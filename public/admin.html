@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Адмінка: запис і чат</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<section id="login" class="admin-wrap" style="max-width:420px;margin-top:80px">
+  <div class="panel">
+    <h2>Вхід в адмінку</h2>
+    <form id="loginForm">
+      <input id="tokenInput" class="input" type="password" placeholder="Токен адміна" autocomplete="current-password" required>
+      <button class="btn btn-primary btn-block" type="submit">Увійти</button>
+      <div class="msg error" id="loginMsg"></div>
+    </form>
+  </div>
+</section>
+
+<section id="app" class="admin-wrap" hidden>
+  <div class="admin-top">
+    <h2 style="margin:0">Адмінка</h2>
+    <button class="btn btn-ghost small" id="logoutBtn" type="button">Вийти</button>
+  </div>
+  <div class="tabs">
+    <button class="tab" data-tab="appointments" type="button">Записи</button>
+    <button class="tab" data-tab="chat" type="button">Чат</button>
+    <button class="tab" data-tab="schedule" type="button">Розклад</button>
+    <button class="tab" data-tab="blocks" type="button">Блокування</button>
+    <button class="tab" data-tab="services" type="button">Послуги</button>
+  </div>
+  <div class="notice" id="notice" role="status"></div>
+  <div class="panel" id="view"></div>
+</section>
+
+<script src="admin.js"></script>
+</body>
+</html>

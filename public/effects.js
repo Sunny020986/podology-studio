@@ -1,0 +1,153 @@
+// Візуальні ефекти. Файл необов'язковий: якщо прибрати його з index.html, сайт працює як раніше.
+(() => {
+  // Якщо в системі увімкнено "зменшити рух", ефекти не запускаються.
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  const root = document.documentElement;
+  root.classList.add('fx');
+
+  // ----- 1. Плавна поява блоків під час прокрутки -----
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((en) => {
+      if (!en.isIntersecting) return;
+      const el = en.target;
+      io.unobserve(el);
+      el.classList.add('reveal-in');
+      // Після анімації прибираємо класи, щоб вони не заважали іншим ефектам
+      setTimeout(() => {
+        el.classList.remove('reveal', 'reveal-in');
+        el.style.transitionDelay = '';
+      }, 900);
+    });
+  }, { threshold: 0.12 });
+
+  function reveal(el, delayMs = 0) {
+    el.classList.add('reveal');
+    el.style.transitionDelay = delayMs + 'ms';
+    io.observe(el);
+  }
+
+  document.querySelectorAll('.hero-text > *, .how, .section h2, .booking-grid .card')
+    .forEach((el, i) => reveal(el, Math.min(i, 5) * 70));
+
+  // Картки послуг з'являються після завантаження з сервера, по черзі
+  const servicesList = document.getElementById('servicesList');
+  new MutationObserver(() => {
+    servicesList.querySelectorAll('.service').forEach((el, i) => reveal(el, i * 90));
+  }).observe(servicesList, { childList: true });
+
+  // ----- 2. Кнопки часу з'являються хвилею -----
+  const slotsGrid = document.getElementById('slotsGrid');
+  new MutationObserver(() => {
+    slotsGrid.querySelectorAll('.slot').forEach((el, i) => {
+      el.style.animationDelay = i * 25 + 'ms';
+      el.classList.add('slot-in');
+    });
+  }).observe(slotsGrid, { childList: true });
+
+  // ----- 3. Хвиля від натискання на кнопках -----
+  document.addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest('.btn, .slot, .chat-fab');
+    if (!btn || btn.disabled) return;
+    const rect = btn.getBoundingClientRect();
+    const size = Math.max(rect.width, rect.height) * 2;
+    const dot = document.createElement('span');
+    dot.className = 'ripple';
+    dot.style.width = dot.style.height = size + 'px';
+    dot.style.left = e.clientX - rect.left - size / 2 + 'px';
+    dot.style.top = e.clientY - rect.top - size / 2 + 'px';
+    btn.appendChild(dot);
+    dot.addEventListener('animationend', () => dot.remove());
+  });
+
+  // ----- 4. Картка послуги нахиляється за курсором -----
+  const MAX_TILT_DEG = 4;
+  let tilted = null;
+
+  function resetTilt() {
+    if (tilted) tilted.style.transform = '';
+    tilted = null;
+  }
+
+  servicesList.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    const card = e.target.closest('.service');
+    if (card !== tilted) resetTilt();
+    if (!card || card.classList.contains('reveal')) return;
+    tilted = card;
+    const r = card.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width - 0.5;  // від -0.5 до 0.5
+    const y = (e.clientY - r.top) / r.height - 0.5;
+    card.style.transform =
+      `perspective(700px) rotateX(${(-y * 2 * MAX_TILT_DEG).toFixed(2)}deg) rotateY(${(x * 2 * MAX_TILT_DEG).toFixed(2)}deg) translateY(-3px)`;
+  });
+  servicesList.addEventListener('pointerleave', resetTilt);
+
+  // ----- 5. Тінь під шапкою після прокрутки -----
+  const nav = document.querySelector('.nav');
+  const onScroll = () => nav.classList.toggle('scrolled', window.scrollY > 8);
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  // ----- 6. Конфеті після успішного запису -----
+  const COLORS = ['#2F6F5E', '#7FB3A3', '#E4B363', '#1F2328'];
+  const PARTICLES = 90;
+  const DURATION_MS = 1800;
+
+  function confetti(originX, originY) {
+    const canvas = document.createElement('canvas');
+    canvas.className = 'confetti';
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    document.body.appendChild(canvas);
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    const parts = Array.from({ length: PARTICLES }, () => {
+      const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.1; // переважно вгору
+      const speed = 5 + Math.random() * 9;
+      return {
+        x: originX,
+        y: originY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        w: 5 + Math.random() * 6,
+        h: 3 + Math.random() * 4,
+        rot: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 0.4,
+        color: COLORS[Math.floor(Math.random() * COLORS.length)],
+      };
+    });
+
+    const start = performance.now();
+    function frame(now) {
+      const t = (now - start) / DURATION_MS;
+      if (t >= 1) return canvas.remove();
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      ctx.globalAlpha = t < 0.7 ? 1 : (1 - t) / 0.3;
+      for (const p of parts) {
+        p.vy += 0.32;   // гравітація
+        p.vx *= 0.985;  // опір повітря
+        p.x += p.vx;
+        p.y += p.vy;
+        p.rot += p.vr;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        ctx.restore();
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // Подію booking:success надсилає app.js після успішного запису
+  document.addEventListener('booking:success', () => {
+    const r = document.getElementById('submitBtn').getBoundingClientRect();
+    confetti(r.left + r.width / 2, r.top);
+    document.getElementById('bookingMsg').classList.add('pop');
+  });
+})();

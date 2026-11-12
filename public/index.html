@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Онлайн-запис до подолога</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="nav">
+  <div class="brand" id="brandName"></div>
+  <nav class="nav-links">
+    <a href="#services">Послуги</a>
+    <a href="#booking">Запис</a>
+    <a href="#" id="navChat">Питання</a>
+  </nav>
+  <a class="btn btn-primary" href="#booking">Записатися</a>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="hero-text">
+      <div class="eyebrow" id="tagline"></div>
+      <h1>Запишіться до подолога онлайн</h1>
+      <p>Оберіть послугу, зручну дату і вільний час. Якщо маєте питання, напишіть оператору в чаті.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#booking">Обрати послугу</a>
+        <a class="btn btn-ghost" href="#services">Послуги і ціни</a>
+      </div>
+    </div>
+    <div class="card how">
+      <div class="how-title">Як записатися</div>
+      <ol>
+        <li>Оберіть послугу.</li>
+        <li>Оберіть дату і вільний час.</li>
+        <li>Залиште ім'я і телефон.</li>
+      </ol>
+      <div class="muted" id="contactLine"></div>
+    </div>
+  </section>
+
+  <section id="services" class="section">
+    <h2>Послуги</h2>
+    <div class="grid3" id="servicesList"></div>
+  </section>
+
+  <section id="booking" class="section">
+    <h2>Запис</h2>
+    <div class="booking-grid">
+      <div class="card">
+        <label class="step-label" for="serviceSelect">1. Послуга</label>
+        <select id="serviceSelect" class="input"></select>
+
+        <label class="step-label" for="dateInput">2. Дата</label>
+        <input type="date" id="dateInput" class="input">
+
+        <div class="step-label">3. Час</div>
+        <div id="slotsGrid" class="slots-grid"></div>
+        <div class="hint" id="slotsHint"></div>
+      </div>
+
+      <form class="card" id="bookingForm" novalidate>
+        <div class="step-label">4. Ваші дані</div>
+        <input class="input" id="nameInput" name="name" placeholder="Ім'я" autocomplete="name" maxlength="60">
+        <input class="input" id="phoneInput" name="phone" placeholder="Телефон, наприклад +380501234567" autocomplete="tel" maxlength="30">
+
+        <div class="summary" id="summary"></div>
+        <button class="btn btn-primary btn-block" type="submit" id="submitBtn" disabled>Записатися</button>
+        <div class="msg" id="bookingMsg" role="status"></div>
+      </form>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <span id="footerName"></span>
+  <span id="footerAddress"></span>
+</footer>
+
+<button class="chat-fab" id="chatFab" type="button">Питання оператору</button>
+<div class="chat-panel" id="chatPanel" hidden>
+  <div class="chat-head">
+    <span>Чат з оператором</span>
+    <button type="button" id="chatClose" class="icon-btn" aria-label="Закрити чат">×</button>
+  </div>
+  <div class="chat-body" id="chatBody" aria-live="polite"></div>
+  <form class="chat-form" id="chatForm">
+    <input id="chatInput" class="input" maxlength="1000" placeholder="Напишіть питання" autocomplete="off">
+    <button class="btn btn-primary" type="submit">Надіслати</button>
+  </form>
+</div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+<script src="effects.js"></script>
+</body>
+</html>

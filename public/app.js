@@ -33,6 +33,7 @@
     state.serviceId = state.services[0]?.id ?? null;
     $('#serviceSelect').value = state.serviceId ?? '';
     $('#dateInput').min = today();
+    fetch('/api/settings').then((x) => x.json()).then((cfg) => { $('#dateInput').max = cfg.maxDate; }).catch(() => {});
     $('#dateInput').value = state.date;
     refreshSlots();
   }

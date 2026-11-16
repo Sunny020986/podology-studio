@@ -5,11 +5,19 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { openDb, DB_PATH } = require('./db');
-const { freeSlots, isValidDate, todayStr, toMin, toHHMM } = require('./slots');
+const { freeSlots, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const DATA_DIR = path.dirname(DB_PATH);
+
+// Межі, які можна змінити змінними середовища (опис у README.md)
+const HORIZON_DAYS = Number(process.env.BOOKING_HORIZON_DAYS) || 90;  // на скільки днів уперед відкрито запис
+const BOOKINGS_PER_HOUR = Number(process.env.BOOKINGS_PER_HOUR) || 10; // записів з однієї IP-адреси за годину
+const MAX_ACTIVE_PER_PHONE = 3;                                        // активних майбутніх записів на один телефон
+const LOGIN_MAX_FAILS = 10;                                            // невдалих входів в адмінку з однієї IP-адреси...
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;                                // ...за 15 хвилин, далі блокування до кінця вікна
+const TRUST_PROXY = process.env.TRUST_PROXY === '1';                   // увімкнути, якщо сайт стоїть за Caddy або Nginx
 
 const db = openDb();
 
@@ -26,6 +34,40 @@ function loadAdminToken() {
   return token;
 }
 const ADMIN_TOKEN = loadAdminToken();
+if (ADMIN_TOKEN.length < 12) {
+  console.warn('УВАГА: токен адміна коротший за 12 символів. Для доступу з інтернету задайте довший ADMIN_TOKEN.');
+}
+
+// ---------- Обмеження частоти (лічильники в пам'яті процесу) ----------
+function makeLimiter(max, windowMs) {
+  const hits = new Map(); // ключ -> { count, resetAt }
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of hits) if (v.resetAt <= now) hits.delete(k);
+  }, 60 * 1000).unref();
+  const entry = (key) => {
+    const now = Date.now();
+    let e = hits.get(key);
+    if (!e || e.resetAt <= now) {
+      e = { count: 0, resetAt: now + windowMs };
+      hits.set(key, e);
+    }
+    return e;
+  };
+  return {
+    blocked: (key) => entry(key).count >= max,
+    hit: (key) => { entry(key).count += 1; },
+    minutesLeft: (key) => Math.max(1, Math.ceil((entry(key).resetAt - Date.now()) / 60000)),
+  };
+}
+const loginLimiter = makeLimiter(LOGIN_MAX_FAILS, LOGIN_WINDOW_MS);
+const bookingLimiter = makeLimiter(BOOKINGS_PER_HOUR, 60 * 60 * 1000);
+
+// IP-адреса для WebSocket (для звичайних запитів Express сам дає req.ip)
+function wsIp(req) {
+  const xff = TRUST_PROXY ? String(req.headers['x-forwarded-for'] || '').split(',').pop().trim() : '';
+  return xff || req.socket.remoteAddress || 'unknown';
+}
 
 function tokenOk(t) {
   if (typeof t !== 'string') return false;
@@ -34,9 +76,15 @@ function tokenOk(t) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// Після LOGIN_MAX_FAILS невдалих спроб адреса блокується до кінця вікна, навіть із правильним токеном:
+// інакше перебір паролів просто тривав би далі.
 const requireAdmin = (req, res, next) => {
+  if (loginLimiter.blocked(req.ip)) {
+    return res.status(429).json({ error: `Забагато невдалих спроб входу. Спробуйте через ${loginLimiter.minutesLeft(req.ip)} хв` });
+  }
   const h = req.headers.authorization || '';
   if (!h.startsWith('Bearer ') || !tokenOk(h.slice(7))) {
+    loginLimiter.hit(req.ip);
     return res.status(401).json({ error: 'Невірний токен' });
   }
   next();
@@ -75,6 +123,8 @@ function updateRow(table, id, data) {
 }
 
 const app = express();
+app.disable('x-powered-by');
+if (TRUST_PROXY) app.set('trust proxy', 1);
 app.use(express.json({ limit: '100kb' }));
 app.use(express.static(PUBLIC_DIR));
 app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'admin.html')));
@@ -84,16 +134,32 @@ app.get('/api/services', (req, res) => {
   res.json(db.prepare('SELECT id, name, description, duration_min, price_uah FROM services WHERE active = 1 ORDER BY id').all());
 });
 
+app.get('/api/settings', (req, res) => {
+  res.json({ horizonDays: HORIZON_DAYS, maxDate: maxDateStr(HORIZON_DAYS) });
+});
+
 app.get('/api/slots', (req, res) => {
   const service = db.prepare('SELECT duration_min FROM services WHERE id = ? AND active = 1').get(Number(req.query.serviceId));
   const date = String(req.query.date || '');
   if (!service) return res.status(400).json({ error: 'Невідома послуга' });
-  if (!isValidDate(date) || date < todayStr()) return res.status(400).json({ error: 'Некоректна дата' });
+  if (!isBookableDate(date, HORIZON_DAYS)) return res.status(400).json({ error: `Запис відкрито від сьогодні до ${maxDateStr(HORIZON_DAYS)}` });
   res.json({ date, slots: freeSlots(db, date, service.duration_min) });
 });
 
 // Перевірка вільного часу і запис виконуються в одній транзакції, тому два клієнти не займуть один слот.
+const last9 = (phone) => phone.replace(/\D/g, '').slice(-9); // номер без коду країни, щоб +380 50... і 050... збігалися
+
 const bookTx = db.transaction(({ service, date, time, name, phone }) => {
+  const samePhone = db
+    .prepare("SELECT client_phone FROM appointments WHERE date >= ? AND status != 'cancelled'")
+    .all(todayStr())
+    .filter((r) => last9(r.client_phone) === last9(phone)).length;
+  if (samePhone >= MAX_ACTIVE_PER_PHONE) {
+    throw Object.assign(
+      new Error(`На цей номер уже є ${MAX_ACTIVE_PER_PHONE} активні записи. Щоб додати ще, напишіть оператору в чат`),
+      { status: 429 }
+    );
+  }
   const free = freeSlots(db, date, service.duration_min);
   if (!free.includes(time)) {
     throw Object.assign(new Error('Цей час уже недоступний, оберіть інший'), { status: 409 });
@@ -109,7 +175,7 @@ app.post('/api/appointments', (req, res) => {
   const { serviceId, date, time, name, phone } = req.body || {};
   const service = db.prepare('SELECT * FROM services WHERE id = ? AND active = 1').get(Number(serviceId));
   if (!service) return res.status(400).json({ error: 'Невідома послуга' });
-  if (!isValidDate(date) || date < todayStr()) return res.status(400).json({ error: 'Некоректна дата' });
+  if (!isBookableDate(date, HORIZON_DAYS)) return res.status(400).json({ error: `Запис відкрито від сьогодні до ${maxDateStr(HORIZON_DAYS)}` });
   if (!isTime(time)) return res.status(400).json({ error: 'Некоректний час' });
 
   const cleanName = String(name ?? '').trim();
@@ -121,8 +187,13 @@ app.post('/api/appointments', (req, res) => {
     return res.status(400).json({ error: 'Вкажіть коректний телефон' });
   }
 
+  if (bookingLimiter.blocked(req.ip)) {
+    return res.status(429).json({ error: 'Забагато записів з вашої адреси за останню годину. Спробуйте пізніше або напишіть оператору в чат' });
+  }
+
   try {
     const id = bookTx({ service, date, time, name: cleanName, phone: cleanPhone });
+    bookingLimiter.hit(req.ip);
     res.status(201).json({ id: Number(id), date, time, service: service.name });
   } catch (e) {
     if (e.status) return res.status(e.status).json({ error: e.message });
@@ -146,12 +217,31 @@ app.get('/api/admin/appointments', (req, res) => {
   );
 });
 
+// Скасований запис можна повернути лише тоді, коли його час досі вільний від інших записів.
+const setStatusTx = db.transaction((id, status) => {
+  const appt = db.prepare('SELECT id, date, start_time, end_time, status FROM appointments WHERE id = ?').get(id);
+  if (!appt) throw Object.assign(new Error('Запис не знайдено'), { status: 404 });
+  if (appt.status === 'cancelled' && status !== 'cancelled') {
+    const clash = db
+      .prepare("SELECT 1 FROM appointments WHERE date = ? AND id != ? AND status != 'cancelled' AND start_time < ? AND end_time > ?")
+      .get(appt.date, id, appt.end_time, appt.start_time);
+    if (clash) {
+      throw Object.assign(new Error('Цей час уже зайнятий іншим записом. Спочатку скасуйте або перенесіть той запис'), { status: 409 });
+    }
+  }
+  db.prepare('UPDATE appointments SET status = ? WHERE id = ?').run(status, id);
+});
+
 app.patch('/api/admin/appointments/:id', (req, res) => {
   const status = req.body?.status;
   if (!['new', 'confirmed', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Некоректний статус' });
-  const changed = db.prepare('UPDATE appointments SET status = ? WHERE id = ?').run(status, Number(req.params.id)).changes;
-  if (!changed) return res.status(404).json({ error: 'Запис не знайдено' });
-  res.json({ ok: true });
+  try {
+    setStatusTx(Number(req.params.id), status);
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
 });
 
 app.get('/api/admin/services', (req, res) => {
@@ -270,6 +360,17 @@ function saveMessage(convId, sender, body) {
   return db.prepare('SELECT id, conversation_id, sender, body, created_at FROM messages WHERE id = ?').get(info.lastInsertRowid);
 }
 
+// ---------- Помилки ----------
+// Власний обробник: клієнт отримує коротке повідомлення, подробиці йдуть лише в журнал сервера.
+app.use('/api', (req, res) => res.status(404).json({ error: 'Не знайдено' }));
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Запит завеликий' });
+  if (err.type === 'entity.parse.failed' || err.status === 400) return res.status(400).json({ error: 'Некоректний запит' });
+  console.error(err);
+  res.status(500).json({ error: 'Помилка сервера' });
+});
+
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 const clients = new Map(); // conversationId -> Set<ws>
@@ -288,7 +389,17 @@ function detach(ws) {
 
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://localhost');
-  const isAdmin = tokenOk(url.searchParams.get('admin'));
+  const adminParam = url.searchParams.get('admin');
+  let isAdmin = false;
+  if (adminParam !== null) {
+    // Спроба зайти як адмін: ті самі обмеження, що й для входу через сторінку
+    const ip = wsIp(req);
+    if (loginLimiter.blocked(ip) || !tokenOk(adminParam)) {
+      if (!loginLimiter.blocked(ip)) loginLimiter.hit(ip);
+      return ws.close(4003, 'forbidden');
+    }
+    isAdmin = true;
+  }
   ws.meta = { role: isAdmin ? 'admin' : 'client', conversationId: null, hits: [] };
 
   if (isAdmin) {
@@ -303,8 +414,13 @@ wss.on('connection', (ws, req) => {
     } catch {
       return;
     }
-    if (ws.meta.role === 'admin') handleAdmin(ws, msg);
-    else handleClient(ws, msg);
+    try {
+      if (ws.meta.role === 'admin') handleAdmin(ws, msg);
+      else handleClient(ws, msg);
+    } catch (e) {
+      console.error(e);
+      send(ws, { type: 'error', error: 'Помилка сервера' });
+    }
   });
 
   ws.on('close', () => {

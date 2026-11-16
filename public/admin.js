@@ -263,7 +263,12 @@
         blockDate = e.target.value;
         await renderBlocks();
       } else if (e.target.dataset.appt) {
-        await api(`/api/admin/appointments/${e.target.dataset.appt}`, { method: 'PATCH', body: { status: e.target.value } });
+        try {
+          await api(`/api/admin/appointments/${e.target.dataset.appt}`, { method: 'PATCH', body: { status: e.target.value } });
+        } catch (err) {
+          await renderAppointments(); // повертаємо у списку справжній статус
+          throw err;
+        }
         notify('Статус збережено');
       }
     } catch (err) {

@@ -224,6 +224,30 @@ app.get('/api/admin/conversations/:id/messages', (req, res) => {
   res.json(messagesOf(req.params.id));
 });
 
+// Видалення діалогу разом з усіма його повідомленнями. Дію не можна скасувати.
+const deleteConversationTx = db.transaction((id) => {
+  db.prepare('DELETE FROM messages WHERE conversation_id = ?').run(id);
+  return db.prepare('DELETE FROM conversations WHERE id = ?').run(id).changes;
+});
+
+app.delete('/api/admin/conversations/:id', (req, res) => {
+  const id = req.params.id;
+  if (!deleteConversationTx(id)) return res.status(404).json({ error: 'Діалог не знайдено' });
+
+  // Відвідувача, який ще тримає цей діалог відкритим, від'єднуємо:
+  // його сторінка сама перепідключиться і отримає новий порожній діалог.
+  const sockets = clients.get(id);
+  if (sockets) {
+    clients.delete(id);
+    sockets.forEach((c) => {
+      c.meta.conversationId = null;
+      c.close(4001, 'conversation deleted');
+    });
+  }
+  notifyAdmins({ type: 'conversation_deleted', conversationId: id });
+  res.json({ ok: true });
+});
+
 // ---------- Чат (WebSocket) ----------
 function listConversations() {
   return db

@@ -90,7 +90,11 @@
   onScroll();
 
   // ----- 6. Конфеті після успішного запису -----
-  const COLORS = ['#2F6F5E', '#7FB3A3', '#E4B363', '#1F2328'];
+  // Основний колір і колір тексту беруться з поточної теми, щоб частинки було видно і на темному тлі
+  function confettiColors() {
+    const css = getComputedStyle(root);
+    return [css.getPropertyValue('--accent').trim(), '#7FB3A3', '#E4B363', css.getPropertyValue('--ink').trim()];
+  }
   const PARTICLES = 90;
   const DURATION_MS = 1800;
 
@@ -104,6 +108,7 @@
     const ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
 
+    const COLORS = confettiColors();
     const parts = Array.from({ length: PARTICLES }, () => {
       const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.1; // переважно вгору
       const speed = 5 + Math.random() * 9;

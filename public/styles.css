@@ -9,6 +9,10 @@
   --accent-ink: #FFFFFF;
   --danger: #A33A2B;
   --ok: #2F6F5E;
+  --field: #FFFFFF;       /* тло полів введення */
+  --field-line: #C9C4B8;  /* рамка полів і другорядних кнопок */
+  --active-bg: #E9F0ED;   /* вибраний рядок у списку */
+  color-scheme: light;
   --radius: 14px;
 }
 
@@ -36,7 +40,7 @@ a { color: inherit; text-decoration: none; }
 }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-primary { background: var(--accent); color: var(--accent-ink); }
-.btn-ghost { border-color: #C9C4B8; }
+.btn-ghost { border-color: var(--field-line); }
 .btn-block { width: 100%; margin-top: 16px; padding: 14px 20px; }
 .btn.small { padding: 6px 12px; font-size: 13px; }
 .icon-btn {
@@ -44,8 +48,8 @@ a { color: inherit; text-decoration: none; }
   width: 32px; height: 32px; padding: 0;
 }
 .input {
-  width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid #C9C4B8;
-  background: #FFFFFF; font: inherit; font-size: 15px; color: var(--ink); margin-bottom: 12px;
+  width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--field-line);
+  background: var(--field); font: inherit; font-size: 15px; color: var(--ink); margin-bottom: 12px;
 }
 .input:focus, .btn:focus-visible, a:focus-visible, .slot:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px;
@@ -236,3 +240,40 @@ td input[type="text"], td input[type="time"], td input[type="number"], td input:
 @keyframes msg-pop { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
 
 .confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; }
+
+/* ===== Темна тема (вмикає theme.js через атрибут data-theme на <html>) ===== */
+:root[data-theme="dark"] {
+  --bg: #14171A;
+  --card: #1D2125;
+  --line: #2E343A;
+  --ink: #E8EAED;
+  --muted: #A4ABB3;
+  --faint: #6B7178;
+  --accent: #5FBFA4;      /* світліший зелений: читається і як текст на темному тлі */
+  --accent-ink: #0F1A17;  /* темний текст на зелених кнопках */
+  --danger: #F08A7B;
+  --ok: #5FBFA4;
+  --field: #14171A;
+  --field-line: #3A4148;
+  --active-bg: #23302C;
+  color-scheme: dark;     /* темні системні елементи: календар, списки, прапорці */
+}
+
+/* Поля адмінки і вибраний діалог беруть кольори з теми */
+:root td input, :root td select, :root .toolbar input, :root .inline-form input, :root .inline-form select {
+  background: var(--field); color: var(--ink); border-color: var(--field-line);
+}
+.conv { color: var(--ink); }
+.conv.active { background: var(--active-bg); }
+
+/* Перемикач теми */
+.nav-actions { display: flex; align-items: center; gap: 12px; }
+.theme-toggle {
+  width: 44px; height: 44px; padding: 0; border-radius: 10px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--ink); border: 1px solid var(--field-line);
+}
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-toggle .icon-sun { display: none; }
+:root[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+:root[data-theme="dark"] .theme-toggle .icon-moon { display: none; }

@@ -89,6 +89,52 @@
   window.addEventListener('scroll', onScroll, { passive: true });
   onScroll();
 
+  // ----- 5а. Шапка ховається під час читання і виповзає від руху миші -----
+  // Нагорі сторінки шапка видна завжди. Нижче вона ховається під час прокрутки вниз
+  // і після паузи без руху миші; рух миші або прокрутка вгору повертають її.
+  const HIDE_BELOW_PX = 160; // від якої прокрутки шапка може ховатися
+  const IDLE_MS = 2500;      // скільки шапка лишається видною після останнього руху миші
+  let hideTimer = null;
+  let lastScrollY = window.scrollY;
+  let lastMouse = { x: -1, y: -1 };
+
+  // Шапку не ховаємо, поки курсор у її смузі або в ній фокус клавіатури.
+  // Смугу рахуємо за координатами миші: стан :hover не оновлюється, коли шапка сама виїжджає під нерухомий курсор.
+  const cursorOnNav = () => lastMouse.y >= 0 && lastMouse.y <= nav.offsetHeight;
+  const mayHide = () => window.scrollY > HIDE_BELOW_PX && !cursorOnNav() && !nav.contains(document.activeElement);
+
+  function hideNav() {
+    clearTimeout(hideTimer);
+    if (mayHide()) nav.classList.add('nav-hidden');
+  }
+
+  function showNav() {
+    nav.classList.remove('nav-hidden');
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(hideNav, IDLE_MS);
+  }
+
+  window.addEventListener('mousemove', (e) => {
+    // Після прокрутки браузер сам надсилає подію руху з тими самими координатами: її пропускаємо
+    if (e.clientX === lastMouse.x && e.clientY === lastMouse.y) return;
+    lastMouse = { x: e.clientX, y: e.clientY };
+    showNav();
+  }, { passive: true });
+
+  window.addEventListener('scroll', () => {
+    const y = window.scrollY;
+    if (y <= HIDE_BELOW_PX || y < lastScrollY) showNav();
+    else if (y > lastScrollY) hideNav();
+    lastScrollY = y;
+  }, { passive: true });
+
+  nav.addEventListener('focusin', showNav);
+  // Курсор вийшов за межі вікна: забуваємо його позицію, щоб шапка не лишилась видною назавжди
+  document.documentElement.addEventListener('mouseleave', () => {
+    lastMouse = { x: -1, y: -1 };
+    showNav();
+  });
+
   // ----- 6. Конфеті після успішного запису -----
   // Основний колір і колір тексту беруться з поточної теми, щоб частинки було видно і на темному тлі
   function confettiColors() {

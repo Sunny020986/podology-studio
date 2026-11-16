@@ -226,7 +226,8 @@ td input[type="text"], td input[type="time"], td input[type="number"], td input:
 }
 @keyframes ripple { to { transform: scale(1); opacity: 0; } }
 
-.fx .nav { transition: box-shadow 0.25s; }
+.fx .nav { transition: box-shadow 0.25s, transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.fx .nav.nav-hidden { transform: translateY(-100%); box-shadow: none; }
 .fx .nav.scrolled { box-shadow: 0 6px 18px rgba(31, 35, 40, 0.08); }
 
 .fx .chat-panel:not([hidden]) { animation: chat-pop 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); transform-origin: bottom right; }

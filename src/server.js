@@ -244,6 +244,98 @@ app.patch('/api/admin/appointments/:id', (req, res) => {
   }
 });
 
+// ---------- Клієнти ----------
+// Клієнт визначається за останніми 9 цифрами телефону, тому +380 67 123 45 67 і 067 123 45 67 це одна людина.
+const isClientKey = (k) => /^\d{9}$/.test(k);
+const NOTE_MAX = 5000;
+
+function listClients(q) {
+  const today = todayStr();
+  const rows = db
+    .prepare('SELECT date, start_time, client_name, client_phone, status FROM appointments ORDER BY date, start_time')
+    .all();
+  const noted = new Set(db.prepare("SELECT phone_key FROM client_notes WHERE note != ''").all().map((r) => r.phone_key));
+  const map = new Map();
+  for (const r of rows) {
+    const key = last9(r.client_phone);
+    if (!map.has(key)) map.set(key, { key, name: '', phone: '', visits: 0, cancelled: 0, last_visit: null, next_visit: null });
+    const c = map.get(key);
+    c.name = r.client_name;   // рядки йдуть за датою, тому залишаються ім'я і телефон з найновішого запису
+    c.phone = r.client_phone;
+    if (r.status === 'cancelled') {
+      c.cancelled += 1;
+    } else if (r.date < today) {
+      c.visits += 1;
+      c.last_visit = r.date;
+    } else if (!c.next_visit) {
+      c.next_visit = r.date;
+    }
+  }
+  let list = [...map.values()].map((c) => ({ ...c, has_note: noted.has(c.key) }));
+  const needle = String(q || '').trim().toLowerCase();
+  if (needle) {
+    const digits = needle.replace(/\D/g, '');
+    list = list.filter((c) => c.name.toLowerCase().includes(needle) || (digits && c.phone.replace(/\D/g, '').includes(digits)));
+  }
+  return list.sort((a, b) => a.name.localeCompare(b.name, 'uk'));
+}
+
+app.get('/api/admin/clients', (req, res) => {
+  res.json(listClients(req.query.q));
+});
+
+// Вивантаження для Excel: роздільник ";" і позначка кодування на початку файлу. Нотаток у файлі немає.
+app.get('/api/admin/clients.csv', (req, res) => {
+  const cell = (v) => {
+    let s = String(v ?? '');
+    // Значення, яке Excel сприйняв би як формулу, отримує апостроф на початку (телефони виду +380... не чіпаємо)
+    if (/^[=@]/.test(s) || (/^[+-]/.test(s) && !/^[+-]?[\d\s()-]+$/.test(s))) s = "'" + s;
+    return '"' + s.replace(/"/g, '""') + '"';
+  };
+  const lines = [['Імʼя', 'Телефон', 'Візитів', 'Скасовано', 'Останній візит', 'Наступний запис']];
+  for (const c of listClients()) lines.push([c.name, c.phone, c.visits, c.cancelled, c.last_visit, c.next_visit]);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="clients.csv"');
+  res.send('\uFEFF' + lines.map((l) => l.map(cell).join(';')).join('\r\n') + '\r\n');
+});
+
+app.get('/api/admin/clients/:key', (req, res) => {
+  const key = req.params.key;
+  if (!isClientKey(key)) return res.status(400).json({ error: 'Некоректний клієнт' });
+  const appointments = db
+    .prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.client_name, a.client_phone, a.status, a.note, s.name AS service
+              FROM appointments a JOIN services s ON s.id = a.service_id ORDER BY a.date DESC, a.start_time DESC`)
+    .all()
+    .filter((a) => last9(a.client_phone) === key);
+  if (!appointments.length) return res.status(404).json({ error: 'Клієнта не знайдено' });
+  const noteRow = db.prepare('SELECT note, updated_at FROM client_notes WHERE phone_key = ?').get(key);
+  res.json({
+    key,
+    name: appointments[0].client_name,
+    phone: appointments[0].client_phone,
+    note: noteRow ? noteRow.note : '',
+    appointments,
+  });
+});
+
+app.put('/api/admin/clients/:key/note', (req, res) => {
+  const key = req.params.key;
+  if (!isClientKey(key)) return res.status(400).json({ error: 'Некоректний клієнт' });
+  const note = String(req.body?.note ?? '').trim();
+  if (note.length > NOTE_MAX) return res.status(400).json({ error: `Нотатка: не більше ${NOTE_MAX} символів` });
+  db.prepare(`INSERT INTO client_notes (phone_key, note) VALUES (?, ?)
+              ON CONFLICT(phone_key) DO UPDATE SET note = excluded.note, updated_at = datetime('now')`).run(key, note);
+  res.json({ ok: true });
+});
+
+app.put('/api/admin/appointments/:id/note', (req, res) => {
+  const note = String(req.body?.note ?? '').trim();
+  if (note.length > NOTE_MAX) return res.status(400).json({ error: `Нотатка: не більше ${NOTE_MAX} символів` });
+  const changed = db.prepare('UPDATE appointments SET note = ? WHERE id = ?').run(note, Number(req.params.id)).changes;
+  if (!changed) return res.status(404).json({ error: 'Запис не знайдено' });
+  res.json({ ok: true });
+});
+
 app.get('/api/admin/services', (req, res) => {
   res.json(db.prepare('SELECT id, name, description, duration_min, price_uah, active FROM services ORDER BY id').all());
 });

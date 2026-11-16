@@ -112,6 +112,10 @@
       <div class="chat-admin">
         <div class="conv-list" id="convList"></div>
         <div class="thread">
+          <div class="thread-head" id="threadHead" hidden>
+            <b id="threadTitle"></b>
+            <button class="btn btn-ghost small danger" type="button" id="deleteConv">Видалити діалог</button>
+          </div>
           <div class="thread-body" id="threadBody"><div class="muted">Оберіть діалог зліва.</div></div>
           <form class="reply-form" id="replyForm" hidden>
             <input class="input" id="replyInput" maxlength="1000" placeholder="Відповідь клієнту" autocomplete="off">
@@ -132,6 +136,8 @@
     const msgs = await api(`/api/admin/conversations/${id}/messages`);
     $('#threadBody').innerHTML = msgs.length ? msgs.map(bubbleHtml).join('') : '<div class="muted">Повідомлень ще немає.</div>';
     $('#replyForm').hidden = false;
+    $('#threadHead').hidden = false;
+    $('#threadTitle').textContent = 'Діалог ' + id.slice(0, 6);
     document.querySelectorAll('.conv').forEach((b) => b.classList.toggle('active', b.dataset.conv === id));
     $('#threadBody').scrollTop = 1e9;
   }
@@ -150,6 +156,11 @@
         } else if (m.message.sender === 'client') {
           notify('Нове повідомлення в чаті');
         }
+      }
+      if (m.type === 'conversation_deleted') {
+        // Діалог видалено (можливо, з іншого вікна адмінки): оновлюємо список, якщо вкладка чату відкрита
+        if (m.conversationId === currentConv) currentConv = null;
+        if ($('#convList')) renderChat().catch((e) => notify(e.message, true));
       }
       if (m.type === 'error') notify(m.error, true);
     };
@@ -264,6 +275,16 @@
     try {
       const conv = e.target.closest('[data-conv]');
       if (conv) return await openConv(conv.dataset.conv);
+
+      if (e.target.id === 'deleteConv') {
+        if (!currentConv) return;
+        if (!confirm('Видалити цей діалог і всі його повідомлення? Відновити їх буде неможливо.')) return;
+        const id = currentConv;
+        currentConv = null;
+        await api(`/api/admin/conversations/${id}`, { method: 'DELETE' });
+        notify('Діалог видалено');
+        return await renderChat();
+      }
 
       if (e.target.dataset.delBlock) {
         await api(`/api/admin/blocks/${e.target.dataset.delBlock}`, { method: 'DELETE' });

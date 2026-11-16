@@ -5,7 +5,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { openDb, DB_PATH } = require('./db');
-const { freeSlots, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM } = require('./slots');
+const { freeSlots, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -303,6 +303,42 @@ app.post('/api/admin/blocks', (req, res) => {
 
 app.delete('/api/admin/blocks/:id', (req, res) => {
   db.prepare('DELETE FROM blocks WHERE id = ?').run(Number(req.params.id));
+  res.json({ ok: true });
+});
+
+// Щотижневі перерви (обід тощо)
+app.get('/api/admin/breaks', (req, res) => {
+  res.json(db.prepare('SELECT id, weekday, start_time, end_time, note FROM breaks ORDER BY start_time, weekday').all());
+});
+
+const addBreaksTx = db.transaction((weekdays, start, end, note) => {
+  const ins = db.prepare('INSERT OR IGNORE INTO breaks (weekday, start_time, end_time, note) VALUES (?, ?, ?, ?)');
+  let added = 0;
+  for (const wd of weekdays) added += ins.run(wd, start, end, note).changes;
+  return added;
+});
+
+app.post('/api/admin/breaks', (req, res) => {
+  const { weekdays, start_time, end_time, note } = req.body || {};
+  const days = Array.isArray(weekdays) ? [...new Set(weekdays.map(Number))] : [];
+  if (!days.length || days.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) {
+    return res.status(400).json({ error: 'Позначте хоча б один день тижня' });
+  }
+  if (!isTime(start_time) || !isTime(end_time) || toMin(start_time) >= toMin(end_time)) {
+    return res.status(400).json({ error: 'Початок має бути раніше за кінець' });
+  }
+  const added = addBreaksTx(days, start_time, end_time, String(note ?? '').trim().slice(0, 60));
+
+  // Скільки вже наявних майбутніх записів потрапляє на нову перерву: вони залишаються чинними
+  const clashes = db
+    .prepare("SELECT date FROM appointments WHERE date >= ? AND status != 'cancelled' AND start_time < ? AND end_time > ?")
+    .all(todayStr(), end_time, start_time)
+    .filter((a) => days.includes(weekdayOf(a.date))).length;
+  res.status(201).json({ added, clashes });
+});
+
+app.delete('/api/admin/breaks/:id', (req, res) => {
+  db.prepare('DELETE FROM breaks WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true });
 });
 

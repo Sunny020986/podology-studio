@@ -37,6 +37,16 @@ function openDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_blocks_date ON blocks(date);
 
+    -- Щотижневі перерви (обід тощо): повторюються кожного вказаного дня тижня
+    CREATE TABLE IF NOT EXISTS breaks (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      weekday    INTEGER NOT NULL,
+      start_time TEXT NOT NULL,
+      end_time   TEXT NOT NULL,
+      note       TEXT NOT NULL DEFAULT '',
+      UNIQUE (weekday, start_time, end_time)
+    );
+
     CREATE TABLE IF NOT EXISTS appointments (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
       service_id   INTEGER NOT NULL REFERENCES services(id),

@@ -19,13 +19,32 @@ function weekdayOf(dateStr) {
   return (jsDay + 6) % 7;
 }
 
+// Дата має існувати в календарі: "2027-02-31" не проходить.
 function isValidDate(s) {
-  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s + 'T00:00:00Z'));
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
+function fmtLocal(d) {
+  return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
 }
 
 function todayStr() {
+  return fmtLocal(new Date());
+}
+
+// Остання дата, на яку можна записатися: сьогодні + days
+function maxDateStr(days) {
   const d = new Date();
-  return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+  d.setDate(d.getDate() + days);
+  return fmtLocal(d);
+}
+
+// Дата, на яку клієнт може записатися: існує, не в минулому і не далі горизонту
+function isBookableDate(s, horizonDays) {
+  return isValidDate(s) && s >= todayStr() && s <= maxDateStr(horizonDays);
 }
 
 function nowMin() {
@@ -57,4 +76,4 @@ function freeSlots(db, dateStr, durationMin) {
   return slots;
 }
 
-module.exports = { freeSlots, isValidDate, todayStr, toMin, toHHMM, weekdayOf, STEP_MIN };
+module.exports = { freeSlots, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, STEP_MIN };

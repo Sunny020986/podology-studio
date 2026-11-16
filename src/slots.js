@@ -62,6 +62,7 @@ function freeSlots(db, dateStr, durationMin) {
   const busy = [
     ...db.prepare("SELECT start_time AS s, end_time AS e FROM appointments WHERE date = ? AND status != 'cancelled'").all(dateStr),
     ...db.prepare('SELECT start_time AS s, end_time AS e FROM blocks WHERE date = ?').all(dateStr),
+    ...db.prepare('SELECT start_time AS s, end_time AS e FROM breaks WHERE weekday = ?').all(weekdayOf(dateStr)),
   ].map((r) => ({ s: toMin(r.s), e: toMin(r.e) }));
 
   const earliest = dateStr === todayStr() ? nowMin() + MIN_LEAD_MIN : 0;

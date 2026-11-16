@@ -6,6 +6,7 @@
     return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
   };
   const STATUS = { new: 'Нова', confirmed: 'Підтверджено', cancelled: 'Скасовано' };
+  const DAYS_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
   const DAYS = ['Понеділок', 'Вівторок', 'Середа', 'Четвер', "П'ятниця", 'Субота', 'Неділя'];
 
   let token = sessionStorage.getItem('adminToken') || '';
@@ -181,7 +182,19 @@
           <td><input type="checkbox" class="off" ${r.start_time ? '' : 'checked'}></td>
         </tr>`).join('')}</tbody>
       </table>
-      <button class="btn btn-primary" id="saveSchedule" type="button">Зберегти розклад</button>`;
+      <button class="btn btn-primary" id="saveSchedule" type="button">Зберегти розклад</button>
+
+      <h3 style="margin:32px 0 6px">Перерви</h3>
+      <div class="muted">Перерва повторюється щотижня у позначені дні. На цей час клієнти записатися не зможуть.</div>
+      <form class="inline-form" id="breakForm">
+        <span class="day-checks">${rows.map((r) => `<label><input type="checkbox" name="wd" value="${r.weekday}" ${r.start_time ? 'checked' : ''}> ${DAYS_SHORT[r.weekday]}</label>`).join('')}</span>
+        <label>з <input type="time" name="start_time" value="13:00" required></label>
+        <label>до <input type="time" name="end_time" value="14:00" required></label>
+        <input name="note" value="Обід" placeholder="Назва" maxlength="60">
+        <button class="btn btn-primary small" type="submit">Додати перерву</button>
+      </form>
+      <ul class="list" id="breakList"></ul>`;
+    await renderBreaks();
     $('#saveSchedule').addEventListener('click', async () => {
       try {
         for (const tr of document.querySelectorAll('[data-wd]')) {
@@ -196,6 +209,23 @@
         notify(err.message, true);
       }
     });
+  }
+
+  // Список перерв. Однакові перерви в різні дні показуються одним рядком.
+  async function renderBreaks() {
+    const list = await api('/api/admin/breaks');
+    const groups = new Map();
+    for (const b of list) {
+      const key = `${b.start_time}|${b.end_time}|${b.note}`;
+      if (!groups.has(key)) groups.set(key, { ...b, days: [], ids: [] });
+      groups.get(key).days.push(b.weekday);
+      groups.get(key).ids.push(b.id);
+    }
+    $('#breakList').innerHTML = groups.size
+      ? [...groups.values()].map((g) => `<li>
+          <span><b>${g.start_time}–${g.end_time}</b> ${esc(g.note)} <span class="muted">· ${g.days.sort().map((d) => DAYS_SHORT[d]).join(', ')}</span></span>
+          <button class="btn btn-ghost small" type="button" data-del-break="${g.ids.join(',')}">Видалити</button></li>`).join('')
+      : '<li class="muted">Перерв ще немає.</li>';
   }
 
   // ----- Блокування -----
@@ -297,6 +327,14 @@
         return await renderBlocks();
       }
 
+      if (e.target.dataset.delBreak) {
+        for (const id of e.target.dataset.delBreak.split(',')) {
+          await api(`/api/admin/breaks/${id}`, { method: 'DELETE' });
+        }
+        notify('Перерву видалено');
+        return await renderBreaks();
+      }
+
       if (e.target.dataset.saveService) {
         const row = e.target.closest('tr');
         await api(`/api/admin/services/${e.target.dataset.saveService}`, { method: 'PATCH', body: readServiceRow(row) });
@@ -312,6 +350,20 @@
     const form = e.target;
     const data = Object.fromEntries(new FormData(form));
     try {
+      if (form.id === 'breakForm') {
+        const weekdays = [...form.querySelectorAll('input[name="wd"]:checked')].map((x) => Number(x.value));
+        const r = await api('/api/admin/breaks', {
+          method: 'POST',
+          body: { weekdays, start_time: data.start_time, end_time: data.end_time, note: data.note },
+        });
+        await renderBreaks();
+        if (!r.added) return notify('Така перерва вже є');
+        if (r.clashes > 0) {
+          return notify(`Перерву додано. Увага: на цей час уже є записів: ${r.clashes}. Вони залишаються чинними, перевірте їх у вкладці «Записи».`, true);
+        }
+        return notify('Перерву додано');
+      }
+
       if (form.id === 'blockForm') {
         await api('/api/admin/blocks', {
           method: 'POST',

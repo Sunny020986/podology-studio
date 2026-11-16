@@ -74,7 +74,18 @@ function openDb() {
       created_at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id);
+
+    -- Загальна нотатка майстра про клієнта. phone_key: останні 9 цифр телефону
+    CREATE TABLE IF NOT EXISTS client_notes (
+      phone_key  TEXT PRIMARY KEY,
+      note       TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
+
+  // Нотатка майстра до окремого візиту: колонка додається до баз, створених раніше
+  const apptCols = db.prepare('PRAGMA table_info(appointments)').all().map((c) => c.name);
+  if (!apptCols.includes('note')) db.exec("ALTER TABLE appointments ADD COLUMN note TEXT NOT NULL DEFAULT ''");
 
   seed(db);
   return db;

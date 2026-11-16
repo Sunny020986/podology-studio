@@ -14,6 +14,9 @@
   let currentConv = null;
   let appointmentDate = today();
   let blockDate = today();
+  let clientQuery = '';
+  let currentClient = null;
+  const fmtDate = (d) => (d ? d.split('-').reverse().join('.') : '—');
 
   async function api(path, opts = {}) {
     const r = await fetch(path, {
@@ -71,6 +74,7 @@
   // ----- Вкладки -----
   const views = {
     appointments: renderAppointments,
+    clients: renderClients,
     chat: renderChat,
     schedule: renderSchedule,
     blocks: renderBlocks,
@@ -79,6 +83,7 @@
 
   function show(name) {
     document.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+    if (name === 'clients') currentClient = null; // вкладка завжди відкривається зі списку
     views[name]().catch((e) => notify(e.message, true));
   }
   document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));
@@ -102,6 +107,82 @@
             .map(([k, v]) => `<option value="${k}" ${k === r.status ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
         </tr>`).join('')
       : '<tr><td colspan="5" class="muted">На цю дату записів немає.</td></tr>';
+  }
+
+  // ----- Клієнти -----
+  async function renderClients() {
+    $('#view').innerHTML = `
+      <div class="toolbar">
+        <input type="search" id="clientSearch" placeholder="Пошук: імʼя або телефон" value="${esc(clientQuery)}" style="flex:1;max-width:340px">
+        <button class="btn btn-ghost small" type="button" id="clientsCsv">Вивантажити в CSV</button>
+      </div>
+      <table>
+        <thead><tr><th>Імʼя</th><th>Телефон</th><th>Візитів</th><th>Останній візит</th><th>Наступний запис</th><th>Нотатка</th></tr></thead>
+        <tbody id="clientRows"></tbody>
+      </table>`;
+    let timer = null;
+    $('#clientSearch').addEventListener('input', (e) => {
+      clientQuery = e.target.value;
+      clearTimeout(timer);
+      timer = setTimeout(() => loadClients().catch((err) => notify(err.message, true)), 250);
+    });
+    await loadClients();
+  }
+
+  async function loadClients() {
+    const q = clientQuery;
+    const list = await api('/api/admin/clients?q=' + encodeURIComponent(q));
+    if (q !== clientQuery || !$('#clientRows')) return; // запит застарів або вкладку вже змінено
+    $('#clientRows').innerHTML = list.length
+      ? list.map((c) => `<tr>
+          <td><button class="link" type="button" data-client="${c.key}">${esc(c.name)}</button></td>
+          <td>${esc(c.phone)}</td>
+          <td>${c.visits}</td>
+          <td>${fmtDate(c.last_visit)}</td>
+          <td>${fmtDate(c.next_visit)}</td>
+          <td>${c.has_note ? 'є' : '—'}</td>
+        </tr>`).join('')
+      : `<tr><td colspan="6" class="muted">${q ? 'Нікого не знайдено.' : 'Клієнтів ще немає: вони зʼявляться після першого запису.'}</td></tr>`;
+  }
+
+  async function renderClient(key) {
+    const c = await api('/api/admin/clients/' + key);
+    currentClient = key;
+    const done = c.appointments.filter((a) => a.status !== 'cancelled' && a.date < today()).length;
+    $('#view').innerHTML = `
+      <button class="btn btn-ghost small" type="button" id="clientBack">← До списку клієнтів</button>
+      <h3 style="margin:16px 0 4px">${esc(c.name)}</h3>
+      <div class="muted">${esc(c.phone)} · візитів: ${done} · усього записів: ${c.appointments.length}</div>
+
+      <label class="step-label" for="clientNote" style="margin-top:20px">Загальна нотатка про клієнта</label>
+      <textarea id="clientNote" class="input" rows="4" maxlength="5000" placeholder="Особливості, рекомендації, домовленості">${esc(c.note)}</textarea>
+      <button class="btn btn-primary small" type="button" id="saveClientNote">Зберегти нотатку</button>
+
+      <h3 style="margin:28px 0 8px">Історія записів</h3>
+      <table>
+        <thead><tr><th>Дата</th><th>Час</th><th>Послуга</th><th>Статус</th><th style="width:38%">Нотатка до візиту</th><th></th></tr></thead>
+        <tbody>${c.appointments.map((a) => `<tr>
+          <td>${fmtDate(a.date)}</td>
+          <td>${a.start_time}–${a.end_time}</td>
+          <td>${esc(a.service)}</td>
+          <td>${STATUS[a.status] || esc(a.status)}</td>
+          <td><input type="text" maxlength="5000" value="${esc(a.note)}" placeholder="Що робили" aria-label="Нотатка до візиту ${fmtDate(a.date)}"></td>
+          <td><button class="btn btn-ghost small" type="button" data-save-visit-note="${a.id}">Зберегти</button></td>
+        </tr>`).join('')}</tbody>
+      </table>`;
+  }
+
+  async function downloadClientsCsv() {
+    const r = await fetch('/api/admin/clients.csv', { headers: { Authorization: 'Bearer ' + token } });
+    if (!r.ok) throw new Error('Не вдалося вивантажити файл');
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `clients-${today()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   // ----- Чат -----
@@ -310,6 +391,26 @@
     try {
       const conv = e.target.closest('[data-conv]');
       if (conv) return await openConv(conv.dataset.conv);
+
+      if (e.target.dataset.client) return await renderClient(e.target.dataset.client);
+
+      if (e.target.id === 'clientBack') {
+        currentClient = null;
+        return await renderClients();
+      }
+
+      if (e.target.id === 'clientsCsv') return await downloadClientsCsv();
+
+      if (e.target.id === 'saveClientNote') {
+        await api(`/api/admin/clients/${currentClient}/note`, { method: 'PUT', body: { note: $('#clientNote').value } });
+        return notify('Нотатку збережено');
+      }
+
+      if (e.target.dataset.saveVisitNote) {
+        const input = e.target.closest('tr').querySelector('input');
+        await api(`/api/admin/appointments/${e.target.dataset.saveVisitNote}/note`, { method: 'PUT', body: { note: input.value } });
+        return notify('Нотатку до візиту збережено');
+      }
 
       if (e.target.id === 'deleteConv') {
         if (!currentConv) return;

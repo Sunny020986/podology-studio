@@ -7,14 +7,20 @@
     return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
   };
 
-  // ----- Брендинг з config.js -----
-  const S = window.STUDIO || {};
-  $('#brandName').textContent = S.name || '';
-  $('#tagline').textContent = S.tagline || '';
-  $('#footerName').textContent = S.name || '';
-  $('#footerAddress').textContent = [S.address, S.phone].filter(Boolean).join(' · ');
-  $('#contactLine').textContent = S.phone ? `Телефон для довідки: ${S.phone}` : '';
-  document.title = S.name ? `${S.name}: онлайн-запис` : document.title;
+  // ----- Дані кабінету: спершу запасні з config.js, потім справжні з сервера (адмінка) -----
+  const telHref = (p) => 'tel:' + String(p).replace(/[^\d+]/g, '');
+  function applyStudio(S) {
+    $('#brandName').textContent = S.name || '';
+    $('#tagline').textContent = S.tagline || '';
+    $('#footerName').textContent = S.name || '';
+    const phoneLink = S.phone ? `<a href="${esc(telHref(S.phone))}">${esc(S.phone)}</a>` : '';
+    $('#footerAddress').innerHTML = [esc(S.address), phoneLink].filter(Boolean).join(' · ');
+    $('#contactLine').innerHTML = S.phone ? `Телефон для довідки: ${phoneLink}` : '';
+    if (S.name) document.title = `${S.name}: онлайн-запис`;
+  }
+  applyStudio(window.STUDIO || {});
+  const settingsReady = fetch('/api/settings').then((x) => x.json()).catch(() => ({}));
+  settingsReady.then((cfg) => { if (cfg.studio) applyStudio(cfg.studio); });
 
   // ----- Стан запису -----
   const state = { services: [], serviceId: null, date: today(), time: null, reqId: 0 };
@@ -33,7 +39,7 @@
     state.serviceId = state.services[0]?.id ?? null;
     $('#serviceSelect').value = state.serviceId ?? '';
     $('#dateInput').min = today();
-    fetch('/api/settings').then((x) => x.json()).then((cfg) => { $('#dateInput').max = cfg.maxDate; }).catch(() => {});
+    settingsReady.then((cfg) => { if (cfg.maxDate) $('#dateInput').max = cfg.maxDate; });
     $('#dateInput').value = state.date;
     refreshSlots();
   }

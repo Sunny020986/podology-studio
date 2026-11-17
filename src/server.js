@@ -134,8 +134,16 @@ app.get('/api/services', (req, res) => {
   res.json(db.prepare('SELECT id, name, description, duration_min, price_uah FROM services WHERE active = 1 ORDER BY id').all());
 });
 
+// Поля кабінету й максимальна довжина кожного. name обов'язкове, решта може бути порожньою.
+const STUDIO_FIELDS = { name: 80, tagline: 120, address: 200, phone: 40 };
+function readStudio() {
+  const rows = db.prepare('SELECT key, value FROM settings').all();
+  const all = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  return Object.fromEntries(Object.keys(STUDIO_FIELDS).map((k) => [k, all[k] ?? '']));
+}
+
 app.get('/api/settings', (req, res) => {
-  res.json({ horizonDays: HORIZON_DAYS, maxDate: maxDateStr(HORIZON_DAYS) });
+  res.json({ horizonDays: HORIZON_DAYS, maxDate: maxDateStr(HORIZON_DAYS), studio: readStudio() });
 });
 
 app.get('/api/slots', (req, res) => {
@@ -204,6 +212,22 @@ app.post('/api/appointments', (req, res) => {
 
 // ---------- Адмін API ----------
 app.use('/api/admin', requireAdmin);
+
+app.get('/api/admin/studio', (req, res) => res.json(readStudio()));
+
+app.put('/api/admin/studio', (req, res) => {
+  const body = req.body || {};
+  const clean = {};
+  for (const [k, max] of Object.entries(STUDIO_FIELDS)) {
+    const v = String(body[k] ?? '').trim();
+    if (v.length > max) return res.status(400).json({ error: `Поле «${k}» довше за ${max} символів` });
+    clean[k] = v;
+  }
+  if (!clean.name) return res.status(400).json({ error: 'Назва кабінету не може бути порожньою' });
+  const up = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+  db.transaction(() => { for (const [k, v] of Object.entries(clean)) up.run(k, v); })();
+  res.json(clean);
+});
 
 app.get('/api/admin/appointments', (req, res) => {
   const from = isValidDate(req.query.from) ? req.query.from : todayStr();

@@ -33,7 +33,7 @@
   // Картки послуг з'являються після завантаження з сервера, по черзі
   const servicesList = document.getElementById('servicesList');
   new MutationObserver(() => {
-    servicesList.querySelectorAll('.service').forEach((el, i) => reveal(el, i * 90));
+    servicesList.querySelectorAll('.service').forEach((el, i) => reveal(el, (i % 6) * 90));
   }).observe(servicesList, { childList: true });
 
   // ----- 2. Кнопки часу з'являються хвилею -----

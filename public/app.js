@@ -93,12 +93,33 @@
         <span class="service-meta">⏱ ${durText(s.duration_min)} · ${priceText(s.price_uah)}</span>
         <span class="service-desc">${esc(s.description)}</span>
       </button>`).join('');
+    setupServicesMore();
     state.serviceId = state.services[0]?.id ?? null;
     $('#serviceSelect').value = state.serviceId ?? '';
     $('#dateInput').min = today();
     settingsReady.then((cfg) => { if (cfg.maxDate) $('#dateInput').max = cfg.maxDate; });
     $('#dateInput').value = state.date;
     refreshSlots();
+  }
+
+  // Перелік довгий: спершу показуємо 6 послуг, решту за кнопкою
+  const SERVICES_VISIBLE = 6;
+  function setupServicesMore() {
+    const list = $('#servicesList');
+    const btn = $('#servicesMore');
+    const total = state.services.length;
+    btn.hidden = total <= SERVICES_VISIBLE;
+    const apply = (open) => {
+      list.classList.toggle('collapsed', !open);
+      btn.textContent = open ? 'Згорнути' : `Показати всі послуги (${total})`;
+      btn.dataset.open = open ? '1' : '';
+    };
+    apply(false);
+    btn.onclick = () => {
+      const open = !btn.dataset.open;
+      apply(open);
+      if (!open) $('#services').scrollIntoView({ behavior: 'smooth' });
+    };
   }
 
   async function refreshSlots() {

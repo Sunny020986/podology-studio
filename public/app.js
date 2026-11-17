@@ -2,6 +2,16 @@
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const priceText = (p) => (p > 0 ? `${p} грн` : 'ціна уточнюється');
+  // 45 → «45 хв», 60 → «1 год», 90 → «1 год 30 хв»
+  const durText = (m) => {
+    const h = Math.floor(m / 60), r = m % 60;
+    return [h ? `${h} год` : '', r ? `${r} хв` : ''].filter(Boolean).join(' ');
+  };
+  const addMin = (hhmm, m) => {
+    const t = Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5)) + m;
+    return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+  };
+  const fmtDate = (d) => d.split('-').reverse().join('.');
   const today = () => {
     const d = new Date();
     return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
@@ -29,11 +39,11 @@
     const r = await fetch('/api/services');
     state.services = await r.json();
     $('#serviceSelect').innerHTML = state.services
-      .map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+      .map((s) => `<option value="${s.id}">${esc(s.name)} · ${durText(s.duration_min)}</option>`).join('');
     $('#servicesList').innerHTML = state.services.map((s) => `
       <button class="service" type="button" data-id="${s.id}">
         <span class="service-name">${esc(s.name)}</span>
-        <span class="service-meta">${s.duration_min} хв · ${priceText(s.price_uah)}</span>
+        <span class="service-meta">⏱ ${durText(s.duration_min)} · ${priceText(s.price_uah)}</span>
         <span class="service-desc">${esc(s.description)}</span>
       </button>`).join('');
     state.serviceId = state.services[0]?.id ?? null;
@@ -71,8 +81,8 @@
   function updateSummary() {
     const s = state.services.find((x) => x.id == state.serviceId);
     $('#summary').textContent = state.time && s
-      ? `${s.name}, ${state.date}, о ${state.time}`
-      : 'Оберіть час, щоб продовжити.';
+      ? `${s.name}, ${fmtDate(state.date)}, ${state.time}–${addMin(state.time, s.duration_min)} (триває ${durText(s.duration_min)})`
+      : s ? `Процедура триває ${durText(s.duration_min)}. Оберіть час, щоб продовжити.` : 'Оберіть час, щоб продовжити.';
     $('#submitBtn').disabled = !state.time;
   }
 
@@ -142,7 +152,9 @@
       return;
     }
     msg.className = 'msg ok';
-    msg.textContent = `Дякуємо! Ви записані: ${data.service}, ${data.date} о ${data.time}. Номер запису: ${data.id}.`;
+    const svc = state.services.find((x) => x.name === data.service);
+    const span = svc ? `${data.time}–${addMin(data.time, svc.duration_min)} (триває ${durText(svc.duration_min)})` : `о ${data.time}`;
+    msg.textContent = `Дякуємо! Ви записані: ${data.service}, ${fmtDate(data.date)}, ${span}. Номер запису: ${data.id}.`;
     $('#nameInput').value = '';
     $('#phoneInput').value = '';
     document.dispatchEvent(new CustomEvent('booking:success'));

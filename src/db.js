@@ -92,6 +92,10 @@ function openDb() {
   // Нотатка майстра до окремого візиту: колонка додається до баз, створених раніше
   const apptCols = db.prepare('PRAGMA table_info(appointments)').all().map((c) => c.name);
   if (!apptCols.includes('note')) db.exec("ALTER TABLE appointments ADD COLUMN note TEXT NOT NULL DEFAULT ''");
+  // Нагадування в Telegram: код для посилання, чат клієнта, чи вже нагадали
+  if (!apptCols.includes('remind_code')) db.exec('ALTER TABLE appointments ADD COLUMN remind_code TEXT');
+  if (!apptCols.includes('tg_chat_id')) db.exec('ALTER TABLE appointments ADD COLUMN tg_chat_id TEXT');
+  if (!apptCols.includes('reminded')) db.exec('ALTER TABLE appointments ADD COLUMN reminded INTEGER NOT NULL DEFAULT 0');
 
   seed(db);
   seedSettings(db);

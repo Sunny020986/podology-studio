@@ -27,6 +27,53 @@
     $('#footerAddress').innerHTML = [esc(S.address), phoneLink].filter(Boolean).join(' · ');
     $('#contactLine').innerHTML = S.phone ? `Телефон для довідки: ${phoneLink}` : '';
     if (S.name) document.title = `${S.name}: онлайн-запис`;
+    renderContent(S);
+  }
+
+  // Текст з адмінки: перший рядок заголовок, решта опис
+  const splitBlock = (t) => {
+    const [title, ...rest] = String(t || '').trim().split('\n');
+    return { title: (title || '').trim(), text: rest.join('\n').trim() };
+  };
+
+  function renderContent(S) {
+    if (S.promo_first === undefined) return; // запасні дані з config.js: блоків ще немає
+
+    const first = splitBlock(S.promo_first);
+    $('#promoPill').hidden = !first.title;
+    $('#promoPill').textContent = first.title ? `🎁 ${first.title}` : '';
+
+    const offers = [
+      ['🎁', S.promo_first], ['🤝', S.promo_friend], ['💝', S.promo_gift], ['🩺', S.partners],
+    ].map(([icon, t]) => ({ icon, ...splitBlock(t) })).filter((o) => o.title);
+    $('#offers').hidden = !offers.length;
+    $('#offersList').innerHTML = offers.map((o) => `
+      <div class="card offer"><div class="offer-icon">${o.icon}</div>
+        <div class="offer-title">${esc(o.title)}</div><div class="offer-text">${esc(o.text)}</div></div>`).join('');
+
+    $('#about').hidden = !(S.master_name || S.master_about);
+    $('#masterName').textContent = S.master_name || '';
+    $('#masterAbout').textContent = S.master_about || '';
+
+    const faq = String(S.faq || '').split(/\n\s*\n/).map(splitBlock).filter((q) => q.title);
+    $('#faq').hidden = !faq.length;
+    $('#faqList').innerHTML = faq.map((q) => `
+      <details class="faq-item"><summary>${esc(q.title)}</summary><div class="faq-answer">${esc(q.text)}</div></details>`).join('');
+
+    const place = [S.city, S.address].filter(Boolean).join(', ');
+    $('#contacts').hidden = !place;
+    if (place) {
+      $('#contactsAddress').textContent = `📍 ${place}`;
+      $('#contactsPhone').innerHTML = S.phone ? `📞 <a href="${esc(telHref(S.phone))}">${esc(S.phone)}</a>` : '';
+      $('#routeBtn').href = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(place);
+      const src = 'https://maps.google.com/maps?q=' + encodeURIComponent(place) + '&z=16&output=embed';
+      const frame = $('#mapWrap iframe');
+      if (!frame || frame.dataset.src !== src) {
+        $('#mapWrap').innerHTML = `<iframe title="Карта: ${esc(place)}" data-src="${esc(src)}" src="${esc(src)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>`;
+      }
+    }
+    $('#reviewBtn').hidden = !S.review_url;
+    if (S.review_url) $('#reviewBtn').href = S.review_url;
   }
   applyStudio(window.STUDIO || {});
   const settingsReady = fetch('/api/settings').then((x) => x.json()).catch(() => ({}));

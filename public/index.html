@@ -30,6 +30,7 @@
 <main>
   <section class="hero">
     <div class="hero-text">
+      <a class="promo-pill" id="promoPill" href="#offers" hidden></a>
       <div class="eyebrow" id="tagline"></div>
       <h1>Запишіться до подолога онлайн</h1>
       <p>Оберіть послугу, зручну дату і вільний час. Якщо маєте питання, напишіть оператору в чаті.</p>
@@ -62,6 +63,19 @@
     </figure>
   </section>
 
+  <section id="about" class="section" hidden>
+    <h2>Про майстра</h2>
+    <div class="card about">
+      <div class="about-name" id="masterName"></div>
+      <div class="about-text" id="masterAbout"></div>
+    </div>
+  </section>
+
+  <section id="offers" class="section" hidden>
+    <h2>Акції</h2>
+    <div class="grid3 offers" id="offersList"></div>
+  </section>
+
   <section id="booking" class="section">
     <h2>Запис</h2>
     <div class="booking-grid">
@@ -86,6 +100,26 @@
         <button class="btn btn-primary btn-block" type="submit" id="submitBtn" disabled>Записатися</button>
         <div class="msg" id="bookingMsg" role="status"></div>
       </form>
+    </div>
+  </section>
+
+  <section id="faq" class="section" hidden>
+    <h2>Питання й відповіді</h2>
+    <div class="faq-list" id="faqList"></div>
+  </section>
+
+  <section id="contacts" class="section" hidden>
+    <h2>Як нас знайти</h2>
+    <div class="contacts-grid">
+      <div class="card contacts-card">
+        <div class="contacts-line" id="contactsAddress"></div>
+        <div class="contacts-line" id="contactsPhone"></div>
+        <div class="contacts-actions">
+          <a class="btn btn-primary" id="routeBtn" target="_blank" rel="noopener">Прокласти маршрут</a>
+          <a class="btn btn-ghost" id="reviewBtn" target="_blank" rel="noopener" hidden>Залишити відгук у Google</a>
+        </div>
+      </div>
+      <div class="map-wrap" id="mapWrap"></div>
     </div>
   </section>
 </main>

@@ -137,7 +137,11 @@ app.get('/api/services', (req, res) => {
 });
 
 // Поля кабінету й максимальна довжина кожного. name обов'язкове, решта може бути порожньою.
-const STUDIO_FIELDS = { name: 80, tagline: 120, address: 200, phone: 40 };
+const STUDIO_FIELDS = {
+  name: 80, tagline: 120, address: 200, phone: 40, city: 80, review_url: 300,
+  promo_first: 400, promo_friend: 400, promo_gift: 400, partners: 600,
+  master_name: 80, master_about: 2000, faq: 6000,
+};
 function readStudio() {
   const rows = db.prepare('SELECT key, value FROM settings').all();
   const all = Object.fromEntries(rows.map((r) => [r.key, r.value]));
@@ -227,6 +231,9 @@ app.put('/api/admin/studio', (req, res) => {
     clean[k] = v;
   }
   if (!clean.name) return res.status(400).json({ error: 'Назва кабінету не може бути порожньою' });
+  if (clean.review_url && !/^https:\/\/\S+$/.test(clean.review_url)) {
+    return res.status(400).json({ error: 'Посилання на відгук має починатися з https://' });
+  }
   const up = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
   db.transaction(() => { for (const [k, v] of Object.entries(clean)) up.run(k, v); })();
   res.json(clean);

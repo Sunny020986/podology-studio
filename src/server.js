@@ -5,6 +5,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { openDb, DB_PATH } = require('./db');
+const { createTelegram } = require('./telegram');
 const { freeSlots, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -20,6 +21,7 @@ const LOGIN_WINDOW_MS = 15 * 60 * 1000;                                // ...з�
 const TRUST_PROXY = process.env.TRUST_PROXY === '1';                   // увімкнути, якщо сайт стоїть за Caddy або Nginx
 
 const db = openDb();
+const telegram = createTelegram(db);
 
 // ---------- Токен адміна ----------
 // Беремо з ADMIN_TOKEN, інакше з data/admin-token.txt, інакше створюємо новий.
@@ -202,6 +204,7 @@ app.post('/api/appointments', (req, res) => {
   try {
     const id = bookTx({ service, date, time, name: cleanName, phone: cleanPhone });
     bookingLimiter.hit(req.ip);
+    telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone });
     res.status(201).json({ id: Number(id), date, time, service: service.name });
   } catch (e) {
     if (e.status) return res.status(e.status).json({ error: e.message });
@@ -228,6 +231,21 @@ app.put('/api/admin/studio', (req, res) => {
   db.transaction(() => { for (const [k, v] of Object.entries(clean)) up.run(k, v); })();
   res.json(clean);
 });
+
+// ----- Сповіщення в Telegram -----
+const tgRoute = (fn) => async (req, res) => {
+  try {
+    res.json(await fn(req));
+  } catch (e) {
+    if (!e.status) console.error(e);
+    res.status(e.status || 500).json({ error: e.status ? e.message : 'Помилка сервера' });
+  }
+};
+app.get('/api/admin/telegram', (req, res) => res.json(telegram.status()));
+app.put('/api/admin/telegram', tgRoute((req) => { telegram.save(req.body || {}); return telegram.status(); }));
+app.delete('/api/admin/telegram', tgRoute(() => { telegram.clear(); return telegram.status(); }));
+app.post('/api/admin/telegram/detect', tgRoute(async (req) => ({ chats: await telegram.detect(req.body?.token) })));
+app.post('/api/admin/telegram/test', tgRoute(async () => { await telegram.test(); return { ok: true }; }));
 
 app.get('/api/admin/appointments', (req, res) => {
   const from = isValidDate(req.query.from) ? req.query.from : todayStr();
@@ -628,6 +646,7 @@ function handleClient(ws, msg) {
     }
     const message = saveMessage(id, 'client', body);
     send(ws, { type: 'message', message });
+    telegram.newChatMessage(id, body);
     notifyAdmins({ type: 'message', conversationId: id, message });
   }
 }

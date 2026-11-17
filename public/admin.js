@@ -79,6 +79,7 @@
     schedule: renderSchedule,
     blocks: renderBlocks,
     services: renderServices,
+    studio: renderStudio,
   };
 
   function show(name) {
@@ -362,6 +363,25 @@
       </form>`;
   }
 
+  // ----- Кабінет: назва, адреса, телефон для сайту -----
+  async function renderStudio() {
+    const s = await api('/api/admin/studio');
+    const field = (name, label, max, hint = '') => `
+      <label class="studio-field">
+        <span>${label}</span>
+        <input name="${name}" value="${esc(s[name])}" maxlength="${max}" ${name === 'name' ? 'required' : ''}>
+        ${hint ? `<small class="muted">${hint}</small>` : ''}
+      </label>`;
+    $('#view').innerHTML = `
+      <form id="studioForm" class="studio-form">
+        ${field('name', 'Назва кабінету', 80)}
+        ${field('tagline', 'Підзаголовок над головним заголовком', 120)}
+        ${field('address', 'Адреса', 200, 'Показується внизу сайту')}
+        ${field('phone', 'Телефон', 40, 'На сайті стає посиланням: з телефона по ньому можна одразу подзвонити')}
+        <button class="btn btn-primary small" type="submit">Зберегти</button>
+      </form>`;
+  }
+
   // ----- Делегування подій для вкладок -----
   const view = $('#view');
 
@@ -486,6 +506,12 @@
         });
         notify('Послугу додано');
         return await renderServices();
+      }
+
+      if (form.id === 'studioForm') {
+        await api('/api/admin/studio', { method: 'PUT', body: data });
+        notify('Збережено. На сайті зміни видно після оновлення сторінки');
+        return await renderStudio();
       }
 
       if (form.id === 'replyForm') {

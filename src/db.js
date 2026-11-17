@@ -81,6 +81,12 @@ function openDb() {
       note       TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- Дані кабінету, які майстер змінює в адмінці: назва, підзаголовок, адреса, телефон
+    CREATE TABLE IF NOT EXISTS settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT ''
+    );
   `);
 
   // Нотатка майстра до окремого візиту: колонка додається до баз, створених раніше
@@ -88,6 +94,7 @@ function openDb() {
   if (!apptCols.includes('note')) db.exec("ALTER TABLE appointments ADD COLUMN note TEXT NOT NULL DEFAULT ''");
 
   seed(db);
+  seedSettings(db);
   return db;
 }
 
@@ -108,4 +115,16 @@ function seed(db) {
   }
 }
 
-module.exports = { openDb, DB_PATH };
+// Стартові дані кабінету. Додаються лише ті ключі, яких ще немає в базі.
+const STUDIO_DEFAULTS = {
+  name: 'Подологічний кабінет',
+  tagline: 'Подологія · запис онлайн',
+  address: 'Вулиця Новаторів, 21/1',
+  phone: '+38 063 116 71 96',
+};
+function seedSettings(db) {
+  const ins = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+  for (const [k, v] of Object.entries(STUDIO_DEFAULTS)) ins.run(k, v);
+}
+
+module.exports = { openDb, DB_PATH, STUDIO_DEFAULTS };

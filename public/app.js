@@ -115,16 +115,30 @@
       name: $('#nameInput').value,
       phone: $('#phoneInput').value,
     };
-    const r = await fetch('/api/appointments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const data = await r.json();
-    if (!r.ok) {
+    // Кнопка вимкнена, поки сервер не відповів: повторне натискання не надішле другий запит
+    const btn = $('#submitBtn');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const oldLabel = btn.textContent;
+    btn.textContent = 'Записуємо…';
+    let r, data;
+    try {
+      r = await fetch('/api/appointments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      data = await r.json().catch(() => ({}));
+    } catch {
+      r = null;
+    } finally {
+      btn.textContent = oldLabel;
+    }
+    if (!r || !r.ok) {
       msg.className = 'msg error';
-      msg.textContent = data.error;
-      if (r.status === 409) refreshSlots();
+      msg.textContent = r ? data.error || 'Помилка сервера' : 'Немає зв\'язку із сервером. Спробуйте ще раз.';
+      btn.disabled = false;
+      if (r && r.status === 409) refreshSlots();
       return;
     }
     msg.className = 'msg ok';
@@ -161,10 +175,17 @@
       const m = JSON.parse(ev.data);
       if (m.type === 'hello') {
         chat.convId = m.conversationId;
-        localStorage.setItem('convId', chat.convId);
+        if (chat.convId) localStorage.setItem('convId', chat.convId);
+        else localStorage.removeItem('convId');
         $('#chatBody').innerHTML = '';
         if (!m.messages.length) addSystem('Напишіть питання, і оператор відповість тут.');
         m.messages.forEach(addMsg);
+      }
+      if (m.type === 'conversation') {
+        chat.convId = m.conversationId;
+        localStorage.setItem('convId', chat.convId);
+        const hint = $('#chatBody .system');
+        if (hint) hint.remove();
       }
       if (m.type === 'message') addMsg(m.message);
       if (m.type === 'error') addSystem(m.error);

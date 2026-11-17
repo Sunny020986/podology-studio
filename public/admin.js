@@ -393,6 +393,38 @@
         ${field('address', 'Адреса', 200, 'Показується внизу сайту')}
         ${field('phone', 'Телефон', 40, 'На сайті стає посиланням: з телефона по ньому можна одразу подзвонити')}
         <button class="btn btn-primary small" type="submit">Зберегти</button>
+      </form>
+      <h3 class="tg-title">Сповіщення в Telegram</h3>
+      <div id="tgBox"></div>`;
+    await renderTelegram();
+  }
+
+  async function renderTelegram() {
+    const t = await api('/api/admin/telegram');
+    $('#tgBox').innerHTML = `
+      <p class="tg-state ${t.configured ? 'ok' : ''}">${t.configured
+        ? 'Увімкнено: бот пише вам про кожен новий запис і нове питання в чаті.'
+        : 'Вимкнено. Налаштування займає близько 3 хвилин.'}</p>
+      <ol class="tg-steps">
+        <li>У Telegram відкрийте <b>@BotFather</b>, надішліть <code>/newbot</code>, придумайте боту назву й ім'я, що закінчується на <code>bot</code>. BotFather надішле токен: довгий рядок на зразок <code>1234567890:AAH…</code></li>
+        <li>Вставте токен нижче.</li>
+        <li>Знайдіть свого нового бота в Telegram і натисніть «Start» (або напишіть йому будь-що).</li>
+        <li>Натисніть «Знайти мій чат», потім «Зберегти» і «Надіслати тест».</li>
+      </ol>
+      <form id="tgForm" class="studio-form">
+        <label class="studio-field"><span>Токен бота</span>
+          <input name="token" autocomplete="off" spellcheck="false" placeholder="${t.hasToken ? 'Збережено: ' + esc(t.tokenHint) + ' (залиште порожнім, щоб не змінювати)' : '1234567890:AAH…'}">
+        </label>
+        <label class="studio-field"><span>Номер чату</span>
+          <input name="chatId" value="${esc(t.chatId)}" inputmode="numeric" placeholder="Заповниться кнопкою «Знайти мій чат»">
+          <small class="muted" id="tgFound"></small>
+        </label>
+        <div class="tg-actions">
+          <button class="btn btn-ghost small" type="button" id="tgDetect">Знайти мій чат</button>
+          <button class="btn btn-primary small" type="submit">Зберегти</button>
+          <button class="btn btn-ghost small" type="button" id="tgTest" ${t.configured ? '' : 'disabled'}>Надіслати тест</button>
+          ${t.hasToken ? '<button class="btn btn-ghost small danger" type="button" id="tgOff">Вимкнути</button>' : ''}
+        </div>
       </form>`;
   }
 
@@ -444,6 +476,37 @@
         const input = e.target.closest('tr').querySelector('input');
         await api(`/api/admin/appointments/${e.target.dataset.saveVisitNote}/note`, { method: 'PUT', body: { note: input.value } });
         return notify('Нотатку до візиту збережено');
+      }
+
+      if (e.target.id === 'tgDetect') {
+        e.target.disabled = true;
+        try {
+          const { chats } = await api('/api/admin/telegram/detect', { method: 'POST', body: { token: $('#tgForm [name=token]').value } });
+          if (!chats.length) return notify('Бот ще не отримав жодного повідомлення. Напишіть йому в Telegram і натисніть ще раз', true);
+          const last = chats[chats.length - 1];
+          $('#tgForm [name=chatId]').value = last.id;
+          $('#tgFound').textContent = `Знайдено чат: ${last.name}. Тепер натисніть «Зберегти».`;
+          return;
+        } finally {
+          e.target.disabled = false;
+        }
+      }
+
+      if (e.target.id === 'tgTest') {
+        e.target.disabled = true;
+        try {
+          await api('/api/admin/telegram/test', { method: 'POST' });
+          return notify('Тест надіслано. Перевірте Telegram');
+        } finally {
+          e.target.disabled = false;
+        }
+      }
+
+      if (e.target.id === 'tgOff') {
+        if (!confirm('Вимкнути сповіщення й видалити збережений токен бота?')) return;
+        await api('/api/admin/telegram', { method: 'DELETE' });
+        notify('Сповіщення вимкнено');
+        return await renderTelegram();
       }
 
       if (e.target.id === 'deleteConv') {
@@ -526,6 +589,12 @@
         await api('/api/admin/studio', { method: 'PUT', body: data });
         notify('Збережено. На сайті зміни видно після оновлення сторінки');
         return await renderStudio();
+      }
+
+      if (form.id === 'tgForm') {
+        await api('/api/admin/telegram', { method: 'PUT', body: data });
+        notify('Збережено. Натисніть «Надіслати тест», щоб перевірити');
+        return await renderTelegram();
       }
 
       if (form.id === 'replyForm') {

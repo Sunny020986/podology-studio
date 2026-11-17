@@ -83,6 +83,8 @@ a { color: inherit; text-decoration: none; }
 .how-title { font-size: 16px; font-weight: 600; }
 
 .section { padding: 40px 64px 0; }
+.studio-photo { margin: 0; border-radius: 16px; overflow: hidden; background: var(--card); border: 1px solid var(--line); }
+.studio-photo img { display: block; width: 100%; height: auto; }
 .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
 .service {
   text-align: left; font: inherit; color: inherit; cursor: pointer;

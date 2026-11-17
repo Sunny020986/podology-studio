@@ -27,7 +27,7 @@
     io.observe(el);
   }
 
-  document.querySelectorAll('.hero-text > *, .how, .section h2, .booking-grid .card')
+  document.querySelectorAll('.hero-text > *, .how, .section h2, .studio-photo, .booking-grid .card')
     .forEach((el, i) => reveal(el, Math.min(i, 5) * 70));
 
   // Картки послуг з'являються після завантаження з сервера, по черзі

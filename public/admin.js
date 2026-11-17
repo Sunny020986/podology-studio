@@ -386,12 +386,33 @@
         <input name="${name}" value="${esc(s[name])}" maxlength="${max}" ${name === 'name' ? 'required' : ''}>
         ${hint ? `<small class="muted">${hint}</small>` : ''}
       </label>`;
+    const area = (name, label, max, rows, hint = '') => `
+      <label class="studio-field">
+        <span>${label}</span>
+        <textarea name="${name}" maxlength="${max}" rows="${rows}">${esc(s[name])}</textarea>
+        ${hint ? `<small class="muted">${hint}</small>` : ''}
+      </label>`;
+    const PROMO_HINT = 'Перший рядок це заголовок, далі опис. Порожнє поле ховає картку на сайті.';
     $('#view').innerHTML = `
       <form id="studioForm" class="studio-form">
+        <h3 class="studio-group">Основне</h3>
         ${field('name', 'Назва кабінету', 80)}
         ${field('tagline', 'Підзаголовок над головним заголовком', 120)}
-        ${field('address', 'Адреса', 200, 'Показується внизу сайту')}
+        <h3 class="studio-group">Контакти й карта</h3>
+        ${field('city', 'Місто', 80, 'Потрібне, щоб карта знайшла правильну вулицю')}
+        ${field('address', 'Адреса', 200)}
         ${field('phone', 'Телефон', 40, 'На сайті стає посиланням: з телефона по ньому можна одразу подзвонити')}
+        ${field('review_url', 'Посилання «Залишити відгук у Google»', 300, 'Google Профіль компанії → «Попросити відгуки» → скопіювати посилання. Порожнє поле ховає кнопку.')}
+        <h3 class="studio-group">Акції</h3>
+        ${area('promo_first', 'Знижка на перший візит', 400, 3, PROMO_HINT + ' Заголовок також показується плашкою на початку сторінки.')}
+        ${area('promo_friend', '«Приведи друга»', 400, 3, PROMO_HINT)}
+        ${area('promo_gift', 'Подарункові сертифікати', 400, 3, PROMO_HINT)}
+        ${area('partners', 'Для лікарів і салонів (співпраця)', 600, 3, PROMO_HINT)}
+        <h3 class="studio-group">Про майстра</h3>
+        ${field('master_name', "Ім'я майстра", 80, 'Порожнє поле разом з порожнім описом ховає блок')}
+        ${area('master_about', 'Про майстра: досвід, навчання, сертифікати', 2000, 5)}
+        <h3 class="studio-group">Питання й відповіді</h3>
+        ${area('faq', 'Питання й відповіді', 6000, 14, 'Кожне питання окремим блоком через порожній рядок. Перший рядок блоку це питання, далі відповідь.')}
         <button class="btn btn-primary small" type="submit">Зберегти</button>
       </form>
       <h3 class="tg-title">Сповіщення в Telegram</h3>

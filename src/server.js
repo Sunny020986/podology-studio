@@ -128,6 +128,32 @@ const app = express();
 app.disable('x-powered-by');
 if (TRUST_PROXY) app.set('trust proxy', 1);
 app.use(express.json({ limit: '100kb' }));
+// Головна сторінка з тегами для прев'ю посилання (Telegram, Viber, Facebook) і пошуковиків.
+// Повна адреса картинки береться із запиту, бо месенджери не розуміють відносних шляхів.
+const INDEX_HTML = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
+const attr = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+app.get(['/', '/index.html'], (req, res) => {
+  const s = readStudio();
+  const origin = `${req.protocol}://${req.get('host')}`;
+  const title = `${s.name}: онлайн-запис до подолога`;
+  const place = [s.city, s.address].filter(Boolean).join(', ');
+  const desc = ['Запис онлайн на вільний час, чат з майстром.', [place, s.phone].filter(Boolean).join(' · ')].filter(Boolean).join(' ');
+  const tags = [
+    `<meta name="description" content="${attr(desc)}">`,
+    `<meta property="og:type" content="website">`,
+    `<meta property="og:locale" content="uk_UA">`,
+    `<meta property="og:site_name" content="${attr(s.name)}">`,
+    `<meta property="og:title" content="${attr(title)}">`,
+    `<meta property="og:description" content="${attr(desc)}">`,
+    `<meta property="og:url" content="${attr(origin + '/')}">`,
+    `<meta property="og:image" content="${attr(origin + '/img/og.jpg')}">`,
+    `<meta property="og:image:width" content="1200">`,
+    `<meta property="og:image:height" content="630">`,
+    `<meta name="twitter:card" content="summary_large_image">`,
+  ].join('\n');
+  res.type('html').send(INDEX_HTML.replace('<!--SEO-->', tags).replace('<title>Онлайн-запис до подолога</title>', `<title>${attr(title)}</title>`));
+});
+
 app.use(express.static(PUBLIC_DIR));
 app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'admin.html')));
 

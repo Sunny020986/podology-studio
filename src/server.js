@@ -581,24 +581,34 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+function attach(ws, id) {
+  ws.meta.conversationId = id;
+  if (!clients.has(id)) clients.set(id, new Set());
+  clients.get(id).add(ws);
+}
+
+// Порожні діалоги, створені старою версією сайту, прибираються при старті й далі щогодини
+function purgeEmptyConversations() {
+  const n = db.prepare(`DELETE FROM conversations
+                        WHERE NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = conversations.id)
+                          AND created_at < datetime('now', '-1 hour')`).run().changes;
+  if (n) console.log(`Видалено порожніх діалогів: ${n}`);
+}
+purgeEmptyConversations();
+setInterval(purgeEmptyConversations, 60 * 60 * 1000).unref();
+
 function handleClient(ws, msg) {
   if (msg.type === 'hello') {
+    // Діалог у базі створюється лише з першим повідомленням, тож просте відкриття сайту нічого не записує
     let id = typeof msg.conversationId === 'string' && /^[a-f0-9-]{36}$/.test(msg.conversationId) ? msg.conversationId : null;
-    if (!id || !db.prepare('SELECT 1 FROM conversations WHERE id = ?').get(id)) {
-      id = crypto.randomUUID();
-      db.prepare('INSERT INTO conversations (id) VALUES (?)').run(id);
-    }
+    if (id && !db.prepare('SELECT 1 FROM conversations WHERE id = ?').get(id)) id = null;
     detach(ws);
-    ws.meta.conversationId = id;
-    if (!clients.has(id)) clients.set(id, new Set());
-    clients.get(id).add(ws);
-    send(ws, { type: 'hello', conversationId: id, messages: messagesOf(id) });
+    if (id) attach(ws, id);
+    send(ws, { type: 'hello', conversationId: id, messages: id ? messagesOf(id) : [] });
     return;
   }
 
   if (msg.type === 'message') {
-    const id = ws.meta.conversationId;
-    if (!id) return;
     const body = String(msg.body ?? '').trim();
     if (!body || body.length > 1000) {
       return send(ws, { type: 'error', error: 'Повідомлення порожнє або довше 1000 символів' });
@@ -609,6 +619,13 @@ function handleClient(ws, msg) {
       return send(ws, { type: 'error', error: 'Забагато повідомлень. Зачекайте 10 секунд' });
     }
     ws.meta.hits.push(now);
+    let id = ws.meta.conversationId;
+    if (!id) {
+      id = crypto.randomUUID();
+      db.prepare('INSERT INTO conversations (id) VALUES (?)').run(id);
+      attach(ws, id);
+      send(ws, { type: 'conversation', conversationId: id });
+    }
     const message = saveMessage(id, 'client', body);
     send(ws, { type: 'message', message });
     notifyAdmins({ type: 'message', conversationId: id, message });

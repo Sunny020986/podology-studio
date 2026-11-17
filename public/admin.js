@@ -187,8 +187,15 @@
   }
 
   // ----- Чат -----
-  const bubbleHtml = (m) => `<div class="bubble ${m.sender === 'operator' ? 'mine' : 'theirs'}">
-    <div class="who">${m.sender === 'operator' ? 'Ви' : 'Клієнт'} · ${esc(m.created_at)}</div>${esc(m.body)}</div>`;
+  // База зберігає час за UTC ("2026-11-18 10:05:00"); показуємо його за часом комп'ютера, тобто за Києвом
+  const localTime = (s) => {
+    const d = new Date(String(s).replace(' ', 'T') + 'Z');
+    if (isNaN(d)) return s;
+    const sameDay = d.toDateString() === new Date().toDateString();
+    return d.toLocaleString('uk-UA', sameDay ? { hour: '2-digit', minute: '2-digit' }
+      : { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  };
+  const bubbleHtml = (m) => `<div class="bubble ${m.sender === 'operator' ? 'mine' : 'theirs'}"><div class="who">${m.sender === 'operator' ? 'Ви' : 'Клієнт'} · ${esc(localTime(m.created_at))}</div>${esc(m.body)}</div>`;
 
   async function renderChat() {
     $('#view').innerHTML = `
@@ -206,12 +213,17 @@
           </form>
         </div>
       </div>`;
+    await refreshConvList();
+    if (currentConv) await openConv(currentConv);
+  }
+
+  async function refreshConvList() {
     const convs = await api('/api/admin/conversations');
+    if (!$('#convList')) return;
     $('#convList').innerHTML = convs.length
       ? convs.map((c) => `<button class="conv ${c.id === currentConv ? 'active' : ''}" type="button" data-conv="${c.id}">
           <b>Діалог ${esc(c.id.slice(0, 6))}</b><span>${esc(c.last_body || '')}</span></button>`).join('')
       : '<div class="muted" style="padding:12px">Звернень ще немає.</div>';
-    if (currentConv) await openConv(currentConv);
   }
 
   async function openConv(id) {
@@ -239,6 +251,8 @@
         } else if (m.message.sender === 'client') {
           notify('Нове повідомлення в чаті');
         }
+        // Новий діалог або нове повідомлення: оновлюємо список зліва, якщо вкладка чату відкрита
+        if ($('#convList')) refreshConvList().catch(() => {});
       }
       if (m.type === 'conversation_deleted') {
         // Діалог видалено (можливо, з іншого вікна адмінки): оновлюємо список, якщо вкладка чату відкрита

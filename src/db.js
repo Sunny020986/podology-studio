@@ -100,6 +100,7 @@ function openDb() {
   seed(db);
   seedSettings(db);
   migrateServicesV2(db);
+  addServicesOnce(db, 'services_v3', EXTRA_SERVICES_V3);
   return db;
 }
 
@@ -147,6 +148,28 @@ function migrateServicesV2(db) {
     const ins = db.prepare('INSERT INTO services (name, description, duration_min, price_uah) VALUES (?, ?, ?, 0)');
     for (const [name, desc, dur] of EXTRA_SERVICES) if (!exists.get(name)) ins.run(name, desc, dur);
     db.prepare("INSERT INTO settings (key, value) VALUES ('services_v2', '1')").run();
+  })();
+}
+
+// Третя хвиля послуг. Як і попередня, додається один раз і лише тих, яких ще немає за назвою.
+const EXTRA_SERVICES_V3 = [
+  ['Тампонада врослого нігтя', 'Розвантаження нігтьового валика спеціальним матеріалом, щоб ніготь ріс правильно.', 30],
+  ['Встановлення титанової нитки', 'Корекція врослого або закрученого нігтя титановою ниткою.', 45],
+  ['Корекція закрученого нігтя', 'Поступове вирівнювання «пінцетного» нігтя скобою.', 45],
+  ['Обробка нігтя при оніхолізисі', 'Обробка нігтя, що відшаровується від ложа, і рекомендації з догляду.', 45],
+  ['Чоловічий подологічний педикюр', 'Апаратна обробка стоп і нігтів для чоловіків.', 60],
+  ['Педикюр для людей похилого віку', 'Делікатна обробка стоп і нігтів з урахуванням віку.', 60],
+  ['Педикюр з покриттям гель-лаком', 'Апаратний педикюр і покриття нігтів гель-лаком.', 90],
+  ["Комп'ютерна діагностика стоп", 'Оцінка розподілу навантаження на стопи, рекомендації щодо устілок.', 30],
+  ['Парафінотерапія для стоп', 'Зволоження й пом\'якшення шкіри стоп теплим парафіном.', 30],
+];
+function addServicesOnce(db, flag, list) {
+  if (db.prepare('SELECT 1 FROM settings WHERE key = ?').get(flag)) return;
+  db.transaction(() => {
+    const exists = db.prepare('SELECT 1 FROM services WHERE name = ?');
+    const ins = db.prepare('INSERT INTO services (name, description, duration_min, price_uah) VALUES (?, ?, ?, 0)');
+    for (const [name, desc, dur] of list) if (!exists.get(name)) ins.run(name, desc, dur);
+    db.prepare("INSERT INTO settings (key, value) VALUES (?, '1')").run(flag);
   })();
 }
 

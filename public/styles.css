@@ -264,6 +264,8 @@ textarea.input { resize: vertical; min-height: 96px; }
 
 /* ===== Темна тема (вмикає theme.js через атрибут data-theme на <html>) ===== */
 .remind-btn { margin-top: 10px; }
+#servicesList.collapsed .service:nth-child(n+7) { display: none; }
+.services-more { display: block; margin: 20px auto 0; }
 
 /* ----- Акції, про майстра, питання, контакти ----- */
 .promo-pill { display: inline-flex; align-self: flex-start; width: fit-content; margin-bottom: 14px; padding: 7px 14px; border-radius: 999px;

@@ -6,18 +6,19 @@ const API = (process.env.TELEGRAM_API || 'https://api.telegram.org').replace(/\/
 const TOKEN_RE = /^\d{5,15}:[A-Za-z0-9_-]{30,50}$/;
 const CHAT_RE = /^-?\d{1,20}$/;
 const CHAT_REPEAT_MS = 5 * 60 * 1000; // про той самий діалог повідомляємо не частіше ніж раз на 5 хв
+const POLL_TIMEOUT_S = 25; // довге опитування Telegram: сервер чекає нових повідомлень до 25 с
 
 function createTelegram(db) {
   const get = (k) => db.prepare('SELECT value FROM settings WHERE key = ?').get(k)?.value || '';
   const set = (k, v) =>
     db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, v);
 
-  async function call(token, method, body) {
+  async function call(token, method, body, timeoutMs = 10000) {
     const r = await fetch(`${API}/bot${token}/${method}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {}),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const data = await r.json().catch(() => ({}));
     if (!data.ok) {
@@ -51,18 +52,92 @@ function createTelegram(db) {
     chatId = String(chatId ?? '').trim();
     if (token && !TOKEN_RE.test(token)) throw Object.assign(new Error('Схоже, це не токен бота. Він має вигляд 1234567890:AAH…'), { status: 400 });
     if (chatId && !CHAT_RE.test(chatId)) throw Object.assign(new Error('Номер чату складається лише з цифр (може починатися з «-»)'), { status: 400 });
+    const changed = token && token !== get('tg_token');
     if (token) set('tg_token', token); // порожнє поле означає «залишити збережений токен»
     set('tg_chat_id', chatId);
+    if (changed || !poll) startPolling();
   }
 
   function clear() {
     set('tg_token', '');
     set('tg_chat_id', '');
+    stopPolling();
+    recentChats.clear();
+  }
+
+  // ----- Опитування бота: клієнти натискають «Start» за посиланням із сайту -----
+  // Поки бот увімкнений, сервер сам забирає повідомлення боту (getUpdates). Тому «Знайти мій чат»
+  // бере чати з пам'яті, а не напряму з Telegram.
+  const recentChats = new Map(); // id → { id, name }, останні 50 чатів, що писали боту
+  let poll = null; // { token, stop }
+  let botUsername = '';
+  let startHandler = () => null; // (код зі /start, чат) → текст відповіді або null
+
+  function remember(chat) {
+    const name = chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(' ') || chat.username || String(chat.id);
+    recentChats.delete(String(chat.id));
+    recentChats.set(String(chat.id), { id: String(chat.id), name });
+    while (recentChats.size > 50) recentChats.delete(recentChats.keys().next().value);
+  }
+
+  async function handleUpdate(token, u) {
+    const m = u.message;
+    if (!m?.chat || m.chat.type !== 'private') return;
+    remember(m.chat);
+    const chatId = String(m.chat.id);
+    const text = String(m.text || '').trim();
+    const code = (text.match(/^\/start\s+(\S+)/) || [])[1];
+    let reply = code ? startHandler(code, chatId) : null;
+    if (!reply && chatId !== get('tg_chat_id')) {
+      const name = get('name') || 'кабінет';
+      reply = `Привіт! Цей бот надсилає нагадування про запис у «${name}». Щоб увімкнути нагадування, ` +
+        'запишіться на сайті й натисніть кнопку «Нагадати в Telegram» під підтвердженням запису.';
+    }
+    if (reply) await call(token, 'sendMessage', { chat_id: chatId, text: reply }).catch(() => {});
+  }
+
+  function startPolling() {
+    stopPolling();
+    const token = get('tg_token');
+    if (!token) return;
+    const state = { token, stopped: false, ctrl: null };
+    poll = state;
+    (async () => {
+      try {
+        botUsername = (await call(token, 'getMe')).username || '';
+      } catch (e) {
+        console.error('Telegram:', explain(e));
+      }
+      let offset = 0;
+      while (!state.stopped) {
+        try {
+          const updates = await call(token, 'getUpdates',
+            { offset, timeout: POLL_TIMEOUT_S, allowed_updates: ['message'] }, (POLL_TIMEOUT_S + 10) * 1000);
+          for (const u of updates) {
+            offset = u.update_id + 1;
+            await handleUpdate(token, u);
+          }
+          if (!botUsername) botUsername = (await call(token, 'getMe').catch(() => ({}))).username || '';
+        } catch (e) {
+          if (state.stopped) break;
+          console.error('Telegram (опитування):', explain(e));
+          await new Promise((r) => setTimeout(r, 30000)); // пауза перед наступною спробою
+        }
+      }
+    })();
+  }
+
+  function stopPolling() {
+    if (poll) poll.stopped = true;
+    poll = null;
+    botUsername = '';
   }
 
   // Шукає чати, які нещодавно писали боту: так майстер дізнається свій номер чату
   async function detect(tokenFromForm) {
-    const token = String(tokenFromForm || '').trim() || get('tg_token');
+    const formToken = String(tokenFromForm || '').trim();
+    if (poll && (!formToken || formToken === poll.token)) return [...recentChats.values()];
+    const token = formToken || get('tg_token');
     if (!token) throw Object.assign(new Error('Спершу вставте токен бота'), { status: 400 });
     if (!TOKEN_RE.test(token)) throw Object.assign(new Error('Схоже, це не токен бота. Він має вигляд 1234567890:AAH…'), { status: 400 });
     let updates;
@@ -81,9 +156,9 @@ function createTelegram(db) {
     return [...chats.values()];
   }
 
-  async function send(text) {
+  async function send(text, toChat) {
     const token = get('tg_token');
-    const chatId = get('tg_chat_id');
+    const chatId = toChat || get('tg_chat_id');
     if (!token || !chatId) return false;
     await call(token, 'sendMessage', { chat_id: chatId, text, disable_web_page_preview: true });
     return true;
@@ -116,7 +191,23 @@ function createTelegram(db) {
     fire(`💬 Нове питання в чаті (діалог ${conversationId.slice(0, 6)})\n\n${preview}\n\nВідповісти: адмінка → вкладка «Чат»`);
   }
 
-  return { status, save, clear, detect, test, newAppointment, newChatMessage };
+  // Повідомлення клієнту (нагадування, скасування). Повертає true, якщо надіслано.
+  const sendToClient = (chatId, text) => send(text, chatId).catch((e) => {
+    console.error('Telegram (клієнт):', explain(e));
+    return false;
+  });
+
+  // Посилання для клієнта: відкриває бота з кодом запису. null, якщо бот не налаштований.
+  const remindLink = (code) => (botUsername && status().configured ? `https://t.me/${botUsername}?start=${code}` : null);
+
+  const onStart = (fn) => { startHandler = fn; };
+
+  startPolling();
+
+  return {
+    status, save, clear, detect, test, newAppointment, newChatMessage,
+    sendToClient, remindLink, onStart, fmtDate,
+  };
 }
 
 module.exports = { createTelegram };

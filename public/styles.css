@@ -263,6 +263,8 @@ textarea.input { resize: vertical; min-height: 96px; }
 .confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; }
 
 /* ===== Темна тема (вмикає theme.js через атрибут data-theme на <html>) ===== */
+.remind-btn { margin-top: 10px; }
+
 /* ----- Акції, про майстра, питання, контакти ----- */
 .promo-pill { display: inline-flex; align-self: flex-start; width: fit-content; margin-bottom: 14px; padding: 7px 14px; border-radius: 999px;
   background: var(--accent); color: var(--accent-ink, #fff); font-size: 14px; font-weight: 600; text-decoration: none;

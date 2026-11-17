@@ -179,10 +179,11 @@ const bookTx = db.transaction(({ service, date, time, name, phone }) => {
     throw Object.assign(new Error('Цей час уже недоступний, оберіть інший'), { status: 409 });
   }
   const end = toHHMM(toMin(time) + service.duration_min);
+  const remindCode = 'r' + crypto.randomBytes(9).toString('base64url');
   const info = db
-    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(service.id, date, time, end, name, phone);
-  return info.lastInsertRowid;
+    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(service.id, date, time, end, name, phone, remindCode);
+  return { id: info.lastInsertRowid, remindCode };
 });
 
 app.post('/api/appointments', (req, res) => {
@@ -206,10 +207,10 @@ app.post('/api/appointments', (req, res) => {
   }
 
   try {
-    const id = bookTx({ service, date, time, name: cleanName, phone: cleanPhone });
+    const { id, remindCode } = bookTx({ service, date, time, name: cleanName, phone: cleanPhone });
     bookingLimiter.hit(req.ip);
     telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone });
-    res.status(201).json({ id: Number(id), date, time, service: service.name });
+    res.status(201).json({ id: Number(id), date, time, service: service.name, remindLink: telegram.remindLink(remindCode) });
   } catch (e) {
     if (e.status) return res.status(e.status).json({ error: e.message });
     console.error(e);
@@ -286,12 +287,62 @@ app.patch('/api/admin/appointments/:id', (req, res) => {
   if (!['new', 'confirmed', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Некоректний статус' });
   try {
     setStatusTx(Number(req.params.id), status);
+    if (status === 'cancelled') notifyClientCancelled(Number(req.params.id));
     res.json({ ok: true });
   } catch (e) {
     if (e.status) return res.status(e.status).json({ error: e.message });
     throw e;
   }
 });
+
+// ---------- Нагадування клієнтам у Telegram ----------
+const REMIND_BEFORE_MS = 24 * 60 * 60 * 1000; // нагадуємо за добу до візиту
+const msUntil = (date, time) => new Date(`${date}T${time}:00`).getTime() - Date.now(); // за часом сервера (Київ)
+const apptForClient = (where, arg) => db.prepare(`SELECT a.*, s.name AS service FROM appointments a
+  JOIN services s ON s.id = a.service_id WHERE ${where}`).get(arg);
+const studioLine = () => {
+  const s = readStudio();
+  return [[s.city, s.address].filter(Boolean).join(', '), s.phone].filter(Boolean).join(' · ');
+};
+
+// Клієнт натиснув «Start» за посиланням із сайту: прив'язуємо його чат до запису
+telegram.onStart((code, chatId) => {
+  const a = apptForClient('a.remind_code = ?', code);
+  if (!a) return 'Не знайшли цей запис. Можливо, посилання застаріло. Запишіться на сайті ще раз або подзвоніть нам.';
+  if (a.status === 'cancelled') return 'Цей запис скасовано. Щоб записатися знову, скористайтеся сайтом.';
+  const left = msUntil(a.date, a.start_time);
+  if (left <= 0) return 'Цей візит уже минув. Дякуємо, що були у нас!';
+  // Якщо до візиту менше доби, окреме нагадування не потрібне: усе є в цьому повідомленні
+  db.prepare('UPDATE appointments SET tg_chat_id = ?, reminded = ? WHERE id = ?').run(chatId, left <= REMIND_BEFORE_MS ? 1 : 0, a.id);
+  const when = `${telegram.fmtDate(a.date)} о ${a.start_time}`;
+  return `✅ Готово! Ваш запис: ${a.service}, ${when}.\n` +
+    (left <= REMIND_BEFORE_MS ? 'Чекаємо на вас.' : 'Нагадаємо за добу до візиту.') +
+    (studioLine() ? `\n${studioLine()}` : '');
+});
+
+async function sendDueReminders() {
+  const rows = db.prepare(`SELECT a.*, s.name AS service FROM appointments a JOIN services s ON s.id = a.service_id
+    WHERE a.tg_chat_id IS NOT NULL AND a.reminded = 0 AND a.status != 'cancelled' AND a.date BETWEEN ? AND date(?, '+2 day')`)
+    .all(todayStr(), todayStr());
+  for (const a of rows) {
+    const left = msUntil(a.date, a.start_time);
+    if (left <= 0 || left > REMIND_BEFORE_MS) continue;
+    db.prepare('UPDATE appointments SET reminded = 1 WHERE id = ?').run(a.id); // спершу позначка: двічі не нагадаємо
+    await telegram.sendToClient(a.tg_chat_id,
+      `🔔 Нагадування: ${a.date === todayStr() ? 'сьогодні' : 'завтра'}, ${telegram.fmtDate(a.date)} о ${a.start_time}, у вас ${a.service}.\n` +
+      (studioLine() ? `${studioLine()}\n` : '') + 'Якщо плани змінилися, будь ласка, повідомте нам заздалегідь.');
+  }
+}
+setInterval(() => sendDueReminders().catch((e) => console.error('Нагадування:', e.message)), 5 * 60 * 1000).unref();
+setTimeout(() => sendDueReminders().catch(() => {}), 15000).unref();
+
+function notifyClientCancelled(id) {
+  const a = apptForClient('a.id = ?', id);
+  if (!a?.tg_chat_id || msUntil(a.date, a.start_time) <= 0) return;
+  telegram.sendToClient(a.tg_chat_id,
+    `Ваш запис ${a.service}, ${telegram.fmtDate(a.date)} о ${a.start_time}, скасовано.` +
+    (readStudio().phone ? ` Щоб обрати інший час, запишіться на сайті або подзвоніть: ${readStudio().phone}.` : ' Щоб обрати інший час, запишіться на сайті.'));
+}
 
 // ---------- Клієнти ----------
 // Клієнт визначається за останніми 9 цифрами телефону, тому +380 67 123 45 67 і 067 123 45 67 це одна людина.

@@ -165,6 +165,7 @@
     const msg = $('#bookingMsg');
     msg.className = 'msg';
     msg.textContent = '';
+    $('#remindBtn').hidden = true;
     const body = {
       serviceId: Number(state.serviceId),
       date: state.date,
@@ -202,6 +203,10 @@
     const svc = state.services.find((x) => x.name === data.service);
     const span = svc ? `${data.time}–${addMin(data.time, svc.duration_min)} (триває ${durText(svc.duration_min)})` : `о ${data.time}`;
     msg.textContent = `Дякуємо! Ви записані: ${data.service}, ${fmtDate(data.date)}, ${span}. Номер запису: ${data.id}.`;
+    if (data.remindLink) {
+      $('#remindBtn').href = data.remindLink;
+      $('#remindBtn').hidden = false;
+    }
     $('#nameInput').value = '';
     $('#phoneInput').value = '';
     document.dispatchEvent(new CustomEvent('booking:success'));

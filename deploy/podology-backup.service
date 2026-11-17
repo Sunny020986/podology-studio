@@ -1,0 +1,14 @@
+[Unit]
+Description=Podology studio: резервна копія бази
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/podology-studio/app
+Environment=DB_PATH=/opt/podology-studio/app/data/studio.db
+Environment=BACKUP_DIR=/opt/podology-studio/backups
+Environment=BACKUP_KEEP_DAYS=30
+# Куди копіювати на іншу машину. Розкоментуйте й підставте свою адресу:
+#Environment=BACKUP_REMOTE=root@192.168.3.X:/var/backups/podology/
+ExecStart=/usr/bin/node scripts/backup.js

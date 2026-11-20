@@ -239,13 +239,6 @@ const accounts = setupAccounts({
   horizonDays: HORIZON_DAYS, makeLimiter, notifyMaster: (t) => telegram.notifyMaster(t), changeHours: readChangeHours,
 });
 
-app.get('/api/admin/change-hours', (req, res) => res.json({ hours: readChangeHours(), options: CHANGE_HOUR_OPTIONS }));
-app.put('/api/admin/change-hours', (req, res) => {
-  const n = Number(req.body?.hours);
-  if (!CHANGE_HOUR_OPTIONS.includes(n)) return res.status(400).json({ error: 'Оберіть один із варіантів: ' + CHANGE_HOUR_OPTIONS.join(', ') + ' год' });
-  db.prepare("INSERT INTO settings (key, value) VALUES ('change_hours', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(n));
-  res.json({ hours: n });
-});
 
 app.post('/api/appointments', (req, res) => {
   const { serviceId, date, time, name, phone, comment } = req.body || {};
@@ -282,6 +275,15 @@ app.post('/api/appointments', (req, res) => {
 
 // ---------- Адмін API ----------
 app.use('/api/admin', requireAdmin);
+
+// Налаштування годин для скасування й перенесення клієнтом (лише для адміна)
+app.get('/api/admin/change-hours', (req, res) => res.json({ hours: readChangeHours(), options: CHANGE_HOUR_OPTIONS }));
+app.put('/api/admin/change-hours', (req, res) => {
+  const n = Number(req.body?.hours);
+  if (!CHANGE_HOUR_OPTIONS.includes(n)) return res.status(400).json({ error: 'Оберіть один із варіантів: ' + CHANGE_HOUR_OPTIONS.join(', ') + ' год' });
+  db.prepare("INSERT INTO settings (key, value) VALUES ('change_hours', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(n));
+  res.json({ hours: n });
+});
 
 app.get('/api/admin/studio', (req, res) => res.json(readStudio()));
 

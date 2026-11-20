@@ -60,6 +60,41 @@
     dot.addEventListener('animationend', () => dot.remove());
   });
 
+  // ----- 3а. Водяні кола на картках акцій -----
+  // Курсор над карткою залишає кола, що розходяться, як від краплі на воді
+  const offersList = document.getElementById('offersList');
+  if (offersList) {
+    const RIPPLE_GAP_MS = 220;   // як часто з'являється нове коло під час руху
+    const MAX_RIPPLES = 6;       // скільки кіл одночасно на одній картці
+    let lastRipple = 0;
+
+    function dropRipple(card, x, y) {
+      if (card.querySelectorAll('.water-ring').length >= MAX_RIPPLES) return;
+      const r = card.getBoundingClientRect();
+      for (let i = 0; i < 2; i++) { // два кола з затримкою дають ефект хвилі
+        const ring = document.createElement('span');
+        ring.className = 'water-ring';
+        ring.style.left = (x - r.left) + 'px';
+        ring.style.top = (y - r.top) + 'px';
+        ring.style.animationDelay = (i * 180) + 'ms';
+        ring.addEventListener('animationend', () => ring.remove());
+        card.appendChild(ring);
+      }
+    }
+
+    offersList.addEventListener('pointerenter', (e) => {
+      const card = e.target.closest?.('.offer');
+      if (card) dropRipple(card, e.clientX, e.clientY);
+    }, true);
+    offersList.addEventListener('pointermove', (e) => {
+      if (e.pointerType !== 'mouse') return;
+      const card = e.target.closest('.offer');
+      if (!card || e.timeStamp - lastRipple < RIPPLE_GAP_MS) return;
+      lastRipple = e.timeStamp;
+      dropRipple(card, e.clientX, e.clientY);
+    });
+  }
+
   // ----- 4. Картка послуги нахиляється за курсором -----
   const MAX_TILT_DEG = 4;
   let tilted = null;

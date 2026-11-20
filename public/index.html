@@ -85,8 +85,10 @@
     <div class="booking-grid">
       <div class="card">
         <label class="step-label" for="serviceSearch">1. Послуга</label>
-        <input id="serviceSearch" class="input" list="serviceOptions" autocomplete="off" placeholder="Почніть вводити назву послуги">
-        <datalist id="serviceOptions"></datalist>
+        <div class="combo">
+          <input id="serviceSearch" class="input" role="combobox" aria-expanded="false" aria-controls="serviceSuggest" aria-autocomplete="list" autocomplete="off" placeholder="Почніть вводити назву послуги">
+          <ul id="serviceSuggest" class="suggest" role="listbox" hidden></ul>
+        </div>
 
         <label class="step-label" for="dateInput">2. Дата</label>
         <input type="date" id="dateInput" class="input">

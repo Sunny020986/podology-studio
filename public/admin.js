@@ -80,6 +80,7 @@
     blocks: renderBlocks,
     services: renderServices,
     studio: renderStudio,
+    reviews: renderReviews,
   };
 
   function show(name) {
@@ -120,7 +121,7 @@
           <td>${esc(r.client_phone)}</td>
           <td>${esc(r.client_comment || '—')}</td>
           <td><select data-appt="${r.id}">${Object.entries(STATUS)
-            .map(([k, v]) => `<option value="${k}" ${k === r.status ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
+            .map(([k, v]) => `<option value="${k}" ${k === r.status ? 'selected' : ''}>${v}</option>`).join('')}</select>${apptArchive && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-review-link="${r.id}" title="Скопіювати посилання на форму відгуку">Відгук</button>` : ''}</td>
         </tr>`).join('')
       : `<tr><td colspan="6" class="muted">${apptArchive ? 'В архіві поки немає записів.' : 'Поточних і майбутніх записів немає.'}</td></tr>`;
   }
@@ -438,6 +439,25 @@
       </form>`;
   }
 
+  // ----- Відгуки -----
+  const REVIEW_STATUS = { pending: 'Чекає схвалення', approved: 'На сайті', hidden: 'Приховано' };
+  async function renderReviews() {
+    const list = await api('/api/admin/reviews');
+    const stars = (n) => '★'.repeat(n) + '☆'.repeat(5 - n);
+    $('#view').innerHTML =
+      '<p class="muted">Наступного дня після візиту бот надсилає клієнту посилання на відгук (якщо клієнт підключив Telegram). ' +
+      'На сайті видно лише відгуки зі статусом «На сайті». Посилання можна взяти й самому: «Записи» → «Архів» → «Відгук».</p>' +
+      '<table><thead><tr><th>Дата</th><th>Клієнт</th><th>Послуга</th><th>Оцінка</th><th style="width:38%">Текст</th><th>Статус</th><th></th></tr></thead><tbody>' +
+      (list.length ? list.map((r) => '<tr>' +
+        '<td>' + fmtDate(r.date) + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.service) + '</td>' +
+        '<td class="review-stars" aria-label="' + r.rating + ' з 5">' + stars(r.rating) + '</td>' +
+        '<td>' + (esc(r.text) || '<span class="muted">без тексту</span>') + '</td>' +
+        '<td><select data-review-status="' + r.id + '">' + Object.entries(REVIEW_STATUS).map(([k, v]) => '<option value="' + k + '"' + (k === r.status ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></td>' +
+        '<td><button class="btn btn-ghost small danger" type="button" data-del-review="' + r.id + '">Видалити</button></td></tr>').join('')
+        : '<tr><td colspan="7" class="muted">Відгуків поки немає.</td></tr>') +
+      '</tbody></table>';
+  }
+
   // ----- Кабінет: назва, адреса, телефон для сайту -----
   async function renderStudio() {
     const s = await api('/api/admin/studio');
@@ -463,6 +483,7 @@
         ${field('city', 'Місто', 80, 'Потрібне, щоб карта знайшла правильну вулицю')}
         ${field('address', 'Адреса', 200)}
         ${field('phone', 'Телефон', 40, 'На сайті стає посиланням: з телефона по ньому можна одразу подзвонити')}
+        ${field('site_url', 'Адреса сайту, наприклад https://podology.example.ua', 200, 'Потрібна для посилань у Telegram: відгуки, повторний візит, список очікування')}
         ${field('review_url', 'Посилання «Залишити відгук у Google»', 300, 'Google Профіль компанії → «Попросити відгуки» → скопіювати посилання. Порожнє поле ховає кнопку.')}
         <h3 class="studio-group">Акції</h3>
         ${area('promo_first', 'Знижка на перший візит', 400, 3, PROMO_HINT + ' Заголовок також показується плашкою на початку сторінки.')}
@@ -522,6 +543,10 @@
         notify('Збережено');
         return await loadClients();
       }
+      if (e.target.dataset.reviewStatus) {
+        await api('/api/admin/reviews/' + e.target.dataset.reviewStatus, { method: 'PATCH', body: { status: e.target.value } });
+        return notify('Статус відгуку змінено');
+      }
       if (e.target.id === 'blockDate') {
         blockDate = e.target.value;
         await renderBlocks();
@@ -556,6 +581,20 @@
       }
 
       if (e.target.id === 'clientsCsv') return await downloadClientsCsv();
+      if (e.target.dataset.delReview) {
+        if (!confirm('Видалити відгук назавжди?')) return;
+        await api('/api/admin/reviews/' + e.target.dataset.delReview, { method: 'DELETE' });
+        return await renderReviews();
+      }
+      if (e.target.dataset.reviewLink) {
+        const { link } = await api('/api/admin/appointments/' + e.target.dataset.reviewLink + '/review-link');
+        try {
+          await navigator.clipboard.writeText(link);
+          return notify('Посилання на відгук скопійовано');
+        } catch (err) {
+          return prompt('Скопіюйте посилання на відгук:', link);
+        }
+      }
       if (e.target.id === 'clientsActiveBtn' || e.target.id === 'clientsArchiveBtn') {
         clientsArchived = e.target.id === 'clientsArchiveBtn';
         return await renderClients();

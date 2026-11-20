@@ -524,3 +524,21 @@ html, body { overflow-x: clip; }       /* страховка: нічого не 
 .acc-hello p { margin: 0; }
 .acc-logout { display: inline-flex; align-items: center; gap: 6px; flex: none; }
 .acc-logout:hover { color: var(--danger); border-color: var(--danger); }
+
+/* Відгуки */
+.review { display: grid; gap: 10px; align-content: start; }
+.review-stars { color: #E2A93B; letter-spacing: 2px; font-size: 18px; white-space: nowrap; }
+.review-text { color: var(--ink); line-height: 1.6; white-space: pre-line; }
+.review-meta { font-size: 14px; color: var(--muted); }
+.review-page { max-width: 560px; margin: 0 auto; padding: 32px 16px 48px; }
+.review-home { display: inline-block; margin-bottom: 16px; color: var(--accent-text, var(--accent)); font-weight: 600; }
+.review-card { display: grid; gap: 10px; }
+.review-card h1 { font-size: 26px; }
+.stars-field { border: 0; padding: 0; margin: 8px 0 4px; }
+.stars { display: inline-flex; flex-direction: row-reverse; gap: 4px; }
+.stars input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.stars label { font-size: 40px; line-height: 1; color: var(--line); cursor: pointer; transition: color 0.15s, transform 0.15s; padding: 2px; }
+.stars input:checked ~ label, .stars label:hover, .stars label:hover ~ label { color: #E2A93B; }
+.stars label:hover { transform: scale(1.12); }
+.stars input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

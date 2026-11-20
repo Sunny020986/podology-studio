@@ -7,6 +7,7 @@ const { WebSocketServer } = require('ws');
 const { openDb, DB_PATH } = require('./db');
 const { createTelegram } = require('./telegram');
 const { setupAccounts, CHANGE_HOUR_OPTIONS } = require('./accounts');
+const { setupReviews } = require('./reviews');
 const { freeSlots, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -134,9 +135,14 @@ app.use(express.json({ limit: '100kb' }));
 // Повна адреса картинки береться із запиту, бо месенджери не розуміють відносних шляхів.
 const INDEX_HTML = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
 const attr = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// Адреса сайту для посилань у повідомленнях бота: з налаштувань кабінету, інакше остання, з якої відкривали сайт
+let lastOrigin = '';
+const siteUrl = () => readStudio().site_url || lastOrigin;
+
 app.get(['/', '/index.html'], (req, res) => {
   const s = readStudio();
   const origin = `${req.protocol}://${req.get('host')}`;
+  lastOrigin = origin; // запасна адреса сайту для посилань у Telegram, якщо в адмінці її не вказано
   const title = `${s.name}: онлайн-запис до подолога`;
   const place = [s.city, s.address].filter(Boolean).join(', ');
   const desc = ['Запис онлайн на вільний час, чат з майстром.', [place, s.phone].filter(Boolean).join(' · ')].filter(Boolean).join(' ');
@@ -168,7 +174,7 @@ app.get('/api/services', (req, res) => {
 const STUDIO_FIELDS = {
   name: 80, tagline: 120, address: 200, phone: 40, city: 80, review_url: 300,
   promo_first: 400, promo_friend: 400, promo_gift: 400, partners: 600,
-  master_name: 80, master_about: 2000, faq: 6000, stat_years: 6, stat_clients: 6,
+  master_name: 80, master_about: 2000, faq: 6000, stat_years: 6, stat_clients: 6, site_url: 200,
 };
 function readStudio() {
   const rows = db.prepare('SELECT key, value FROM settings').all();
@@ -276,6 +282,9 @@ app.post('/api/appointments', (req, res) => {
 // ---------- Адмін API ----------
 app.use('/api/admin', requireAdmin);
 
+// Відгуки: публічні маршрути і маршрути адмінки (останні вже під перевіркою доступу)
+setupReviews({ app, db, telegram, todayStr, siteUrl, last9 });
+
 // Налаштування годин для скасування й перенесення клієнтом (лише для адміна)
 app.get('/api/admin/change-hours', (req, res) => res.json({ hours: readChangeHours(), options: CHANGE_HOUR_OPTIONS }));
 app.put('/api/admin/change-hours', (req, res) => {
@@ -298,6 +307,9 @@ app.put('/api/admin/studio', (req, res) => {
   if (!clean.name) return res.status(400).json({ error: 'Назва кабінету не може бути порожньою' });
   for (const k of ['stat_years', 'stat_clients']) {
     if (clean[k] && !/^\d{1,6}$/.test(clean[k])) return res.status(400).json({ error: 'Років досвіду й кількість клієнтів: лише ціле число' });
+  }
+  if (clean.site_url && !/^https?:\/\/[^\s/]+(\/\S*)?$/.test(clean.site_url)) {
+    return res.status(400).json({ error: 'Адреса сайту має починатися з https:// (або http://)' });
   }
   if (clean.review_url && !/^https:\/\/\S+$/.test(clean.review_url)) {
     return res.status(400).json({ error: 'Посилання на відгук має починатися з https://' });

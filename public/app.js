@@ -364,6 +364,17 @@
   });
 
   connectChat();
+  // Схвалені відгуки клієнтів
+  fetch('/api/reviews').then((r) => r.json()).then((list) => {
+    if (!Array.isArray(list) || !list.length) return;
+    const stars = (n) => '★'.repeat(n) + '☆'.repeat(5 - n);
+    $('#reviewsList').innerHTML = list.map((r) => '<div class="card review">' +
+      '<div class="review-stars" role="img" aria-label="Оцінка ' + r.rating + ' з 5">' + stars(r.rating) + '</div>' +
+      (r.text ? '<div class="review-text">' + esc(r.text) + '</div>' : '') +
+      '<div class="review-meta">' + esc(r.name) + ' · ' + esc(r.service) + '</div></div>').join('');
+    $('#reviews').hidden = false;
+  }).catch(() => {});
+
   loadServices().catch(() => {
     $('#slotsHint').textContent = 'Не вдалося завантажити послуги. Перевірте, чи запущено сервер.';
   });

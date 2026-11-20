@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 const { createAccountTables } = require('./accounts');
+const { createReviewTables } = require('./reviews');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'studio.db');
 
@@ -121,6 +122,7 @@ function openDb() {
   if (!svcCols.includes('price_note')) db.exec("ALTER TABLE services ADD COLUMN price_note TEXT NOT NULL DEFAULT ''");
 
   createAccountTables(db);
+  createReviewTables(db);
   seed(db);
   seedSettings(db);
   migrateServicesV2(db);

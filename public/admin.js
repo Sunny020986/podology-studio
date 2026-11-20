@@ -105,7 +105,7 @@
         <button class="btn ${apptArchive ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptArchiveBtn">Архів</button>
       </div>
       <table>
-        <thead><tr><th>Дата</th><th>Час</th><th>Послуга</th><th>Клієнт</th><th>Телефон</th><th>Статус</th></tr></thead>
+        <thead><tr><th>Дата</th><th>Час</th><th>Послуга</th><th>Клієнт</th><th>Телефон</th><th>Коментар клієнта</th><th>Статус</th></tr></thead>
         <tbody id="apptRows"></tbody>
       </table>`;
     let rows = await api(`/api/admin/appointments?from=${from}&to=${to}`);
@@ -117,6 +117,7 @@
           <td>${esc(r.service)}</td>
           <td>${esc(r.client_name)}</td>
           <td>${esc(r.client_phone)}</td>
+          <td>${esc(r.client_comment || '—')}</td>
           <td><select data-appt="${r.id}">${Object.entries(STATUS)
             .map(([k, v]) => `<option value="${k}" ${k === r.status ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
         </tr>`).join('')

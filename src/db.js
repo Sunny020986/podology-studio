@@ -93,6 +93,8 @@ function openDb() {
   // Нотатка майстра до окремого візиту: колонка додається до баз, створених раніше
   const apptCols = db.prepare('PRAGMA table_info(appointments)').all().map((c) => c.name);
   if (!apptCols.includes('note')) db.exec("ALTER TABLE appointments ADD COLUMN note TEXT NOT NULL DEFAULT ''");
+  // Коментар клієнта при записі (побажання тощо); його бачить майстер, на відміну від приватної нотатки
+  if (!apptCols.includes('client_comment')) db.exec("ALTER TABLE appointments ADD COLUMN client_comment TEXT NOT NULL DEFAULT ''");
   // Нагадування в Telegram: код для посилання, чат клієнта, чи вже нагадали
   if (!apptCols.includes('remind_code')) db.exec('ALTER TABLE appointments ADD COLUMN remind_code TEXT');
   if (!apptCols.includes('tg_chat_id')) db.exec('ALTER TABLE appointments ADD COLUMN tg_chat_id TEXT');

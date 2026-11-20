@@ -59,7 +59,7 @@ function bufferMin(db) {
   return Number.isInteger(n) && n > 0 ? n : 0;
 }
 
-function freeSlots(db, dateStr, durationMin) {
+function freeSlots(db, dateStr, durationMin, excludeId = 0) {
   const hours = db.prepare('SELECT start_time, end_time FROM work_hours WHERE weekday = ?').get(weekdayOf(dateStr));
   if (!hours || !hours.start_time) return [];
 
@@ -68,7 +68,7 @@ function freeSlots(db, dateStr, durationMin) {
   const buffer = bufferMin(db);
 
   const busy = [
-    ...db.prepare("SELECT start_time AS s, end_time AS e FROM appointments WHERE date = ? AND status != 'cancelled'").all(dateStr)
+    ...db.prepare("SELECT start_time AS s, end_time AS e FROM appointments WHERE date = ? AND status != 'cancelled' AND id != ?").all(dateStr, excludeId)
       .map((r) => ({ s: r.s, e: toHHMM(toMin(r.e) + buffer) })), // після візиту лишається час на прибирання
     ...db.prepare('SELECT start_time AS s, end_time AS e FROM blocks WHERE date = ?').all(dateStr),
     ...db.prepare('SELECT start_time AS s, end_time AS e FROM breaks WHERE weekday = ?').all(weekdayOf(dateStr)),

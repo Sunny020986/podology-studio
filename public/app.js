@@ -201,7 +201,14 @@
     state.serviceId = s.id;
     pickNearestDate();
   }
-  serviceInput.addEventListener('focus', () => { serviceInput.select(); renderSuggest(''); });
+  const touchScreen = window.matchMedia('(pointer: coarse)').matches;
+  serviceInput.addEventListener('focus', () => {
+    // На телефоні виділення тексту відкриває меню «Копіювати/Вставити», тож лише показуємо список
+    if (!touchScreen) serviceInput.select();
+    renderSuggest('');
+    // Клавіатура телефона закриває пів екрана: піднімаємо поле, щоб список підказок був видно
+    if (touchScreen) setTimeout(() => serviceInput.scrollIntoView({ block: 'start', behavior: 'smooth' }), 350);
+  });
   serviceInput.addEventListener('input', () => renderSuggest(serviceInput.value));
   serviceInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') { serviceInput.value = currentName(); closeSuggest(); } });
   suggest.addEventListener('click', (e) => {

@@ -83,7 +83,14 @@
       }
     }
 
+    // На телефоні наведення немає: хвиля з'являється одразу від дотику
+    offersList.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse') return;
+      const card = e.target.closest('.offer');
+      if (card) dropRipple(card, e.clientX, e.clientY);
+    });
     offersList.addEventListener('pointermove', (e) => {
+      if (e.pointerType !== 'mouse') return;
       lastX = e.clientX;
       lastY = e.clientY;
       const card = e.target.closest('.offer');
@@ -155,7 +162,9 @@
     hideTimer = setTimeout(hideNav, IDLE_MS);
   }
 
-  window.addEventListener('mousemove', (e) => {
+  window.addEventListener('pointermove', (e) => {
+    // Лише справжня миша: дотик на телефоні теж породжує подію руху, і шапка «застрягала» видною
+    if (e.pointerType !== 'mouse') return;
     // Після прокрутки браузер сам надсилає подію руху з тими самими координатами: її пропускаємо
     if (e.clientX === lastMouse.x && e.clientY === lastMouse.y) return;
     lastMouse = { x: e.clientX, y: e.clientY };

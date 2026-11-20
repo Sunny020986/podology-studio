@@ -202,7 +202,7 @@ app.get('/api/next-slot', (req, res) => {
 // Перевірка вільного часу і запис виконуються в одній транзакції, тому два клієнти не займуть один слот.
 const last9 = (phone) => phone.replace(/\D/g, '').slice(-9); // номер без коду країни, щоб +380 50... і 050... збігалися
 
-const bookTx = db.transaction(({ service, date, time, name, phone }) => {
+const bookTx = db.transaction(({ service, date, time, name, phone, comment }) => {
   const samePhone = db
     .prepare("SELECT client_phone FROM appointments WHERE date >= ? AND status != 'cancelled'")
     .all(todayStr())
@@ -220,13 +220,13 @@ const bookTx = db.transaction(({ service, date, time, name, phone }) => {
   const end = toHHMM(toMin(time) + service.duration_min);
   const remindCode = 'r' + crypto.randomBytes(9).toString('base64url');
   const info = db
-    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(service.id, date, time, end, name, phone, remindCode);
+    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code, client_comment) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(service.id, date, time, end, name, phone, remindCode, comment ?? '');
   return { id: info.lastInsertRowid, remindCode };
 });
 
 app.post('/api/appointments', (req, res) => {
-  const { serviceId, date, time, name, phone } = req.body || {};
+  const { serviceId, date, time, name, phone, comment } = req.body || {};
   const service = db.prepare('SELECT * FROM services WHERE id = ? AND active = 1').get(Number(serviceId));
   if (!service) return res.status(400).json({ error: 'Невідома послуга' });
   if (!isBookableDate(date, HORIZON_DAYS)) return res.status(400).json({ error: `Запис відкрито від сьогодні до ${maxDateStr(HORIZON_DAYS)}` });
@@ -246,9 +246,10 @@ app.post('/api/appointments', (req, res) => {
   }
 
   try {
-    const { id, remindCode } = bookTx({ service, date, time, name: cleanName, phone: cleanPhone });
+    const cleanComment = String(comment ?? '').trim().slice(0, 500);
+    const { id, remindCode } = bookTx({ service, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment });
     bookingLimiter.hit(req.ip);
-    telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone });
+    telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment });
     res.status(201).json({ id: Number(id), date, time, service: service.name, remindLink: telegram.remindLink(remindCode) });
   } catch (e) {
     if (e.status) return res.status(e.status).json({ error: e.message });
@@ -299,7 +300,7 @@ app.get('/api/admin/appointments', (req, res) => {
   const to = isValidDate(req.query.to) ? req.query.to : from;
   res.json(
     db
-      .prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.client_name, a.client_phone, a.status, s.name AS service
+      .prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.client_name, a.client_phone, a.status, a.client_comment, s.name AS service
                 FROM appointments a JOIN services s ON s.id = a.service_id
                 WHERE a.date BETWEEN ? AND ? ORDER BY a.date, a.start_time`)
       .all(from, to)

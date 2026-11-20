@@ -243,6 +243,7 @@
       time: state.time,
       name: $('#nameInput').value,
       phone: $('#phoneInput').value,
+      comment: $('#commentInput').value,
     };
     // Кнопка вимкнена, поки сервер не відповів: повторне натискання не надішле другий запит
     const btn = $('#submitBtn');

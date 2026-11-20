@@ -504,3 +504,17 @@ html, body { overflow-x: clip; }       /* страховка: нічого не 
 .pass-eye .eye-closed { display: none; }
 .pass-eye.is-visible .eye-open { display: none; }
 .pass-eye.is-visible .eye-closed { display: block; }
+
+/* Кнопка кабінету після входу: ім'я клієнта з м'яким світінням */
+#accountBtn { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#accountBtn.acc-logged {
+  color: var(--accent-text, var(--accent)); border-color: var(--accent);
+  background: rgba(142, 216, 198, 0.16);
+  box-shadow: 0 0 0 3px rgba(142, 216, 198, 0.22), 0 0 14px rgba(142, 216, 198, 0.45);
+}
+#accountBtn.acc-logged::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: var(--accent); box-shadow: 0 0 6px var(--accent); flex: none; }
+.fx #accountBtn.acc-logged { animation: acc-glow 2.8s ease-in-out infinite; }
+@keyframes acc-glow {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(142, 216, 198, 0.18), 0 0 10px rgba(142, 216, 198, 0.35); }
+  50% { box-shadow: 0 0 0 3px rgba(142, 216, 198, 0.3), 0 0 18px rgba(142, 216, 198, 0.6); }
+}

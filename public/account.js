@@ -40,6 +40,18 @@
     document.body.style.overflow = '';
   }
   $('#accountBtn').addEventListener('click', open);
+
+  // Кнопка в шапці: після входу на ній світиться ім'я клієнта
+  function updateHeader() {
+    const btn = $('#accountBtn');
+    const name = state.me ? state.me.name.trim().split(/\s+/)[0] : '';
+    btn.classList.toggle('acc-logged', !!state.me);
+    btn.textContent = name || 'Кабінет';
+    btn.title = state.me ? 'Особистий кабінет: ' + state.me.name : '';
+    btn.setAttribute('aria-label', state.me ? 'Особистий кабінет, ' + state.me.name : 'Особистий кабінет');
+  }
+  // Одразу після завантаження сторінки перевіряємо, чи клієнт уже увійшов
+  api('/api/account/me').then((me) => { state.me = me; updateHeader(); }).catch(() => {});
   $('#accClose').addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.hidden) close(); });
@@ -50,6 +62,7 @@
     } catch (e) {
       state.me = null;
     }
+    updateHeader();
     if (state.me) return renderHome();
     renderAuth();
   }
@@ -200,6 +213,7 @@
       if (a === 'logout') {
         await api('/api/account/logout', { method: 'POST' });
         state.me = null;
+        updateHeader();
         return renderAuth();
       }
       if (a === 'tg-link') {

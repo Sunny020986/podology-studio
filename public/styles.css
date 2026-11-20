@@ -9,6 +9,7 @@
   --accent-ink: #13201D;  /* темний текст на м'ятних кнопках */
   --accent-text: #23786A; /* м'ятний для тексту на світлому фоні */
   --lilac: #B9A7EA;       /* ліловий акцент */
+  --teal: #14857F;        /* зелено-блакитний для наведення в меню */
   --danger: #B5485D;
   --ok: #23786A;
   --field: #FFFFFF;       /* тло полів введення */
@@ -64,8 +65,8 @@ a { color: inherit; text-decoration: none; }
 }
 .brand { font-size: 20px; font-weight: 700; }
 .nav-links { display: flex; gap: 32px; font-size: 15px; color: var(--muted); }
-.nav-links a { display: inline-flex; align-items: center; gap: 8px; }
-.nav-links a:hover { color: var(--ink); }
+.nav-links a { display: inline-flex; align-items: center; gap: 8px; transition: color 0.35s ease; }
+.nav-links a:hover, .nav-links a:focus-visible { color: var(--teal); }
 .nav-links svg { flex: none; }
 
 /* Головний екран */
@@ -312,6 +313,7 @@ textarea.input { resize: vertical; min-height: 96px; }
   --accent-ink: #13201D;
   --accent-text: #8ED8C6;
   --lilac: #C5B4F5;
+  --teal: #5FD6CF;
   --danger: #F08A9B;
   --ok: #8ED8C6;
   --field: #161422;

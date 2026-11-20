@@ -90,7 +90,7 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
   const canChange = (a) => a.status !== 'cancelled' && hoursUntil(a.date, a.start_time) >= changeHours();
 
   const accountPhoneAppts = (acc) => db.prepare(`
-      SELECT a.id, a.date, a.start_time, a.end_time, a.client_phone, a.status, s.name AS service, s.duration_min
+      SELECT a.id, a.date, a.start_time, a.end_time, a.client_phone, a.status, s.id AS service_id, s.name AS service, s.duration_min
       FROM appointments a JOIN services s ON s.id = a.service_id ORDER BY a.date DESC, a.start_time DESC`)
     .all().filter((a) => last9(a.client_phone) === last9(acc.phone));
 
@@ -145,7 +145,7 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
   app.get('/api/account/appointments', requireAccount, (req, res) => {
     const today = todayStr();
     res.json(accountPhoneAppts(req.account).map((a) => ({
-      id: a.id, date: a.date, start_time: a.start_time, end_time: a.end_time, status: a.status,
+      id: a.id, service_id: a.service_id, date: a.date, start_time: a.start_time, end_time: a.end_time, status: a.status,
       service: a.service, upcoming: a.date >= today && a.status !== 'cancelled', canChange: canChange(a),
     })));
   });

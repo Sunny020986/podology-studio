@@ -437,3 +437,56 @@ html, body { overflow-x: clip; }       /* страховка: нічого не 
   .chat-admin { grid-template-columns: 1fr; }
   .conv-list { max-height: 220px; }
 }
+
+/* ===== Набір ефектів (effects.js) ===== */
+/* Питання: відповідь плавно висувається */
+.fx .faq-answer { overflow: hidden; }
+
+/* Смужка прогресу запису */
+.book-progress { height: 4px; border-radius: 999px; background: var(--line); overflow: hidden; margin: -6px 0 18px; }
+.book-progress span { display: block; height: 100%; width: 0; border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--lilac, #B9A7EA)); transition: width 0.45s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.book-progress.full span { box-shadow: 0 0 10px rgba(142, 216, 198, 0.7); }
+
+/* Іскорки на головному екрані */
+.hero.has-sparkles { position: relative; isolation: isolate; overflow: hidden; }
+.sparkle { position: absolute; z-index: -1; border-radius: 50%; pointer-events: none;
+  background: rgba(110, 205, 185, 0.85); box-shadow: 0 0 8px rgba(110, 205, 185, 0.8);
+  animation: sparkle-float 6s ease-in-out infinite; }
+.sparkle.lilac { background: rgba(185, 167, 234, 0.9); box-shadow: 0 0 8px rgba(185, 167, 234, 0.85); }
+@keyframes sparkle-float {
+  0% { transform: translateY(0) scale(0.6); opacity: 0; }
+  20% { opacity: 1; }
+  80% { opacity: 0.8; }
+  100% { transform: translateY(-60px) scale(1); opacity: 0; }
+}
+
+/* Лінія під заголовками розділів */
+.fx .section h2 { position: relative; display: inline-block; }
+.fx .section h2::after { content: ''; position: absolute; left: 0; bottom: -6px; width: 100%; height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--lilac, #B9A7EA)); transform: scaleX(0); transform-origin: left;
+  transition: transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) 0.15s; }
+.fx .section h2.drawn::after { transform: scaleX(1); }
+
+/* М'яке світло за курсором на картках послуг */
+.fx .service { background-image: radial-gradient(220px circle at var(--mx, -300px) var(--my, -300px), rgba(142, 216, 198, 0.22), transparent 65%); }
+
+/* Вибраний час: галочка і короткий пульс */
+.slot.selected::before { content: '✓ '; }
+.fx .slot.selected { animation: slot-pick 0.35s ease; }
+@keyframes slot-pick { 0% { transform: scale(1); } 40% { transform: scale(1.08); } 100% { transform: scale(1); } }
+
+/* Кнопка чату похитується один раз */
+.chat-fab.nudge { animation: fab-nudge 0.9s ease-in-out; }
+@keyframes fab-nudge {
+  0%, 100% { transform: rotate(0); }
+  15% { transform: rotate(-6deg); } 30% { transform: rotate(5deg); }
+  45% { transform: rotate(-4deg); } 60% { transform: rotate(3deg); } 75% { transform: rotate(-1deg); }
+}
+
+/* Лічильники в «Про майстра» */
+.stats { display: flex; gap: 32px; flex-wrap: wrap; margin-top: 16px; }
+.stats[hidden] { display: none; }
+.stat { display: grid; gap: 2px; }
+.stat-num { font-size: 34px; font-weight: 700; line-height: 1.1; color: var(--accent-text, var(--accent)); font-variant-numeric: tabular-nums; }
+.stat span { font-size: 14px; color: var(--muted); }

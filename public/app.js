@@ -52,7 +52,15 @@
       <div class="card offer"><div class="offer-icon">${o.icon}</div>
         <div class="offer-title">${esc(o.title)}</div><div class="offer-text">${esc(o.text)}</div></div>`).join('');
 
-    $('#about').hidden = !(S.master_name || S.master_about);
+    // Лічильники: показуються лише заповнені числа з адмінки
+    const plural = (n, one, few, many) => (n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many);
+    const stats = [
+      [Number(S.stat_years), (n) => plural(n, 'рік досвіду', 'роки досвіду', 'років досвіду')],
+      [Number(S.stat_clients), (n) => plural(n, 'задоволений клієнт', 'задоволені клієнти', 'задоволених клієнтів')],
+    ].filter(([n]) => Number.isInteger(n) && n > 0);
+    $('#masterStats').hidden = !stats.length;
+    $('#masterStats').innerHTML = stats.map(([n, label]) => '<div class="stat"><b class="stat-num" data-count="' + n + '">' + n.toLocaleString('uk-UA') + '</b><span>' + label(n) + '</span></div>').join('');
+    $('#about').hidden = !(S.master_name || S.master_about || stats.length);
     $('#masterName').textContent = S.master_name || '';
     $('#masterAbout').textContent = S.master_about || '';
 

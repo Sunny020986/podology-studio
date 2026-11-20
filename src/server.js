@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { openDb, DB_PATH } = require('./db');
 const { createTelegram } = require('./telegram');
+const { setupAccounts, CHANGE_HOUR_OPTIONS } = require('./accounts');
 const { freeSlots, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -225,6 +226,26 @@ const bookTx = db.transaction(({ service, date, time, name, phone }) => {
   return { id: info.lastInsertRowid, remindCode };
 });
 
+// Скільки годин до візиту клієнт може сам скасувати чи перенести запис (налаштовується в адмінці)
+const DEFAULT_CHANGE_HOURS = 24;
+function readChangeHours() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'change_hours'").get();
+  const n = Number(row?.value);
+  return CHANGE_HOUR_OPTIONS.includes(n) ? n : DEFAULT_CHANGE_HOURS;
+}
+const accounts = setupAccounts({
+  app, db, telegram, freeSlots, todayStr, isBookableDate, isTime,
+  horizonDays: HORIZON_DAYS, makeLimiter, notifyMaster: (t) => telegram.notifyMaster(t), changeHours: readChangeHours,
+});
+
+app.get('/api/admin/change-hours', (req, res) => res.json({ hours: readChangeHours(), options: CHANGE_HOUR_OPTIONS }));
+app.put('/api/admin/change-hours', (req, res) => {
+  const n = Number(req.body?.hours);
+  if (!CHANGE_HOUR_OPTIONS.includes(n)) return res.status(400).json({ error: 'Оберіть один із варіантів: ' + CHANGE_HOUR_OPTIONS.join(', ') + ' год' });
+  db.prepare("INSERT INTO settings (key, value) VALUES ('change_hours', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(n));
+  res.json({ hours: n });
+});
+
 app.post('/api/appointments', (req, res) => {
   const { serviceId, date, time, name, phone } = req.body || {};
   const service = db.prepare('SELECT * FROM services WHERE id = ? AND active = 1').get(Number(serviceId));
@@ -346,6 +367,7 @@ const studioLine = () => {
 
 // Клієнт натиснув «Start» за посиланням із сайту: прив'язуємо його чат до запису
 telegram.onStart((code, chatId) => {
+  if (code.startsWith('acc_')) return accounts.linkTelegram(code.slice(4), chatId);
   const a = apptForClient('a.remind_code = ?', code);
   if (!a) return 'Не знайшли цей запис. Можливо, посилання застаріло. Запишіться на сайті ще раз або подзвоніть нам.';
   if (a.status === 'cancelled') return 'Цей запис скасовано. Щоб записатися знову, скористайтеся сайтом.';

@@ -281,6 +281,8 @@
   async function renderSchedule() {
     const rows = await api('/api/admin/schedule');
     const { minutes: bufferMin } = await api('/api/admin/buffer');
+    const { hours: changeHours, options: changeOptions } = await api('/api/admin/change-hours');
+    const changeOpts = changeOptions.map((h) => `<option value="${h}" ${h === changeHours ? 'selected' : ''}>${h} год</option>`).join('');
     $('#view').innerHTML = `
       <h3 style="margin-bottom:12px">Робочі години</h3>
       <table>
@@ -301,6 +303,13 @@
         <button class="btn btn-primary small" type="submit">Зберегти прибирання</button>
       </form>
 
+      <h3 style="margin:32px 0 6px">Скасування і перенесення клієнтом</h3>
+      <div class="muted">За скільки годин до візиту клієнт може сам скасувати чи перенести запис у своєму кабінеті. Пізніше він має писати оператору в чат.</div>
+      <form class="inline-form" id="changeHoursForm">
+        <label>Не пізніше ніж за <select name="hours" id="changeHoursSelect">${changeOpts}</select></label>
+        <button class="btn btn-primary small" type="submit">Зберегти</button>
+      </form>
+
       <h3 style="margin:32px 0 6px">Перерви</h3>
       <div class="muted">Перерва повторюється щотижня у позначені дні. На цей час клієнти записатися не зможуть.</div>
       <form class="inline-form" id="breakForm">
@@ -312,6 +321,15 @@
       </form>
       <ul class="list" id="breakList"></ul>`;
     await renderBreaks();
+    $('#changeHoursForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api('/api/admin/change-hours', { method: 'PUT', body: { hours: Number($('#changeHoursSelect').value) } });
+        notify('Збережено');
+      } catch (err) {
+        notify(err.message, true);
+      }
+    });
     $('#bufferForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       try {

@@ -206,7 +206,7 @@ function createTelegram(db) {
 
   return {
     status, save, clear, detect, test, newAppointment, newChatMessage,
-    sendToClient, remindLink, onStart, fmtDate,
+    sendToClient, remindLink, onStart, fmtDate, notifyMaster: (text) => fire(text),
   };
 }
 

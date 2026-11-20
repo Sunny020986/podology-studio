@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
+const { createAccountTables } = require('./accounts');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'studio.db');
 
@@ -97,6 +98,7 @@ function openDb() {
   if (!apptCols.includes('tg_chat_id')) db.exec('ALTER TABLE appointments ADD COLUMN tg_chat_id TEXT');
   if (!apptCols.includes('reminded')) db.exec('ALTER TABLE appointments ADD COLUMN reminded INTEGER NOT NULL DEFAULT 0');
 
+  createAccountTables(db);
   seed(db);
   seedSettings(db);
   migrateServicesV2(db);

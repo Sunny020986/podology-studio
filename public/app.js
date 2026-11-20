@@ -85,8 +85,9 @@
   async function loadServices() {
     const r = await fetch('/api/services');
     state.services = await r.json();
-    $('#serviceSelect').innerHTML = state.services
-      .map((s) => `<option value="${s.id}">${esc(s.name)} · ${durText(s.duration_min)}</option>`).join('');
+    // Пошук послуги: поле з підказками (datalist) фільтрує список, коли клієнт друкує
+    $('#serviceOptions').innerHTML = state.services
+      .map((s) => `<option value="${esc(s.name)}">${durText(s.duration_min)}</option>`).join('');
     $('#servicesList').innerHTML = state.services.map((s) => `
       <button class="service" type="button" data-id="${s.id}">
         <span class="service-name">${esc(s.name)}</span>
@@ -95,7 +96,7 @@
       </button>`).join('');
     setupServicesMore();
     state.serviceId = state.services[0]?.id ?? null;
-    $('#serviceSelect').value = state.serviceId ?? '';
+    $('#serviceSearch').value = state.services.find((s) => s.id === state.serviceId)?.name ?? '';
     $('#dateInput').min = today();
     settingsReady.then((cfg) => { if (cfg.maxDate) $('#dateInput').max = cfg.maxDate; });
     $('#dateInput').value = state.date;
@@ -172,13 +173,22 @@
     const card = e.target.closest('[data-id]');
     if (!card) return;
     state.serviceId = Number(card.dataset.id);
-    $('#serviceSelect').value = state.serviceId;
+    $('#serviceSearch').value = card.querySelector('.service-name')?.textContent ?? '';
     pickNearestDate();
     $('#booking').scrollIntoView({ behavior: 'smooth' });
   });
 
-  $('#serviceSelect').addEventListener('change', (e) => {
-    state.serviceId = Number(e.target.value);
+  // Вибір послуги: точна назва з підказок або введена вручну. Якщо назву не знайдено, повертаємо попередню
+  const serviceInput = $('#serviceSearch');
+  const findService = (text) => state.services.find((s) => s.name.toLowerCase() === text.trim().toLowerCase());
+  serviceInput.addEventListener('change', () => {
+    const s = findService(serviceInput.value);
+    if (!s) {
+      serviceInput.value = state.services.find((x) => x.id === state.serviceId)?.name ?? '';
+      return;
+    }
+    if (s.id === state.serviceId) return;
+    state.serviceId = s.id;
     pickNearestDate();
   });
 

@@ -280,6 +280,7 @@
   // ----- Розклад -----
   async function renderSchedule() {
     const rows = await api('/api/admin/schedule');
+    const { minutes: bufferMin } = await api('/api/admin/buffer');
     $('#view').innerHTML = `
       <h3 style="margin-bottom:12px">Робочі години</h3>
       <table>
@@ -293,6 +294,13 @@
       </table>
       <button class="btn btn-primary" id="saveSchedule" type="button">Зберегти розклад</button>
 
+      <h3 style="margin:32px 0 6px">Прибирання між клієнтами</h3>
+      <div class="muted">Цей час резервується після кожного візиту, щоб лишився час прибрати робоче місце. Клієнти на нього не запишуться.</div>
+      <form class="inline-form" id="bufferForm">
+        <label>Після кожного візиту <select name="minutes" id="bufferMinutes">${[0, 15, 30, 45, 60].map((m) => `<option value="${m}" ${m === bufferMin ? 'selected' : ''}>${m ? m + ' хв' : 'не резервувати'}</option>`).join('')}</select></label>
+        <button class="btn btn-primary small" type="submit">Зберегти прибирання</button>
+      </form>
+
       <h3 style="margin:32px 0 6px">Перерви</h3>
       <div class="muted">Перерва повторюється щотижня у позначені дні. На цей час клієнти записатися не зможуть.</div>
       <form class="inline-form" id="breakForm">
@@ -304,6 +312,15 @@
       </form>
       <ul class="list" id="breakList"></ul>`;
     await renderBreaks();
+    $('#bufferForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api('/api/admin/buffer', { method: 'PUT', body: { minutes: Number($('#bufferMinutes').value) } });
+        notify('Прибирання збережено');
+      } catch (err) {
+        notify(err.message, true);
+      }
+    });
     $('#saveSchedule').addEventListener('click', async () => {
       try {
         for (const tr of document.querySelectorAll('[data-wd]')) {

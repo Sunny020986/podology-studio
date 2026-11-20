@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { openDb, DB_PATH } = require('./db');
 const { createTelegram } = require('./telegram');
-const { freeSlots, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
+const { freeSlots, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -494,6 +494,16 @@ app.patch('/api/admin/services/:id', (req, res) => {
   if (v.error) return res.status(400).json({ error: v.error });
   if (!updateRow('services', Number(req.params.id), v.data)) return res.status(404).json({ error: 'Послугу не знайдено' });
   res.json({ ok: true });
+});
+
+// Прибирання робочого місця між клієнтами: хвилини, що резервуються після кожного візиту
+app.get('/api/admin/buffer', (req, res) => res.json({ minutes: bufferMin(db) }));
+
+app.put('/api/admin/buffer', (req, res) => {
+  const n = Number(req.body?.minutes);
+  if (!Number.isInteger(n) || n < 0 || n > 120) return res.status(400).json({ error: 'Прибирання: від 0 до 120 хвилин' });
+  db.prepare("INSERT INTO settings (key, value) VALUES ('buffer_min', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(n));
+  res.json({ minutes: n });
 });
 
 app.get('/api/admin/schedule', (req, res) => {

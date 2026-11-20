@@ -168,7 +168,7 @@ app.get('/api/services', (req, res) => {
 const STUDIO_FIELDS = {
   name: 80, tagline: 120, address: 200, phone: 40, city: 80, review_url: 300,
   promo_first: 400, promo_friend: 400, promo_gift: 400, partners: 600,
-  master_name: 80, master_about: 2000, faq: 6000,
+  master_name: 80, master_about: 2000, faq: 6000, stat_years: 6, stat_clients: 6,
 };
 function readStudio() {
   const rows = db.prepare('SELECT key, value FROM settings').all();
@@ -294,6 +294,9 @@ app.put('/api/admin/studio', (req, res) => {
     clean[k] = v;
   }
   if (!clean.name) return res.status(400).json({ error: 'Назва кабінету не може бути порожньою' });
+  for (const k of ['stat_years', 'stat_clients']) {
+    if (clean[k] && !/^\d{1,6}$/.test(clean[k])) return res.status(400).json({ error: 'Років досвіду й кількість клієнтів: лише ціле число' });
+  }
   if (clean.review_url && !/^https:\/\/\S+$/.test(clean.review_url)) {
     return res.status(400).json({ error: 'Посилання на відгук має починатися з https://' });
   }

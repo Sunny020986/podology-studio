@@ -113,7 +113,11 @@
   let tilted = null;
 
   function resetTilt() {
-    if (tilted) tilted.style.transform = '';
+    if (tilted) {
+      tilted.style.transform = '';
+      tilted.style.removeProperty('--mx');
+      tilted.style.removeProperty('--my');
+    }
     tilted = null;
   }
 
@@ -126,6 +130,8 @@
     const r = card.getBoundingClientRect();
     const x = (e.clientX - r.left) / r.width - 0.5;  // від -0.5 до 0.5
     const y = (e.clientY - r.top) / r.height - 0.5;
+    card.style.setProperty('--mx', (e.clientX - r.left) + 'px'); // світло за курсором
+    card.style.setProperty('--my', (e.clientY - r.top) + 'px');
     card.style.transform =
       `perspective(700px) rotateX(${(-y * 2 * MAX_TILT_DEG).toFixed(2)}deg) rotateY(${(x * 2 * MAX_TILT_DEG).toFixed(2)}deg) translateY(-3px)`;
   });
@@ -251,4 +257,123 @@
     confetti(r.left + r.width / 2, r.top);
     document.getElementById('bookingMsg').classList.add('pop');
   });
+
+  // ----- 7. Плавне розкриття питань і відповідей -----
+  document.addEventListener('click', (e) => {
+    const sum = e.target.closest('.faq-item > summary');
+    if (!sum) return;
+    const item = sum.parentElement;
+    const ans = item.querySelector('.faq-answer');
+    if (!ans) return;
+    e.preventDefault();
+    if (item.dataset.animating) return;
+    item.dataset.animating = '1';
+    if (!item.open) {
+      item.open = true;
+      const h = ans.scrollHeight;
+      ans.animate([{ height: '0px', opacity: 0 }, { height: h + 'px', opacity: 1 }], { duration: 300, easing: 'ease-out' })
+        .onfinish = () => { delete item.dataset.animating; };
+    } else {
+      const h = ans.scrollHeight;
+      ans.animate([{ height: h + 'px', opacity: 1 }, { height: '0px', opacity: 0 }], { duration: 250, easing: 'ease-in' })
+        .onfinish = () => { item.open = false; delete item.dataset.animating; };
+    }
+  });
+
+  // ----- 8. Смужка прогресу запису: 4 кроки по 25% -----
+  const bookingSection = document.getElementById('booking');
+  const bookingCard = bookingSection && bookingSection.querySelector('.booking-grid .card');
+  if (bookingCard) {
+    const wrap = document.createElement('div');
+    wrap.className = 'book-progress';
+    wrap.setAttribute('role', 'progressbar');
+    wrap.setAttribute('aria-label', 'Заповнення запису');
+    wrap.setAttribute('aria-valuemin', '0');
+    wrap.setAttribute('aria-valuemax', '100');
+    const fill = document.createElement('span');
+    wrap.appendChild(fill);
+    bookingCard.prepend(wrap);
+    const val = (id) => (document.getElementById(id)?.value || '').trim();
+    const updateProgress = () => {
+      const done = [
+        !!(val('serviceSearch') || val('serviceSelect')),
+        !!val('dateInput'),
+        !!document.querySelector('#slotsGrid .slot.selected'),
+        val('nameInput').length >= 2 && val('phoneInput').replace(/\D/g, '').length >= 9,
+      ].filter(Boolean).length;
+      const pct = done * 25;
+      fill.style.width = pct + '%';
+      wrap.setAttribute('aria-valuenow', String(pct));
+      wrap.classList.toggle('full', pct === 100);
+    };
+    ['input', 'change', 'click'].forEach((ev) => bookingSection.addEventListener(ev, () => requestAnimationFrame(updateProgress)));
+    const grid = document.getElementById('slotsGrid');
+    if (grid) new MutationObserver(updateProgress).observe(grid, { childList: true, subtree: true, attributes: true });
+    updateProgress();
+    setTimeout(updateProgress, 1500); // послуга й дата підставляються після завантаження
+  }
+
+  // ----- 9. Іскорки на головному екрані -----
+  const heroEl = document.querySelector('.hero');
+  if (heroEl) {
+    heroEl.classList.add('has-sparkles');
+    const SPARKLES = 14;
+    for (let i = 0; i < SPARKLES; i++) {
+      const s = document.createElement('span');
+      s.className = 'sparkle' + (i % 2 ? ' lilac' : '');
+      s.setAttribute('aria-hidden', 'true');
+      const size = 3 + Math.random() * 4;
+      s.style.width = s.style.height = size.toFixed(1) + 'px';
+      s.style.left = (45 + Math.random() * 50).toFixed(1) + '%';
+      s.style.top = (20 + Math.random() * 70).toFixed(1) + '%';
+      s.style.animationDuration = (4 + Math.random() * 4).toFixed(1) + 's';
+      s.style.animationDelay = (-Math.random() * 8).toFixed(1) + 's';
+      heroEl.appendChild(s);
+    }
+  }
+
+  // ----- 10. Лінія під заголовками розділів промальовується при появі -----
+  const lineIo = new IntersectionObserver((entries) => {
+    entries.forEach((en) => {
+      if (!en.isIntersecting) return;
+      en.target.classList.add('drawn');
+      lineIo.unobserve(en.target);
+    });
+  }, { threshold: 0.6 });
+  document.querySelectorAll('.section h2').forEach((h) => lineIo.observe(h));
+
+  // ----- 11. Кнопка чату один раз привертає увагу через 20 секунд -----
+  setTimeout(() => {
+    const fab = document.getElementById('chatFab');
+    const panel = document.getElementById('chatPanel');
+    if (!fab || (panel && !panel.hidden)) return;
+    fab.classList.add('nudge');
+    fab.addEventListener('animationend', () => fab.classList.remove('nudge'), { once: true });
+  }, 20000);
+
+  // ----- 12. Лічильники в «Про майстра» рахують від нуля, коли блок з'являється -----
+  const COUNT_MS = 1200;
+  const countIo = new IntersectionObserver((entries) => {
+    entries.forEach((en) => {
+      if (!en.isIntersecting) return;
+      countIo.unobserve(en.target);
+      const el = en.target;
+      const target = Number(el.dataset.count) || 0;
+      const t0 = performance.now();
+      const step = (t) => {
+        const k = Math.min(1, (t - t0) / COUNT_MS);
+        const eased = 1 - Math.pow(1 - k, 3);
+        el.textContent = Math.round(target * eased).toLocaleString('uk-UA');
+        if (k < 1) requestAnimationFrame(step);
+      };
+      el.textContent = '0';
+      requestAnimationFrame(step);
+    });
+  }, { threshold: 0.6 });
+  const statsBox = document.getElementById('masterStats');
+  if (statsBox) {
+    const watch = () => statsBox.querySelectorAll('[data-count]').forEach((el) => countIo.observe(el));
+    new MutationObserver(watch).observe(statsBox, { childList: true });
+    watch();
+  }
 })();

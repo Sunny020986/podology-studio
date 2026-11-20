@@ -14,6 +14,7 @@
   let currentConv = null;
   let blockDate = today();
   let clientQuery = '';
+  let clientsArchived = false; // вкладка «Клієнти»: показувати архів замість активних
   let currentClient = null;
   const fmtDate = (d) => (d ? d.split('-').reverse().join('.') : '—');
 
@@ -126,13 +127,20 @@
 
   // ----- Клієнти -----
   async function renderClients() {
+    const arch = await api('/api/admin/archive-months');
+    const archiveOpts = arch.options.map((m) => '<option value="' + m + '"' + (m === arch.months ? ' selected' : '') + '>' + m + ' міс.</option>').join('');
     $('#view').innerHTML = `
       <div class="toolbar">
         <input type="search" id="clientSearch" placeholder="Пошук: імʼя або телефон" value="${esc(clientQuery)}" style="flex:1;max-width:340px">
         <button class="btn btn-ghost small" type="button" id="clientsCsv">Вивантажити в CSV</button>
       </div>
+      <div class="toolbar">
+        <button class="btn ${clientsArchived ? 'btn-ghost' : 'btn-primary'} small" type="button" id="clientsActiveBtn">Активні</button>
+        <button class="btn ${clientsArchived ? 'btn-primary' : 'btn-ghost'} small" type="button" id="clientsArchiveBtn">Архів</button>
+        <label class="muted" style="margin-left:auto">В архів, якщо без змін понад <select id="archiveMonths">${archiveOpts}</select></label>
+      </div>
       <table>
-        <thead><tr><th>Імʼя</th><th>Телефон</th><th>Візитів</th><th>Останній візит</th><th>Наступний запис</th><th>Нотатка</th></tr></thead>
+        <thead><tr><th>Імʼя</th><th>Телефон</th><th>Візитів</th><th>Останній візит</th><th>Наступний запис</th><th>Нотатка</th><th></th></tr></thead>
         <tbody id="clientRows"></tbody>
       </table>`;
     let timer = null;
@@ -146,7 +154,7 @@
 
   async function loadClients() {
     const q = clientQuery;
-    const list = await api('/api/admin/clients?q=' + encodeURIComponent(q));
+    const list = await api('/api/admin/clients?q=' + encodeURIComponent(q) + (clientsArchived ? '&archived=1' : ''));
     if (q !== clientQuery || !$('#clientRows')) return; // запит застарів або вкладку вже змінено
     $('#clientRows').innerHTML = list.length
       ? list.map((c) => `<tr>
@@ -156,8 +164,9 @@
           <td>${fmtDate(c.last_visit)}</td>
           <td>${fmtDate(c.next_visit)}</td>
           <td>${c.has_note ? 'є' : '—'}</td>
+          <td>${c.archived ? '<button class="btn btn-ghost small" type="button" data-restore="' + c.key + '">Повернути</button>' : ''}</td>
         </tr>`).join('')
-      : `<tr><td colspan="6" class="muted">${q ? 'Нікого не знайдено.' : 'Клієнтів ще немає: вони зʼявляться після першого запису.'}</td></tr>`;
+      : `<tr><td colspan="7" class="muted">${q ? 'Нікого не знайдено.' : clientsArchived ? 'В архіві нікого немає.' : 'Клієнтів ще немає: вони зʼявляться після першого запису.'}</td></tr>`;
   }
 
   async function renderClient(key) {
@@ -508,6 +517,11 @@
 
   view.addEventListener('change', async (e) => {
     try {
+      if (e.target.id === 'archiveMonths') {
+        await api('/api/admin/archive-months', { method: 'PUT', body: { months: Number(e.target.value) } });
+        notify('Збережено');
+        return await loadClients();
+      }
       if (e.target.id === 'blockDate') {
         blockDate = e.target.value;
         await renderBlocks();
@@ -542,6 +556,15 @@
       }
 
       if (e.target.id === 'clientsCsv') return await downloadClientsCsv();
+      if (e.target.id === 'clientsActiveBtn' || e.target.id === 'clientsArchiveBtn') {
+        clientsArchived = e.target.id === 'clientsArchiveBtn';
+        return await renderClients();
+      }
+      if (e.target.dataset.restore) {
+        await api('/api/admin/clients/' + e.target.dataset.restore + '/restore', { method: 'POST' });
+        notify('Клієнта повернуто з архіву');
+        return await loadClients();
+      }
 
       if (e.target.id === 'saveClientNote') {
         await api(`/api/admin/clients/${currentClient}/note`, { method: 'PUT', body: { note: $('#clientNote').value } });

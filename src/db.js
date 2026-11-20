@@ -95,6 +95,23 @@ function openDb() {
   if (!apptCols.includes('note')) db.exec("ALTER TABLE appointments ADD COLUMN note TEXT NOT NULL DEFAULT ''");
   // Коментар клієнта при записі (побажання тощо); його бачить майстер, на відміну від приватної нотатки
   if (!apptCols.includes('client_comment')) db.exec("ALTER TABLE appointments ADD COLUMN client_comment TEXT NOT NULL DEFAULT ''");
+  // Час останньої зміни запису: за ним визначається, коли клієнта перенести в архів
+  if (!apptCols.includes('updated_at')) {
+    db.exec("ALTER TABLE appointments ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''");
+    db.exec("UPDATE appointments SET updated_at = created_at WHERE updated_at = ''");
+  }
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS appt_insert_touch AFTER INSERT ON appointments WHEN NEW.updated_at = ''
+    BEGIN UPDATE appointments SET updated_at = datetime('now') WHERE id = NEW.id; END;
+    CREATE TRIGGER IF NOT EXISTS appt_update_touch AFTER UPDATE ON appointments WHEN NEW.updated_at = OLD.updated_at
+    BEGIN UPDATE appointments SET updated_at = datetime('now') WHERE id = NEW.id; END;
+    -- Архів клієнтів: pinned = 1 означає, що клієнта повернули з архіву вручну
+    CREATE TABLE IF NOT EXISTS client_archive (
+      phone_key   TEXT PRIMARY KEY,
+      archived_at TEXT NOT NULL DEFAULT (datetime('now')),
+      pinned      INTEGER NOT NULL DEFAULT 0
+    );
+  `);
   // Нагадування в Telegram: код для посилання, чат клієнта, чи вже нагадали
   if (!apptCols.includes('remind_code')) db.exec('ALTER TABLE appointments ADD COLUMN remind_code TEXT');
   if (!apptCols.includes('tg_chat_id')) db.exec('ALTER TABLE appointments ADD COLUMN tg_chat_id TEXT');

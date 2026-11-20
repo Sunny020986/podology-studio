@@ -415,17 +415,20 @@ function notifyClientCancelled(id) {
 const isClientKey = (k) => /^\d{9}$/.test(k);
 const NOTE_MAX = 5000;
 
-function listClients(q) {
+// mode: 'active' — лише активні, 'archived' — лише в архіві, без параметра — усі (для вивантаження)
+function listClients(q, mode) {
   const today = todayStr();
   const rows = db
-    .prepare('SELECT date, start_time, client_name, client_phone, status FROM appointments ORDER BY date, start_time')
+    .prepare('SELECT date, start_time, client_name, client_phone, status, updated_at FROM appointments ORDER BY date, start_time')
     .all();
-  const noted = new Set(db.prepare("SELECT phone_key FROM client_notes WHERE note != ''").all().map((r) => r.phone_key));
+  const notes = new Map(db.prepare('SELECT phone_key, note, updated_at FROM client_notes').all().map((r) => [r.phone_key, r]));
+  const archive = new Map(db.prepare('SELECT phone_key, pinned FROM client_archive').all().map((r) => [r.phone_key, r.pinned]));
   const map = new Map();
   for (const r of rows) {
     const key = last9(r.client_phone);
-    if (!map.has(key)) map.set(key, { key, name: '', phone: '', visits: 0, cancelled: 0, last_visit: null, next_visit: null });
+    if (!map.has(key)) map.set(key, { key, name: '', phone: '', visits: 0, cancelled: 0, last_visit: null, next_visit: null, last_change: '' });
     const c = map.get(key);
+    if (r.updated_at > c.last_change) c.last_change = r.updated_at;
     c.name = r.client_name;   // рядки йдуть за датою, тому залишаються ім'я і телефон з найновішого запису
     c.phone = r.client_phone;
     if (r.status === 'cancelled') {
@@ -437,7 +440,13 @@ function listClients(q) {
       c.next_visit = r.date;
     }
   }
-  let list = [...map.values()].map((c) => ({ ...c, has_note: noted.has(c.key) }));
+  let list = [...map.values()].map((c) => {
+    const n = notes.get(c.key);
+    if (n && n.updated_at > c.last_change) c.last_change = n.updated_at;
+    return { ...c, has_note: !!(n && n.note), archived: archive.get(c.key) === 0 };
+  });
+  if (mode === 'active') list = list.filter((c) => !c.archived);
+  if (mode === 'archived') list = list.filter((c) => c.archived);
   const needle = String(q || '').trim().toLowerCase();
   if (needle) {
     const digits = needle.replace(/\D/g, '');
@@ -447,7 +456,47 @@ function listClients(q) {
 }
 
 app.get('/api/admin/clients', (req, res) => {
-  res.json(listClients(req.query.q));
+  res.json(listClients(req.query.q, req.query.archived === '1' ? 'archived' : 'active'));
+});
+
+// Архів клієнтів: клієнт без змін довше за обраний термін переходить в архів. Будь-яка нова зміна повертає його в активні.
+const ARCHIVE_MONTH_OPTIONS = [6, 12, 24];
+function readArchiveMonths() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'archive_months'").get();
+  const n = Number(row?.value);
+  return ARCHIVE_MONTH_OPTIONS.includes(n) ? n : 12;
+}
+function syncArchive() {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - readArchiveMonths());
+  const cutoffStr = cutoff.toISOString().replace('T', ' ').slice(0, 19); // час у базі за UTC
+  const stale = listClients(undefined).filter((c) => c.last_change && c.last_change < cutoffStr);
+  const staleKeys = new Set(stale.map((c) => c.key));
+  db.transaction(() => {
+    const add = db.prepare('INSERT OR IGNORE INTO client_archive (phone_key) VALUES (?)');
+    const drop = db.prepare('DELETE FROM client_archive WHERE phone_key = ?');
+    for (const c of listClients(undefined)) {
+      if (staleKeys.has(c.key)) add.run(c.key);
+      else drop.run(c.key);
+    }
+  })();
+}
+
+app.get('/api/admin/archive-months', (req, res) => res.json({ months: readArchiveMonths(), options: ARCHIVE_MONTH_OPTIONS }));
+app.put('/api/admin/archive-months', (req, res) => {
+  const n = Number(req.body?.months);
+  if (!ARCHIVE_MONTH_OPTIONS.includes(n)) return res.status(400).json({ error: 'Оберіть один із варіантів: ' + ARCHIVE_MONTH_OPTIONS.join(', ') + ' міс.' });
+  db.prepare("INSERT INTO settings (key, value) VALUES ('archive_months', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(n));
+  syncArchive();
+  res.json({ months: n });
+});
+
+// Повернути клієнта з архіву вручну: він лишається активним, доки знову не стане неактивним
+app.post('/api/admin/clients/:key/restore', (req, res) => {
+  const key = req.params.key;
+  if (!isClientKey(key)) return res.status(400).json({ error: 'Некоректний клієнт' });
+  db.prepare('INSERT INTO client_archive (phone_key, pinned) VALUES (?, 1) ON CONFLICT(phone_key) DO UPDATE SET pinned = 1').run(key);
+  res.json({ ok: true });
 });
 
 // Вивантаження для Excel: роздільник ";" і позначка кодування на початку файлу. Нотаток у файлі немає.
@@ -748,6 +797,9 @@ function purgeEmptyConversations() {
 }
 purgeEmptyConversations();
 setInterval(purgeEmptyConversations, 60 * 60 * 1000).unref();
+// Архів клієнтів оновлюється при старті й щогодини
+syncArchive();
+setInterval(syncArchive, 60 * 60 * 1000).unref();
 
 function handleClient(ws, msg) {
   if (msg.type === 'hello') {

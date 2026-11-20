@@ -85,9 +85,6 @@
   async function loadServices() {
     const r = await fetch('/api/services');
     state.services = await r.json();
-    // Пошук послуги: поле з підказками (datalist) фільтрує список, коли клієнт друкує
-    $('#serviceOptions').innerHTML = state.services
-      .map((s) => `<option value="${esc(s.name)}">${durText(s.duration_min)}</option>`).join('');
     $('#servicesList').innerHTML = state.services.map((s) => `
       <button class="service" type="button" data-id="${s.id}">
         <span class="service-name">${esc(s.name)}</span>
@@ -178,18 +175,42 @@
     $('#booking').scrollIntoView({ behavior: 'smooth' });
   });
 
-  // Вибір послуги: точна назва з підказок або введена вручну. Якщо назву не знайдено, повертаємо попередню
+  // Пошук послуги в самому полі: список фільтрується за тим, що клієнт друкує
   const serviceInput = $('#serviceSearch');
-  const findService = (text) => state.services.find((s) => s.name.toLowerCase() === text.trim().toLowerCase());
-  serviceInput.addEventListener('change', () => {
-    const s = findService(serviceInput.value);
-    if (!s) {
-      serviceInput.value = state.services.find((x) => x.id === state.serviceId)?.name ?? '';
-      return;
-    }
+  const suggest = $('#serviceSuggest');
+  const currentName = () => state.services.find((x) => x.id === state.serviceId)?.name ?? '';
+  const closeSuggest = () => {
+    suggest.hidden = true;
+    serviceInput.setAttribute('aria-expanded', 'false');
+  };
+  function renderSuggest(term) {
+    const q = term.trim().toLowerCase();
+    const list = state.services.filter((s) => !q || s.name.toLowerCase().includes(q));
+    suggest.innerHTML = list.length
+      ? list.map((s) => `<li role="option"><button type="button" class="suggest-item" data-id="${s.id}">${esc(s.name)} <span class="muted">· ${durText(s.duration_min)}</span></button></li>`).join('')
+      : '<li class="suggest-empty muted">Такої послуги немає. Спробуйте інші слова.</li>';
+    suggest.hidden = false;
+    serviceInput.setAttribute('aria-expanded', 'true');
+  }
+  function chooseService(id) {
+    closeSuggest();
+    const s = state.services.find((x) => x.id === id);
+    if (!s) return;
+    serviceInput.value = s.name;
     if (s.id === state.serviceId) return;
     state.serviceId = s.id;
     pickNearestDate();
+  }
+  serviceInput.addEventListener('focus', () => { serviceInput.select(); renderSuggest(''); });
+  serviceInput.addEventListener('input', () => renderSuggest(serviceInput.value));
+  serviceInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') { serviceInput.value = currentName(); closeSuggest(); } });
+  suggest.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-id]');
+    if (btn) chooseService(Number(btn.dataset.id));
+  });
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.combo')) return;
+    if (!suggest.hidden) { closeSuggest(); serviceInput.value = currentName(); }
   });
 
   // Клік по полю дати одразу відкриває календар (де браузер це підтримує)

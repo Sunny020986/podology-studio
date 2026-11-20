@@ -60,18 +60,19 @@
     dot.addEventListener('animationend', () => dot.remove());
   });
 
-  // ----- 3а. Водяні кола на картках акцій -----
-  // Курсор над карткою залишає кола, що розходяться, як від краплі на воді
+  // ----- 3а. Водяна хвиля на картках акцій -----
+  // Через чверть секунди після наведення від курсора один раз розходиться хвиля, як від краплі на воді.
+  // Наступна хвиля буде лише після того, як курсор вийде з картки й наведеться знову.
   const offersList = document.getElementById('offersList');
   if (offersList) {
-    const RIPPLE_GAP_MS = 220;   // як часто з'являється нове коло під час руху
-    const MAX_RIPPLES = 6;       // скільки кіл одночасно на одній картці
-    let lastRipple = 0;
+    const RIPPLE_DELAY_MS = 250;
+    let hovered = null;   // картка під курсором
+    let timer = null;
+    let lastX = 0, lastY = 0;
 
     function dropRipple(card, x, y) {
-      if (card.querySelectorAll('.water-ring').length >= MAX_RIPPLES) return;
       const r = card.getBoundingClientRect();
-      for (let i = 0; i < 2; i++) { // два кола з затримкою дають ефект хвилі
+      for (let i = 0; i < 2; i++) { // два кола з невеликою затримкою дають ефект хвилі
         const ring = document.createElement('span');
         ring.className = 'water-ring';
         ring.style.left = (x - r.left) + 'px';
@@ -82,16 +83,21 @@
       }
     }
 
-    offersList.addEventListener('pointerenter', (e) => {
-      const card = e.target.closest?.('.offer');
-      if (card) dropRipple(card, e.clientX, e.clientY);
-    }, true);
     offersList.addEventListener('pointermove', (e) => {
-      if (e.pointerType !== 'mouse') return;
+      lastX = e.clientX;
+      lastY = e.clientY;
       const card = e.target.closest('.offer');
-      if (!card || e.timeStamp - lastRipple < RIPPLE_GAP_MS) return;
-      lastRipple = e.timeStamp;
-      dropRipple(card, e.clientX, e.clientY);
+      if (card === hovered) return;
+      clearTimeout(timer);
+      hovered = card;
+      if (!card) return;
+      timer = setTimeout(() => {
+        if (hovered === card) dropRipple(card, lastX, lastY);
+      }, RIPPLE_DELAY_MS);
+    });
+    offersList.addEventListener('pointerleave', () => {
+      clearTimeout(timer);
+      hovered = null;
     });
   }
 

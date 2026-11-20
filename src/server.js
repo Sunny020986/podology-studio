@@ -9,6 +9,7 @@ const { createTelegram } = require('./telegram');
 const { setupAccounts, CHANGE_HOUR_OPTIONS } = require('./accounts');
 const { setupReviews } = require('./reviews');
 const { setupRepeatReminders } = require('./repeat');
+const { setupWaitlist } = require('./waitlist');
 const { freeSlots, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -291,6 +292,9 @@ app.use('/api/admin', requireAdmin);
 // Відгуки: публічні маршрути і маршрути адмінки (останні вже під перевіркою доступу)
 setupReviews({ app, db, telegram, todayStr, siteUrl, last9 });
 setupRepeatReminders({ db, telegram, todayStr, siteUrl, last9 });
+const waitlist = setupWaitlist({
+  app, db, telegram, freeSlots, isBookableDate, horizonDays: HORIZON_DAYS, todayStr, siteUrl, makeLimiter, last9,
+});
 
 // Налаштування годин для скасування й перенесення клієнтом (лише для адміна)
 app.get('/api/admin/change-hours', (req, res) => res.json({ hours: readChangeHours(), options: CHANGE_HOUR_OPTIONS }));
@@ -373,7 +377,10 @@ app.patch('/api/admin/appointments/:id', (req, res) => {
   if (!['new', 'confirmed', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Некоректний статус' });
   try {
     setStatusTx(Number(req.params.id), status);
-    if (status === 'cancelled') notifyClientCancelled(Number(req.params.id));
+    if (status === 'cancelled') {
+      notifyClientCancelled(Number(req.params.id));
+      waitlist.checkWaitlist().catch(() => {}); // звільнився час: може, хтось на нього чекає
+    }
     res.json({ ok: true });
   } catch (e) {
     if (e.status) return res.status(e.status).json({ error: e.message });
@@ -394,6 +401,7 @@ const studioLine = () => {
 // Клієнт натиснув «Start» за посиланням із сайту: прив'язуємо його чат до запису
 telegram.onStart((code, chatId) => {
   if (code.startsWith('acc_')) return accounts.linkTelegram(code.slice(4), chatId);
+  if (code.startsWith('w_')) return waitlist.linkTelegram(code.slice(2), chatId);
   const a = apptForClient('a.remind_code = ?', code);
   if (!a) return 'Не знайшли цей запис. Можливо, посилання застаріло. Запишіться на сайті ще раз або подзвоніть нам.';
   if (a.status === 'cancelled') return 'Цей запис скасовано. Щоб записатися знову, скористайтеся сайтом.';

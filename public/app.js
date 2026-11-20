@@ -143,8 +143,43 @@
     return refreshSlots();
   }
 
+  // Список очікування: показується, коли на обрану дату немає вільного часу
+  function showWaitBox(show) {
+    $('#waitBox').hidden = !show;
+    $('#waitForm').hidden = true;
+    $('#waitOpen').hidden = false;
+    $('#waitMsg').textContent = '';
+    $('#waitTg').hidden = true;
+  }
+  $('#waitOpen').addEventListener('click', () => {
+    $('#waitOpen').hidden = true;
+    $('#waitForm').hidden = false;
+    if (!$('#waitName').value) $('#waitName').value = $('#nameInput').value;
+    if (!$('#waitPhone').value) $('#waitPhone').value = $('#phoneInput').value;
+    $('#waitName').focus();
+  });
+  $('#waitForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const msg = $('#waitMsg');
+    msg.classList.remove('ok');
+    try {
+      const r = await fetch('/api/waitlist', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serviceId: state.serviceId, date: state.date, name: $('#waitName').value, phone: $('#waitPhone').value }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'Помилка, спробуйте ще раз');
+      $('#waitForm').hidden = true;
+      msg.classList.add('ok');
+      msg.textContent = 'Готово! Ви в списку очікування на ' + fmtDate(state.date) + '. ' +
+        (data.telegramLink ? 'Щоб отримати сповіщення одразу, натисніть кнопку нижче.' : 'Якщо звільниться час, ми вам зателефонуємо.');
+      if (data.telegramLink) { $('#waitTg').href = data.telegramLink; $('#waitTg').hidden = false; }
+    } catch (err) {
+      msg.textContent = err.message;
+    }
+  });
+
   async function refreshSlots() {
     state.time = null;
+    showWaitBox(false);
     updateSummary();
     const grid = $('#slotsGrid');
     grid.innerHTML = '';
@@ -160,7 +195,8 @@
       return;
     }
     if (!data.slots.length) {
-      $('#slotsHint').textContent = 'На цю дату вільного часу немає. Оберіть іншу дату.';
+      $('#slotsHint').textContent = 'На цю дату вільного часу немає. Оберіть іншу дату або станьте в чергу.';
+      showWaitBox(true);
       return;
     }
     $('#slotsHint').textContent = '';

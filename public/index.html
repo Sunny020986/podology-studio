@@ -98,6 +98,16 @@
         <div class="step-label">3. Час</div>
         <div id="slotsGrid" class="slots-grid"></div>
         <div class="hint" id="slotsHint"></div>
+        <div class="wait-box" id="waitBox" hidden>
+          <button class="btn btn-ghost small" type="button" id="waitOpen">🔔 Повідомити, якщо звільниться час</button>
+          <form class="wait-form" id="waitForm" hidden>
+            <input class="input" id="waitName" placeholder="Ім'я" autocomplete="name" maxlength="60" aria-label="Ім'я">
+            <input class="input" id="waitPhone" type="tel" placeholder="Телефон" autocomplete="tel" maxlength="30" aria-label="Телефон">
+            <button class="btn btn-primary small" type="submit">Стати в чергу</button>
+          </form>
+          <p class="acc-msg" id="waitMsg" role="status"></p>
+          <a class="btn btn-ghost small" id="waitTg" target="_blank" rel="noopener" hidden>Отримати сповіщення в Telegram</a>
+        </div>
       </div>
 
       <form class="card" id="bookingForm" novalidate>

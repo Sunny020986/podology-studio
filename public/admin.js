@@ -93,19 +93,35 @@
   // ----- Записи -----
   // Вкладка показує поточні й майбутні записи. Минулі не видаляються: вони в архіві
   let apptArchive = false;
+  let apptWaitlist = false; // показати список очікування замість записів
   const shiftDay = (s, n) => {
     const d = new Date(s + 'T12:00:00');
     d.setDate(d.getDate() + n);
     return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
   };
 
-  async function renderAppointments() {
-    const [from, to] = apptArchive ? ['2000-01-01', shiftDay(today(), -1)] : [today(), '2999-12-31'];
-    $('#view').innerHTML = `
+  const WAIT_STATUS = { waiting: 'Чекає', notified: 'Повідомлено' };
+  async function renderWaitlist() {
+    const list = await api('/api/admin/waitlist');
+    $('#view').innerHTML = apptToolbar() +
+      '<p class="muted">Клієнти, яким не вистачило вільного часу. Коли час звільняється, бот повідомляє першого в черзі. Якщо в клієнта немає Telegram, повідомлення приходить вам, щоб зателефонувати.</p>' +
+      '<table><thead><tr><th>Дата</th><th>Послуга</th><th>Клієнт</th><th>Телефон</th><th>Telegram</th><th>Статус</th><th></th></tr></thead><tbody>' +
+      (list.length ? list.map((w) => '<tr><td>' + fmtDate(w.date) + '</td><td>' + esc(w.service) + '</td><td>' + esc(w.name) + '</td><td>' + esc(w.phone) + '</td>' +
+        '<td>' + (w.telegram ? 'так' : '—') + '</td><td>' + (WAIT_STATUS[w.status] || esc(w.status)) + '</td>' +
+        '<td><button class="btn btn-ghost small danger" type="button" data-del-wait="' + w.id + '">Прибрати</button></td></tr>').join('')
+        : '<tr><td colspan="7" class="muted">У черзі нікого немає.</td></tr>') + '</tbody></table>';
+  }
+  const apptToolbar = () => `
       <div class="toolbar">
-        <button class="btn ${apptArchive ? 'btn-ghost' : 'btn-primary'} small" type="button" id="apptUpcoming">Поточні і майбутні</button>
-        <button class="btn ${apptArchive ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptArchiveBtn">Архів</button>
-      </div>
+        <button class="btn ${!apptArchive && !apptWaitlist ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptUpcoming">Поточні і майбутні</button>
+        <button class="btn ${apptArchive && !apptWaitlist ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptArchiveBtn">Архів</button>
+        <button class="btn ${apptWaitlist ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptWaitBtn">Черга очікування</button>
+      </div>`;
+
+  async function renderAppointments() {
+    if (apptWaitlist) return renderWaitlist();
+    const [from, to] = apptArchive ? ['2000-01-01', shiftDay(today(), -1)] : [today(), '2999-12-31'];
+    $('#view').innerHTML = `${apptToolbar()}
       <table>
         <thead><tr><th>Дата</th><th>Час</th><th>Послуга</th><th>Клієнт</th><th>Телефон</th><th>Коментар клієнта</th><th>Статус</th></tr></thead>
         <tbody id="apptRows"></tbody>
@@ -569,9 +585,14 @@
 
   view.addEventListener('click', async (e) => {
     try {
-      if (e.target.id === 'apptUpcoming' || e.target.id === 'apptArchiveBtn') {
+      if (e.target.id === 'apptUpcoming' || e.target.id === 'apptArchiveBtn' || e.target.id === 'apptWaitBtn') {
+        apptWaitlist = e.target.id === 'apptWaitBtn';
         apptArchive = e.target.id === 'apptArchiveBtn';
         return await renderAppointments();
+      }
+      if (e.target.dataset.delWait) {
+        await api('/api/admin/waitlist/' + e.target.dataset.delWait, { method: 'DELETE' });
+        return await renderWaitlist();
       }
       const conv = e.target.closest('[data-conv]');
       if (conv) return await openConv(conv.dataset.conv);

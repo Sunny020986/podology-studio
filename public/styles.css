@@ -1,19 +1,23 @@
 :root {
-  --bg: #F7F5F0;
+  --bg: #F5F9F8;
   --card: #FFFFFF;
-  --line: #E4E0D6;
-  --ink: #1F2328;
-  --muted: #4A5159;
-  --faint: #B5B0A5;
-  --accent: #2F6F5E;
-  --accent-ink: #FFFFFF;
-  --danger: #A33A2B;
-  --ok: #2F6F5E;
+  --line: #E3DDF0;        /* тонкі лілові лінії */
+  --ink: #2E2A3D;
+  --muted: #5C566E;
+  --faint: #A9A3BA;
+  --accent: #8ED8C6;      /* м'ятний: кнопки, активні елементи */
+  --accent-ink: #13201D;  /* темний текст на м'ятних кнопках */
+  --accent-text: #23786A; /* м'ятний для тексту на світлому фоні */
+  --lilac: #B9A7EA;       /* ліловий акцент */
+  --teal: #14857F;        /* зелено-блакитний для наведення в меню */
+  --teal-ink: #FFFFFF;    /* текст на зелено-блакитних кнопках */
+  --danger: #B5485D;
+  --ok: #23786A;
   --field: #FFFFFF;       /* тло полів введення */
-  --field-line: #C9C4B8;  /* рамка полів і другорядних кнопок */
-  --active-bg: #E9F0ED;   /* вибраний рядок у списку */
+  --field-line: #CFC7E3;  /* рамка полів і другорядних кнопок */
+  --active-bg: #EEE9FA;   /* вибраний рядок у списку */
   color-scheme: light;
-  --radius: 14px;
+  --radius: 20px;
 }
 
 * { box-sizing: border-box; }
@@ -22,7 +26,7 @@ body {
   margin: 0;
   font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   color: var(--ink);
-  background: var(--bg);
+  background: linear-gradient(180deg, #F5F9F8 0%, #F3F0FB 100%) fixed, var(--bg);
   line-height: 1.5;
 }
 h1, h2, h3 { margin: 0; }
@@ -62,26 +66,30 @@ a { color: inherit; text-decoration: none; }
 }
 .brand { font-size: 20px; font-weight: 700; }
 .nav-links { display: flex; gap: 32px; font-size: 15px; color: var(--muted); }
-.nav-links a { display: inline-flex; align-items: center; gap: 8px; }
-.nav-links a:hover { color: var(--ink); }
+.nav-links a { display: inline-flex; align-items: center; gap: 8px; transition: color 0.35s ease; }
+.nav-links a:hover, .nav-links a:focus-visible { color: var(--teal); }
 .nav-links svg { flex: none; }
 
 /* Головний екран */
 .hero {
   display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 64px; padding: 56px 64px 24px;
   background:
-    linear-gradient(rgba(247, 245, 240, 0.85), rgba(247, 245, 240, 0.85)),
+    linear-gradient(rgba(245, 249, 248, 0.85), rgba(247, 245, 240, 0.85)),
     url('img/hero.webp') center / cover no-repeat;
   border-radius: 24px;
 }
 .hero-text { display: flex; flex-direction: column; gap: 22px; }
-.eyebrow { font-size: 14px; font-weight: 600; color: var(--accent); }
+.eyebrow { font-size: 14px; font-weight: 600; color: var(--accent-text); }
 .hero h1 { font-size: 52px; line-height: 1.1; font-weight: 700; }
 .hero p { margin: 0; font-size: 18px; color: var(--muted); }
 .hero-actions { display: flex; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+/* Кнопки головного екрану плавно переходять до зелено-блакитного при наведенні */
+.hero-actions .btn { transition: background-color 0.35s ease, color 0.35s ease, border-color 0.35s ease; }
+.hero-actions .btn-primary:hover, .hero-actions .btn-primary:focus-visible { background: var(--teal); color: var(--teal-ink); }
+.hero-actions .btn-ghost:hover, .hero-actions .btn-ghost:focus-visible { color: var(--teal); border-color: var(--teal); }
 
 .card {
-  background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 24px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 24px;
 }
 .how ol { margin: 12px 0 16px; padding-left: 20px; font-size: 16px; line-height: 1.9; }
 .how-title { font-size: 16px; font-weight: 600; }
@@ -95,9 +103,9 @@ a { color: inherit; text-decoration: none; }
   background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px;
   display: flex; flex-direction: column; gap: 10px;
 }
-.service:hover { border-color: var(--accent); }
+.service:hover { border-color: var(--accent-text); }
 .service-name { font-size: 19px; font-weight: 600; }
-.service-meta { font-size: 14px; color: var(--accent); font-weight: 600; }
+.service-meta { font-size: 14px; color: var(--accent-text); font-weight: 600; }
 .service-desc { font-size: 15px; color: var(--muted); }
 
 /* Запис */
@@ -106,7 +114,7 @@ a { color: inherit; text-decoration: none; }
 .slots-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 4px; }
 .slot {
   padding: 12px 0; border-radius: 10px; border: 1px solid var(--accent); background: var(--card);
-  color: var(--accent); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+  color: var(--accent-text); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
 }
 .slot.selected { background: var(--accent); color: var(--accent-ink); }
 .summary { font-size: 15px; color: var(--muted); margin-top: 6px; }
@@ -159,7 +167,7 @@ a { color: inherit; text-decoration: none; }
   padding: 10px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--card);
   font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; color: var(--muted);
 }
-.tab.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.tab.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent-text); }
 .panel { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 16px; }
 th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
@@ -172,7 +180,7 @@ td input[type="text"], td input[type="time"], td input[type="number"], td input:
   padding: 8px 10px; border-radius: 8px; border: 1px solid #C9C4B8; font: inherit;
 }
 .inline-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0 20px; }
-.link { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--accent); cursor: pointer; text-decoration: underline; text-align: left; }
+.link { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--accent-text); cursor: pointer; text-decoration: underline; text-align: left; }
 textarea.input { resize: vertical; min-height: 96px; }
 .studio-form { display: grid; gap: 16px; max-width: 560px; margin-top: 8px; }
 .studio-field { display: grid; gap: 6px; font-size: 14px; }
@@ -183,7 +191,7 @@ textarea.input { resize: vertical; min-height: 96px; }
 .studio-field textarea { padding: 10px 12px; border: 1px solid var(--field-line, var(--line)); border-radius: 10px; background: var(--field, #fff); color: var(--ink); font: inherit; line-height: 1.5; resize: vertical; }
 .tg-title { margin: 36px 0 8px; }
 .tg-state { margin: 0 0 8px; color: var(--muted, #6b6b6b); }
-.tg-state.ok { color: var(--accent); font-weight: 600; }
+.tg-state.ok { color: var(--accent-text); font-weight: 600; }
 .tg-steps { margin: 0 0 8px; padding-left: 20px; max-width: 640px; line-height: 1.6; font-size: 14px; }
 .tg-steps code { background: var(--active-bg, rgba(0,0,0,.05)); padding: 1px 5px; border-radius: 5px; }
 .tg-actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -274,7 +282,7 @@ textarea.input { resize: vertical; min-height: 96px; }
 /* ----- Акції, про майстра, питання, контакти ----- */
 .promo-pill { display: inline-flex; align-self: flex-start; width: fit-content; margin-bottom: 14px; padding: 7px 14px; border-radius: 999px;
   background: var(--accent); color: var(--accent-ink, #fff); font-size: 14px; font-weight: 600; text-decoration: none;
-  box-shadow: 0 4px 14px rgba(47, 111, 94, 0.25); transition: transform 0.2s ease; }
+  box-shadow: 0 4px 14px rgba(142, 216, 198, 0.45); transition: transform 0.2s ease; }
 .promo-pill:hover { transform: translateY(-1px); }
 .offer { display: grid; gap: 8px; align-content: start; }
 .offer-icon { font-size: 28px; line-height: 1; }
@@ -289,7 +297,7 @@ textarea.input { resize: vertical; min-height: 96px; }
 .faq-item { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 0 20px; }
 .faq-item summary { cursor: pointer; padding: 16px 0; font-weight: 600; list-style: none; display: flex; justify-content: space-between; gap: 12px; }
 .faq-item summary::-webkit-details-marker { display: none; }
-.faq-item summary::after { content: '+'; color: var(--accent); font-size: 22px; line-height: 1; transition: transform 0.2s ease; }
+.faq-item summary::after { content: '+'; color: var(--accent-text); font-size: 22px; line-height: 1; transition: transform 0.2s ease; }
 .faq-item[open] summary::after { transform: rotate(45deg); }
 .faq-answer { padding: 0 0 16px; }
 .contacts-grid { display: grid; grid-template-columns: 1fr 1.6fr; gap: 24px; }
@@ -303,19 +311,23 @@ textarea.input { resize: vertical; min-height: 96px; }
 @media (max-width: 860px) { .contacts-grid { grid-template-columns: 1fr; } }
 
 :root[data-theme="dark"] {
-  --bg: #14171A;
-  --card: #1D2125;
-  --line: #2E343A;
-  --ink: #E8EAED;
-  --muted: #A4ABB3;
-  --faint: #6B7178;
-  --accent: #5FBFA4;      /* світліший зелений: читається і як текст на темному тлі */
-  --accent-ink: #0F1A17;  /* темний текст на зелених кнопках */
-  --danger: #F08A7B;
-  --ok: #5FBFA4;
-  --field: #14171A;
-  --field-line: #3A4148;
-  --active-bg: #23302C;
+  --bg: #161422;
+  --card: #1F1C2E;
+  --line: #37324A;
+  --ink: #ECE9F6;
+  --muted: #ABA5C0;
+  --faint: #6E688A;
+  --accent: #8ED8C6;
+  --accent-ink: #13201D;
+  --accent-text: #8ED8C6;
+  --lilac: #C5B4F5;
+  --teal: #5FD6CF;
+  --teal-ink: #0E1F1D;
+  --danger: #F08A9B;
+  --ok: #8ED8C6;
+  --field: #161422;
+  --field-line: #4A4362;
+  --active-bg: #2A2640;
   color-scheme: dark;     /* темні системні елементи: календар, списки, прапорці */
 }
 

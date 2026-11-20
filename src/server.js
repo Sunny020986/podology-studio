@@ -113,6 +113,7 @@ function validateService(body, partial = false) {
     if (!Number.isInteger(p) || p < 0 || p > 1000000) return { error: 'Ціна: ціле число від 0 до 1000000' };
     out.price_uah = p;
   }
+  if (!partial || body.price_note !== undefined) out.price_note = String(body.price_note ?? '').trim().slice(0, 60);
   if (body.active !== undefined) out.active = body.active ? 1 : 0;
   return { data: out };
 }
@@ -159,7 +160,7 @@ app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'admin.html')
 
 // ---------- Публічне API ----------
 app.get('/api/services', (req, res) => {
-  res.json(db.prepare('SELECT id, name, description, duration_min, price_uah FROM services WHERE active = 1 ORDER BY id').all());
+  res.json(db.prepare('SELECT id, name, description, duration_min, price_uah, price_note FROM services WHERE active = 1 ORDER BY id').all());
 });
 
 // Поля кабінету й максимальна довжина кожного. name обов'язкове, решта може бути порожньою.
@@ -463,16 +464,16 @@ app.put('/api/admin/appointments/:id/note', (req, res) => {
 });
 
 app.get('/api/admin/services', (req, res) => {
-  res.json(db.prepare('SELECT id, name, description, duration_min, price_uah, active FROM services ORDER BY id').all());
+  res.json(db.prepare('SELECT id, name, description, duration_min, price_uah, price_note, active FROM services ORDER BY id').all());
 });
 
 app.post('/api/admin/services', (req, res) => {
   const v = validateService(req.body || {});
   if (v.error) return res.status(400).json({ error: v.error });
-  const d = { description: '', price_uah: 0, active: 1, ...v.data };
+  const d = { description: '', price_uah: 0, price_note: '', active: 1, ...v.data };
   const info = db
-    .prepare('INSERT INTO services (name, description, duration_min, price_uah, active) VALUES (?, ?, ?, ?, ?)')
-    .run(d.name, d.description, d.duration_min, d.price_uah, d.active);
+    .prepare('INSERT INTO services (name, description, duration_min, price_uah, price_note, active) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(d.name, d.description, d.duration_min, d.price_uah, d.price_note, d.active);
   res.status(201).json({ id: Number(info.lastInsertRowid) });
 });
 

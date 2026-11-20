@@ -348,6 +348,7 @@
     <td><input type="text" class="f-desc" value="${esc(s.description)}"></td>
     <td><input type="number" class="f-dur" min="5" max="480" step="5" value="${s.duration_min}"></td>
     <td><input type="number" class="f-price" min="0" step="10" value="${s.price_uah}"></td>
+    <td><input type="text" class="f-note" maxlength="60" value="${esc(s.price_note)}" placeholder="напр. від 1380 грн"></td>
     <td><input type="checkbox" class="f-active" ${s.active ? 'checked' : ''}></td>
     <td><button class="btn btn-ghost small" type="button" data-save-service="${s.id}">Зберегти</button></td>
   </tr>`;
@@ -357,6 +358,7 @@
     description: row.querySelector('.f-desc').value,
     duration_min: Number(row.querySelector('.f-dur').value),
     price_uah: Number(row.querySelector('.f-price').value),
+    price_note: row.querySelector('.f-note').value,
     active: row.querySelector('.f-active').checked ? 1 : 0,
   });
 
@@ -364,7 +366,7 @@
     const list = await api('/api/admin/services');
     $('#view').innerHTML = `
       <table>
-        <thead><tr><th>Назва</th><th>Опис</th><th>Хв</th><th>Ціна, грн</th><th>Активна</th><th></th></tr></thead>
+        <thead><tr><th>Назва</th><th>Опис</th><th>Хв</th><th>Ціна, грн</th><th>Орієнтовна ціна (текст)</th><th>Активна</th><th></th></tr></thead>
         <tbody>${list.map(serviceRow).join('')}</tbody>
       </table>
       <h3 style="margin-bottom:8px">Нова послуга</h3>
@@ -373,6 +375,7 @@
         <input name="description" placeholder="Опис" maxlength="300">
         <input name="duration_min" type="number" min="5" max="480" step="5" placeholder="Хв" required>
         <input name="price_uah" type="number" min="0" step="10" placeholder="Ціна, грн" required>
+        <input name="price_note" maxlength="60" placeholder="Орієнтовна ціна (необов'язково)">
         <button class="btn btn-primary small" type="submit">Додати</button>
       </form>`;
   }
@@ -600,6 +603,7 @@
             description: data.description,
             duration_min: Number(data.duration_min),
             price_uah: Number(data.price_uah),
+            price_note: data.price_note || '',
           },
         });
         notify('Послугу додано');

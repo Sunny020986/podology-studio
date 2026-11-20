@@ -99,12 +99,16 @@ function openDb() {
   if (!apptCols.includes('remind_code')) db.exec('ALTER TABLE appointments ADD COLUMN remind_code TEXT');
   if (!apptCols.includes('tg_chat_id')) db.exec('ALTER TABLE appointments ADD COLUMN tg_chat_id TEXT');
   if (!apptCols.includes('reminded')) db.exec('ALTER TABLE appointments ADD COLUMN reminded INTEGER NOT NULL DEFAULT 0');
+  // Орієнтовна ціна текстом («від 1380 грн»): показується на сайті замість числа, якщо заповнена
+  const svcCols = db.prepare('PRAGMA table_info(services)').all().map((c) => c.name);
+  if (!svcCols.includes('price_note')) db.exec("ALTER TABLE services ADD COLUMN price_note TEXT NOT NULL DEFAULT ''");
 
   createAccountTables(db);
   seed(db);
   seedSettings(db);
   migrateServicesV2(db);
   addServicesOnce(db, 'services_v3', EXTRA_SERVICES_V3);
+  setPriceNoteOnce(db);
   return db;
 }
 
@@ -167,6 +171,15 @@ const EXTRA_SERVICES_V3 = [
   ["Комп'ютерна діагностика стоп", 'Оцінка розподілу навантаження на стопи, рекомендації щодо устілок.', 30],
   ['Парафінотерапія для стоп', 'Зволоження й пом\'якшення шкіри стоп теплим парафіном.', 30],
 ];
+// Орієнтовні ціни з відкритих прайсів (dobrobut.com). Записуються один раз, далі майстер міняє їх в адмінці.
+function setPriceNoteOnce(db) {
+  if (db.prepare("SELECT 1 FROM settings WHERE key = 'price_note_v1'").get()) return;
+  db.transaction(() => {
+    db.prepare("UPDATE services SET price_note = 'від 1380 грн' WHERE name = 'Обробка врослого нігтя' AND price_note = ''").run();
+    db.prepare("INSERT INTO settings (key, value) VALUES ('price_note_v1', '1')").run();
+  })();
+}
+
 function addServicesOnce(db, flag, list) {
   if (db.prepare('SELECT 1 FROM settings WHERE key = ?').get(flag)) return;
   db.transaction(() => {

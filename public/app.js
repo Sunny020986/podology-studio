@@ -1,7 +1,8 @@
 (() => {
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const priceText = (p) => (p > 0 ? `${p} грн` : 'ціна уточнюється');
+  // Орієнтовна ціна текстом має пріоритет; інакше число з адмінки; 0 означає «ціна уточнюється»
+  const priceText = (s) => (s.price_note ? s.price_note : s.price_uah > 0 ? `${s.price_uah} грн` : 'ціна уточнюється');
   // 45 → «45 хв», 60 → «1 год», 90 → «1 год 30 хв»
   const durText = (m) => {
     const h = Math.floor(m / 60), r = m % 60;
@@ -88,7 +89,7 @@
     $('#servicesList').innerHTML = state.services.map((s) => `
       <button class="service" type="button" data-id="${s.id}">
         <span class="service-name">${esc(s.name)}</span>
-        <span class="service-meta">⏱ ${durText(s.duration_min)} · ${priceText(s.price_uah)}</span>
+        <span class="service-meta">⏱ ${durText(s.duration_min)} · ${esc(priceText(s))}</span>
         <span class="service-desc">${esc(s.description)}</span>
       </button>`).join('');
     setupServicesMore();

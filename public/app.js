@@ -182,6 +182,11 @@
     pickNearestDate();
   });
 
+  // Клік по полю дати одразу відкриває календар (де браузер це підтримує)
+  $('#dateInput').addEventListener('click', (e) => {
+    try { e.target.showPicker?.(); } catch (err) { /* браузер сам покаже календар кнопкою праворуч */ }
+  });
+
   $('#dateInput').addEventListener('change', (e) => {
     state.date = e.target.value;
     refreshSlots();

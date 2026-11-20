@@ -10,6 +10,7 @@
   --accent-text: #23786A; /* м'ятний для тексту на світлому фоні */
   --lilac: #B9A7EA;       /* ліловий акцент */
   --teal: #14857F;        /* зелено-блакитний для наведення в меню */
+  --teal-ink: #FFFFFF;    /* текст на зелено-блакитних кнопках */
   --danger: #B5485D;
   --ok: #23786A;
   --field: #FFFFFF;       /* тло полів введення */
@@ -82,6 +83,10 @@ a { color: inherit; text-decoration: none; }
 .hero h1 { font-size: 52px; line-height: 1.1; font-weight: 700; }
 .hero p { margin: 0; font-size: 18px; color: var(--muted); }
 .hero-actions { display: flex; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+/* Кнопки головного екрану плавно переходять до зелено-блакитного при наведенні */
+.hero-actions .btn { transition: background-color 0.35s ease, color 0.35s ease, border-color 0.35s ease; }
+.hero-actions .btn-primary:hover, .hero-actions .btn-primary:focus-visible { background: var(--teal); color: var(--teal-ink); }
+.hero-actions .btn-ghost:hover, .hero-actions .btn-ghost:focus-visible { color: var(--teal); border-color: var(--teal); }
 
 .card {
   background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 24px;
@@ -314,6 +319,7 @@ textarea.input { resize: vertical; min-height: 96px; }
   --accent-text: #8ED8C6;
   --lilac: #C5B4F5;
   --teal: #5FD6CF;
+  --teal-ink: #0E1F1D;
   --danger: #F08A9B;
   --ok: #8ED8C6;
   --field: #161422;

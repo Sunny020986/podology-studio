@@ -11,6 +11,8 @@ const { setupReviews } = require('./reviews');
 const { setupRepeatReminders } = require('./repeat');
 const { setupWaitlist } = require('./waitlist');
 const { setupStats } = require('./stats');
+const { setupTips } = require('./tips');
+const { localBusinessJsonLd, setupSeo } = require('./seo');
 const { freeSlots, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -166,8 +168,10 @@ app.get(['/', '/index.html'], (req, res) => {
     `<meta property="og:image:width" content="1200">`,
     `<meta property="og:image:height" content="630">`,
     `<meta name="twitter:card" content="summary_large_image">`,
-  ].join('\n');
-  res.type('html').send(INDEX_HTML.replace('<!--SEO-->', tags).replace('<title>Онлайн-запис до подолога</title>', `<title>${attr(title)}</title>`));
+  ].join('\n') +
+    `\n<link rel="canonical" href="${attr((siteUrl() || origin).replace(/\/+$/, '') + '/')}">\n` +
+    localBusinessJsonLd(db, s, (siteUrl() || origin).replace(/\/+$/, ''));
+  res.type('html').send(INDEX_HTML.replace('<!--SEO-->', () => tags).replace('<title>Онлайн-запис до подолога</title>', `<title>${attr(title)}</title>`));
 });
 
 app.use(express.static(PUBLIC_DIR));
@@ -294,6 +298,8 @@ app.use('/api/admin', requireAdmin);
 setupReviews({ app, db, telegram, todayStr, siteUrl, last9 });
 setupRepeatReminders({ db, telegram, todayStr, siteUrl, last9 });
 setupStats({ app, db, toMin, weekdayOf, last9 });
+setupTips({ app, db, siteUrl, readStudio });
+setupSeo({ app, db, siteUrl });
 const waitlist = setupWaitlist({
   app, db, telegram, freeSlots, isBookableDate, horizonDays: HORIZON_DAYS, todayStr, siteUrl, makeLimiter, last9,
 });

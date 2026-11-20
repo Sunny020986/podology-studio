@@ -82,6 +82,7 @@
     studio: renderStudio,
     reviews: renderReviews,
     stats: renderStats,
+    tips: renderTips,
   };
 
   function show(name) {
@@ -459,6 +460,51 @@
       </form>`;
   }
 
+  // ----- Поради з догляду -----
+  let editingTip = null; // null — список, 'new' — нова порада, число — редагування
+  async function renderTips() {
+    const list = await api('/api/admin/tips');
+    if (editingTip !== null) {
+      const t = editingTip === 'new' ? { title: '', summary: '', body: '', published: 0 } : list.find((x) => x.id === editingTip);
+      if (!t) { editingTip = null; return renderTips(); }
+      $('#view').innerHTML =
+        '<button class="btn btn-ghost small" type="button" id="tipBack">← До списку порад</button>' +
+        '<form class="tips-editor" id="tipForm">' +
+        '<label class="step-label" for="tipTitle">Заголовок</label><input class="input" id="tipTitle" maxlength="120" required value="' + esc(t.title) + '">' +
+        '<label class="step-label" for="tipSummary">Короткий опис (для картки на сайті й пошуку Google)</label><input class="input" id="tipSummary" maxlength="300" value="' + esc(t.summary) + '">' +
+        '<label class="step-label" for="tipBody">Текст. Абзаци розділяйте порожнім рядком</label><textarea class="input" id="tipBody" rows="14" maxlength="20000">' + esc(t.body) + '</textarea>' +
+        '<label><input type="checkbox" id="tipPublished"' + (t.published ? ' checked' : '') + '> Опублікувати на сайті</label>' +
+        '<div class="toolbar"><button class="btn btn-primary" type="submit">Зберегти</button>' +
+        (t.slug && t.published ? '<a class="btn btn-ghost small" href="/tips/' + encodeURIComponent(t.slug) + '" target="_blank" rel="noopener">Відкрити на сайті</a>' : '') + '</div>' +
+        '</form>';
+      return;
+    }
+    $('#view').innerHTML =
+      '<div class="toolbar"><button class="btn btn-primary small" type="button" id="tipNew">+ Нова порада</button>' +
+      '<span class="muted">На сайті видно лише опубліковані. Кожна має окрему сторінку, яку бачить Google.</span></div>' +
+      '<table><thead><tr><th>Заголовок</th><th>Статус</th><th>Оновлено</th><th></th></tr></thead><tbody>' +
+      (list.length ? list.map((t) => '<tr><td>' + esc(t.title) + '</td><td>' + (t.published ? 'Опубліковано' : '<span class="muted">Чернетка</span>') + '</td>' +
+        '<td>' + fmtDate(t.updated) + '</td><td><button class="btn btn-ghost small" type="button" data-edit-tip="' + t.id + '">Редагувати</button> ' +
+        '<button class="btn btn-ghost small danger" type="button" data-del-tip="' + t.id + '">Видалити</button></td></tr>').join('')
+        : '<tr><td colspan="4" class="muted">Порад поки немає.</td></tr>') + '</tbody></table>';
+  }
+  // Обробник форми порад: #view уже є в розмітці, тож вішаємо його напряму (змінну view оголошено нижче)
+  $('#view').addEventListener('submit', async (e) => {
+    if (e.target.id !== 'tipForm') return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const body = { title: $('#tipTitle').value, summary: $('#tipSummary').value, body: $('#tipBody').value, published: $('#tipPublished').checked };
+    try {
+      if (editingTip === 'new') await api('/api/admin/tips', { method: 'POST', body });
+      else await api('/api/admin/tips/' + editingTip, { method: 'PUT', body });
+      notify('Пораду збережено');
+      editingTip = null;
+      await renderTips();
+    } catch (err) {
+      notify(err.message, true);
+    }
+  });
+
   // ----- Статистика -----
   let statsMonth = today().slice(0, 7);
   async function renderStats() {
@@ -633,6 +679,14 @@
       }
 
       if (e.target.id === 'clientsCsv') return await downloadClientsCsv();
+      if (e.target.id === 'tipNew') { editingTip = 'new'; return await renderTips(); }
+      if (e.target.id === 'tipBack') { editingTip = null; return await renderTips(); }
+      if (e.target.dataset.editTip) { editingTip = Number(e.target.dataset.editTip); return await renderTips(); }
+      if (e.target.dataset.delTip) {
+        if (!confirm('Видалити пораду назавжди?')) return;
+        await api('/api/admin/tips/' + e.target.dataset.delTip, { method: 'DELETE' });
+        return await renderTips();
+      }
       if (e.target.dataset.delReview) {
         if (!confirm('Видалити відгук назавжди?')) return;
         await api('/api/admin/reviews/' + e.target.dataset.delReview, { method: 'DELETE' });

@@ -400,6 +400,16 @@
   });
 
   connectChat();
+  // Опубліковані поради з догляду: кожна веде на окрему сторінку
+  fetch('/api/tips').then((r) => r.json()).then((list) => {
+    if (!Array.isArray(list) || !list.length) return;
+    $('#tipsList').innerHTML = list.map((t) => '<a class="card tip-card" href="/tips/' + encodeURIComponent(t.slug) + '">' +
+      '<span class="tip-title">' + esc(t.title) + '</span>' +
+      (t.summary ? '<span class="tip-summary">' + esc(t.summary) + '</span>' : '') +
+      '<span class="tip-more">Читати →</span></a>').join('');
+    $('#tips').hidden = false;
+  }).catch(() => {});
+
   // Схвалені відгуки клієнтів
   fetch('/api/reviews').then((r) => r.json()).then((list) => {
     if (!Array.isArray(list) || !list.length) return;

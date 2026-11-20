@@ -5,6 +5,7 @@ const { createAccountTables } = require('./accounts');
 const { createReviewTables } = require('./reviews');
 const { createRepeatColumns } = require('./repeat');
 const { createWaitlistTable } = require('./waitlist');
+const { createTipsTable } = require('./tips');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'studio.db');
 
@@ -127,6 +128,7 @@ function openDb() {
   createReviewTables(db);
   createRepeatColumns(db);
   createWaitlistTable(db);
+  createTipsTable(db);
   seed(db);
   seedSettings(db);
   migrateServicesV2(db);

@@ -77,4 +77,10 @@ function freeSlots(db, dateStr, durationMin) {
   return slots;
 }
 
-module.exports = { freeSlots, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, STEP_MIN };
+// Дата, зсунута на n днів (працює з рядком YYYY-MM-DD)
+function addDays(dateStr, n) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+
+module.exports = { freeSlots, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays, STEP_MIN };

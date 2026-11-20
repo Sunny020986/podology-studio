@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { openDb, DB_PATH } = require('./db');
 const { createTelegram } = require('./telegram');
-const { freeSlots, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf } = require('./slots');
+const { freeSlots, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -184,6 +184,19 @@ app.get('/api/slots', (req, res) => {
   if (!service) return res.status(400).json({ error: 'Невідома послуга' });
   if (!isBookableDate(date, HORIZON_DAYS)) return res.status(400).json({ error: `Запис відкрито від сьогодні до ${maxDateStr(HORIZON_DAYS)}` });
   res.json({ date, slots: freeSlots(db, date, service.duration_min) });
+});
+
+// Найближчий день з вільним часом для послуги, щоб клієнт одразу бачив записи, а не порожню дату
+app.get('/api/next-slot', (req, res) => {
+  const service = db.prepare('SELECT duration_min FROM services WHERE id = ? AND active = 1').get(Number(req.query.serviceId));
+  if (!service) return res.status(400).json({ error: 'Невідома послуга' });
+  for (let i = 0; i <= HORIZON_DAYS; i++) {
+    const date = addDays(todayStr(), i);
+    if (!isBookableDate(date, HORIZON_DAYS)) break;
+    const slots = freeSlots(db, date, service.duration_min);
+    if (slots.length) return res.json({ date, slots });
+  }
+  res.json({ date: null, slots: [] });
 });
 
 // Перевірка вільного часу і запис виконуються в одній транзакції, тому два клієнти не займуть один слот.

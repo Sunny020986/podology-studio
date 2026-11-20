@@ -99,7 +99,7 @@
     $('#dateInput').min = today();
     settingsReady.then((cfg) => { if (cfg.maxDate) $('#dateInput').max = cfg.maxDate; });
     $('#dateInput').value = state.date;
-    refreshSlots();
+    pickNearestDate();
   }
 
   // Перелік довгий: спершу показуємо 6 послуг, решту за кнопкою
@@ -120,6 +120,20 @@
       apply(open);
       if (!open) $('#services').scrollIntoView({ behavior: 'smooth' });
     };
+  }
+
+  // Клієнт одразу бачить найближчий день з вільним часом, а не порожню дату
+  async function pickNearestDate() {
+    if (!state.serviceId) return refreshSlots();
+    try {
+      const r = await fetch(`/api/next-slot?serviceId=${state.serviceId}`);
+      const data = r.ok ? await r.json() : null;
+      if (data?.date) {
+        state.date = data.date;
+        $('#dateInput').value = data.date;
+      }
+    } catch (e) { /* без мережі лишається поточна дата */ }
+    return refreshSlots();
   }
 
   async function refreshSlots() {
@@ -159,13 +173,13 @@
     if (!card) return;
     state.serviceId = Number(card.dataset.id);
     $('#serviceSelect').value = state.serviceId;
-    refreshSlots();
+    pickNearestDate();
     $('#booking').scrollIntoView({ behavior: 'smooth' });
   });
 
   $('#serviceSelect').addEventListener('change', (e) => {
     state.serviceId = Number(e.target.value);
-    refreshSlots();
+    pickNearestDate();
   });
 
   $('#dateInput').addEventListener('change', (e) => {

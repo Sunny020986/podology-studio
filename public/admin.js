@@ -12,7 +12,6 @@
   let token = sessionStorage.getItem('adminToken') || '';
   let ws = null;
   let currentConv = null;
-  let appointmentDate = today();
   let blockDate = today();
   let clientQuery = '';
   let currentClient = null;
@@ -90,16 +89,30 @@
   document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));
 
   // ----- Записи -----
+  // Вкладка показує поточні й майбутні записи. Минулі не видаляються: вони в архіві
+  let apptArchive = false;
+  const shiftDay = (s, n) => {
+    const d = new Date(s + 'T12:00:00');
+    d.setDate(d.getDate() + n);
+    return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+  };
+
   async function renderAppointments() {
+    const [from, to] = apptArchive ? ['2000-01-01', shiftDay(today(), -1)] : [today(), '2999-12-31'];
     $('#view').innerHTML = `
-      <div class="toolbar"><label>Дата <input type="date" id="apptDate" value="${appointmentDate}"></label></div>
+      <div class="toolbar">
+        <button class="btn ${apptArchive ? 'btn-ghost' : 'btn-primary'} small" type="button" id="apptUpcoming">Поточні і майбутні</button>
+        <button class="btn ${apptArchive ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptArchiveBtn">Архів</button>
+      </div>
       <table>
-        <thead><tr><th>Час</th><th>Послуга</th><th>Клієнт</th><th>Телефон</th><th>Статус</th></tr></thead>
+        <thead><tr><th>Дата</th><th>Час</th><th>Послуга</th><th>Клієнт</th><th>Телефон</th><th>Статус</th></tr></thead>
         <tbody id="apptRows"></tbody>
       </table>`;
-    const rows = await api(`/api/admin/appointments?from=${appointmentDate}&to=${appointmentDate}`);
+    let rows = await api(`/api/admin/appointments?from=${from}&to=${to}`);
+    if (apptArchive) rows = rows.slice().reverse(); // в архіві найновіші зверху
     $('#apptRows').innerHTML = rows.length
       ? rows.map((r) => `<tr>
+          <td>${fmtDate(r.date)}</td>
           <td>${r.start_time}–${r.end_time}</td>
           <td>${esc(r.service)}</td>
           <td>${esc(r.client_name)}</td>
@@ -107,7 +120,7 @@
           <td><select data-appt="${r.id}">${Object.entries(STATUS)
             .map(([k, v]) => `<option value="${k}" ${k === r.status ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
         </tr>`).join('')
-      : '<tr><td colspan="5" class="muted">На цю дату записів немає.</td></tr>';
+      : `<tr><td colspan="6" class="muted">${apptArchive ? 'В архіві поки немає записів.' : 'Поточних і майбутніх записів немає.'}</td></tr>`;
   }
 
   // ----- Клієнти -----
@@ -454,10 +467,7 @@
 
   view.addEventListener('change', async (e) => {
     try {
-      if (e.target.id === 'apptDate') {
-        appointmentDate = e.target.value;
-        await renderAppointments();
-      } else if (e.target.id === 'blockDate') {
+      if (e.target.id === 'blockDate') {
         blockDate = e.target.value;
         await renderBlocks();
       } else if (e.target.dataset.appt) {
@@ -476,6 +486,10 @@
 
   view.addEventListener('click', async (e) => {
     try {
+      if (e.target.id === 'apptUpcoming' || e.target.id === 'apptArchiveBtn') {
+        apptArchive = e.target.id === 'apptArchiveBtn';
+        return await renderAppointments();
+      }
       const conv = e.target.closest('[data-conv]');
       if (conv) return await openConv(conv.dataset.conv);
 

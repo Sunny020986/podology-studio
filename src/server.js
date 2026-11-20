@@ -8,6 +8,7 @@ const { openDb, DB_PATH } = require('./db');
 const { createTelegram } = require('./telegram');
 const { setupAccounts, CHANGE_HOUR_OPTIONS } = require('./accounts');
 const { setupReviews } = require('./reviews');
+const { setupRepeatReminders } = require('./repeat');
 const { freeSlots, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -116,6 +117,11 @@ function validateService(body, partial = false) {
     out.price_uah = p;
   }
   if (!partial || body.price_note !== undefined) out.price_note = String(body.price_note ?? '').trim().slice(0, 60);
+  if (!partial || body.repeat_weeks !== undefined) {
+    const w = Number(body.repeat_weeks ?? 0);
+    if (!Number.isInteger(w) || w < 0 || w > 52) return { error: 'Повторний візит: від 0 до 52 тижнів (0 — не нагадувати)' };
+    out.repeat_weeks = w;
+  }
   if (body.active !== undefined) out.active = body.active ? 1 : 0;
   return { data: out };
 }
@@ -284,6 +290,7 @@ app.use('/api/admin', requireAdmin);
 
 // Відгуки: публічні маршрути і маршрути адмінки (останні вже під перевіркою доступу)
 setupReviews({ app, db, telegram, todayStr, siteUrl, last9 });
+setupRepeatReminders({ db, telegram, todayStr, siteUrl, last9 });
 
 // Налаштування годин для скасування й перенесення клієнтом (лише для адміна)
 app.get('/api/admin/change-hours', (req, res) => res.json({ hours: readChangeHours(), options: CHANGE_HOUR_OPTIONS }));
@@ -566,16 +573,16 @@ app.put('/api/admin/appointments/:id/note', (req, res) => {
 });
 
 app.get('/api/admin/services', (req, res) => {
-  res.json(db.prepare('SELECT id, name, description, duration_min, price_uah, price_note, active FROM services ORDER BY id').all());
+  res.json(db.prepare('SELECT id, name, description, duration_min, price_uah, price_note, repeat_weeks, active FROM services ORDER BY id').all());
 });
 
 app.post('/api/admin/services', (req, res) => {
   const v = validateService(req.body || {});
   if (v.error) return res.status(400).json({ error: v.error });
-  const d = { description: '', price_uah: 0, price_note: '', active: 1, ...v.data };
+  const d = { description: '', price_uah: 0, price_note: '', repeat_weeks: 0, active: 1, ...v.data };
   const info = db
-    .prepare('INSERT INTO services (name, description, duration_min, price_uah, price_note, active) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(d.name, d.description, d.duration_min, d.price_uah, d.price_note, d.active);
+    .prepare('INSERT INTO services (name, description, duration_min, price_uah, price_note, repeat_weeks, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(d.name, d.description, d.duration_min, d.price_uah, d.price_note, d.repeat_weeks, d.active);
   res.status(201).json({ id: Number(info.lastInsertRowid) });
 });
 

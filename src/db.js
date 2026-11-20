@@ -3,6 +3,7 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const { createAccountTables } = require('./accounts');
 const { createReviewTables } = require('./reviews');
+const { createRepeatColumns } = require('./repeat');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'studio.db');
 
@@ -123,6 +124,7 @@ function openDb() {
 
   createAccountTables(db);
   createReviewTables(db);
+  createRepeatColumns(db);
   seed(db);
   seedSettings(db);
   migrateServicesV2(db);

@@ -40,6 +40,18 @@
     document.body.style.overflow = '';
   }
   $('#accountBtn').addEventListener('click', open);
+
+  // Кнопка в шапці: після входу на ній світиться ім'я клієнта
+  function updateHeader() {
+    const btn = $('#accountBtn');
+    const name = state.me ? state.me.name.trim().split(/\s+/)[0] : '';
+    btn.classList.toggle('acc-logged', !!state.me);
+    btn.textContent = name || 'Кабінет';
+    btn.title = state.me ? 'Особистий кабінет: ' + state.me.name : '';
+    btn.setAttribute('aria-label', state.me ? 'Особистий кабінет, ' + state.me.name : 'Особистий кабінет');
+  }
+  // Одразу після завантаження сторінки перевіряємо, чи клієнт уже увійшов
+  api('/api/account/me').then((me) => { state.me = me; updateHeader(); }).catch(() => {});
   $('#accClose').addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.hidden) close(); });
@@ -50,6 +62,7 @@
     } catch (e) {
       state.me = null;
     }
+    updateHeader();
     if (state.me) return renderHome();
     renderAuth();
   }
@@ -70,7 +83,10 @@
     <input class="input" id="${id}" name="phone" type="tel" autocomplete="tel" required placeholder="+380501234567" maxlength="30">`;
   const passField = (id, label, auto) => `
     <label class="step-label" for="${id}">${label}</label>
-    <input class="input" id="${id}" name="password" type="password" autocomplete="${auto}" required minlength="8" maxlength="100">`;
+    <div class="pass-wrap">
+      <input class="input" id="${id}" name="password" type="password" autocomplete="${auto}" required minlength="8" maxlength="100">
+      <button class="pass-eye" type="button" data-eye="${id}" aria-label="Показати пароль" aria-pressed="false"><svg class="eye-open" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-closed" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.8 10.8 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2"/><path d="M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></button>
+    </div>`;
 
   const loginForm = () => `
     <form class="acc-form" id="loginForm">
@@ -109,7 +125,10 @@
   async function renderHome() {
     const me = state.me;
     body.innerHTML = `
-      <p>Вітаю, <b>${esc(me.name)}</b>. Телефон: ${esc(me.phone)}</p>
+      <div class="acc-hello">
+        <p>Вітаю, <b>${esc(me.name)}</b>.<br><span class="muted">Телефон: ${esc(me.phone)}</span></p>
+        <button class="btn btn-ghost small acc-logout" type="button" data-act="logout"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg> Вийти</button>
+      </div>
       <div class="acc-tg">
         ${me.telegram
           ? '<p class="muted">Telegram підключено: нагадування про записи надходитимуть у бот.</p><button class="btn btn-ghost small" type="button" data-act="tg-unlink">Відключити Telegram</button>'
@@ -117,8 +136,7 @@
         <p class="acc-msg" id="tgMsg" role="status"></p>
       </div>
       <h3 class="acc-h">Мої записи</h3>
-      <ul class="acc-list" id="apptList"><li class="muted">Завантажую…</li></ul>
-      <div class="acc-actions"><button class="btn btn-ghost small" type="button" data-act="logout">Вийти</button></div>`;
+      <ul class="acc-list" id="apptList"><li class="muted">Завантажую…</li></ul>`;
     await loadAppointments();
   }
 
@@ -176,6 +194,18 @@
       state.authTab = tab.dataset.tab;
       return renderAuth();
     }
+    // Око в полі пароля: показати або сховати введені символи
+    const eye = e.target.closest('[data-eye]');
+    if (eye) {
+      const input = document.getElementById(eye.dataset.eye);
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      eye.setAttribute('aria-pressed', String(show));
+      eye.setAttribute('aria-label', show ? 'Сховати пароль' : 'Показати пароль');
+      eye.classList.toggle('is-visible', show);
+      input.focus();
+      return;
+    }
     const slot = e.target.closest('[data-slot]');
     if (slot) return rescheduleTo(slot);
     const act = e.target.closest('[data-act]');
@@ -185,6 +215,7 @@
       if (a === 'logout') {
         await api('/api/account/logout', { method: 'POST' });
         state.me = null;
+        updateHeader();
         return renderAuth();
       }
       if (a === 'tg-link') {

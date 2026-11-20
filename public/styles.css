@@ -389,3 +389,16 @@ textarea.input { resize: vertical; min-height: 96px; }
 .acc-move { display: grid; gap: 8px; margin-top: 8px; }
 .acc-slots { display: flex; flex-wrap: wrap; gap: 8px; }
 .acc-tg { display: grid; gap: 6px; margin: 12px 0 4px; }
+
+/* Водяні кола на картках акцій (ефект з effects.js) */
+.fx .offer { position: relative; overflow: hidden; isolation: isolate; transition: transform 0.3s ease, box-shadow 0.3s ease; }
+.fx .offer:hover { transform: translateY(-3px); box-shadow: 0 12px 28px rgba(95, 185, 170, 0.18); }
+.water-ring {
+  position: absolute; z-index: -1; width: 24px; height: 24px; margin: -12px 0 0 -12px;
+  border-radius: 50%; pointer-events: none;
+  border: 2px solid rgba(95, 185, 170, 0.55);
+  background: radial-gradient(circle, rgba(142, 216, 198, 0.22) 0%, rgba(185, 167, 234, 0.12) 55%, transparent 70%);
+  transform: scale(0); opacity: 1;
+  animation: water-ring 1.4s cubic-bezier(0.2, 0.6, 0.3, 1) forwards;
+}
+@keyframes water-ring { to { transform: scale(14); opacity: 0; } }

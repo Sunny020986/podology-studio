@@ -10,6 +10,7 @@ const { setupAccounts, CHANGE_HOUR_OPTIONS } = require('./accounts');
 const { setupReviews } = require('./reviews');
 const { setupRepeatReminders } = require('./repeat');
 const { setupWaitlist } = require('./waitlist');
+const { setupStats } = require('./stats');
 const { freeSlots, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -292,6 +293,7 @@ app.use('/api/admin', requireAdmin);
 // Відгуки: публічні маршрути і маршрути адмінки (останні вже під перевіркою доступу)
 setupReviews({ app, db, telegram, todayStr, siteUrl, last9 });
 setupRepeatReminders({ db, telegram, todayStr, siteUrl, last9 });
+setupStats({ app, db, toMin, weekdayOf, last9 });
 const waitlist = setupWaitlist({
   app, db, telegram, freeSlots, isBookableDate, horizonDays: HORIZON_DAYS, todayStr, siteUrl, makeLimiter, last9,
 });

@@ -81,6 +81,7 @@
     services: renderServices,
     studio: renderStudio,
     reviews: renderReviews,
+    stats: renderStats,
   };
 
   function show(name) {
@@ -458,6 +459,29 @@
       </form>`;
   }
 
+  // ----- Статистика -----
+  let statsMonth = today().slice(0, 7);
+  async function renderStats() {
+    const s = await api('/api/admin/stats?month=' + statsMonth);
+    const tile = (value, label, hint) => '<div class="stat-tile"><div class="stat-tile-num">' + value + '</div><div class="stat-tile-label">' + label + '</div>' + (hint ? '<div class="muted stat-tile-hint">' + hint + '</div>' : '') + '</div>';
+    const maxTop = Math.max(1, ...s.topServices.map((t) => t.count));
+    $('#view').innerHTML =
+      '<div class="toolbar"><label>Місяць <input type="month" id="statsMonth" value="' + s.month + '"></label></div>' +
+      '<div class="stat-tiles">' +
+        tile(s.active, 'записів', 'з них відбулось: ' + s.done) +
+        tile(s.cancelled, 'скасовано', s.total ? Math.round((s.cancelled / s.total) * 100) + '% від усіх' : '') +
+        tile(s.newClients, 'нових клієнтів', 'усього клієнтів: ' + s.uniqueClients) +
+        tile(s.loadPercent + '%', 'заповненість розкладу', s.bookedHours.toLocaleString('uk-UA') + ' з ' + s.availableHours.toLocaleString('uk-UA') + ' год') +
+        tile(s.revenue ? s.revenue.toLocaleString('uk-UA') + ' грн' : '—', 'орієнтовний дохід', s.revenue ? 'за ' + s.revenueCount + ' візитами з вказаною ціною' : 'ціни послуг не вказані') +
+        tile(s.avgRating ? '★ ' + s.avgRating.toLocaleString('uk-UA') : '—', 'середня оцінка', 'відгуків: ' + s.reviews) +
+        tile(s.waitlist, 'у черзі очікування', '') +
+      '</div>' +
+      '<h3 style="margin:24px 0 10px">Найпопулярніші послуги</h3>' +
+      (s.topServices.length ? '<div class="top-services">' + s.topServices.map((t) =>
+        '<div class="top-row"><span class="top-name">' + esc(t.name) + '</span><span class="top-bar"><span style="width:' + Math.round((t.count / maxTop) * 100) + '%"></span></span><span class="top-count">' + t.count + '</span></div>').join('') + '</div>'
+        : '<p class="muted">У цьому місяці записів немає.</p>');
+  }
+
   // ----- Відгуки -----
   const REVIEW_STATUS = { pending: 'Чекає схвалення', approved: 'На сайті', hidden: 'Приховано' };
   async function renderReviews() {
@@ -561,6 +585,10 @@
         await api('/api/admin/archive-months', { method: 'PUT', body: { months: Number(e.target.value) } });
         notify('Збережено');
         return await loadClients();
+      }
+      if (e.target.id === 'statsMonth') {
+        if (e.target.value) statsMonth = e.target.value;
+        return await renderStats();
       }
       if (e.target.dataset.reviewStatus) {
         await api('/api/admin/reviews/' + e.target.dataset.reviewStatus, { method: 'PATCH', body: { status: e.target.value } });

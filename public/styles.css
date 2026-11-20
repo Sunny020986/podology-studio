@@ -549,3 +549,16 @@ html, body { overflow-x: clip; }       /* страховка: нічого не 
 .wait-form { display: flex; gap: 8px; flex-wrap: wrap; width: 100%; }
 .wait-form[hidden] { display: none; }
 .wait-form .input { flex: 1 1 160px; margin: 0; }
+
+/* Статистика в адмінці */
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.stat-tile { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: grid; gap: 4px; }
+.stat-tile-num { font-size: 28px; font-weight: 700; color: var(--accent-text, var(--accent)); font-variant-numeric: tabular-nums; }
+.stat-tile-label { font-weight: 600; }
+.stat-tile-hint { font-size: 13px; }
+.top-services { display: grid; gap: 8px; max-width: 720px; }
+.top-row { display: grid; grid-template-columns: minmax(140px, 260px) 1fr 40px; gap: 12px; align-items: center; }
+.top-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top-bar { height: 10px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.top-bar span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--lilac, #B9A7EA)); }
+.top-count { text-align: right; font-variant-numeric: tabular-nums; }

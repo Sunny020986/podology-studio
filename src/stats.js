@@ -1,0 +1,78 @@
+// Статистика для адмінки за обраний місяць.
+function setupStats({ app, db, toMin, weekdayOf, last9 }) {
+  const isMonth = (m) => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(m));
+  const pad = (n) => String(n).padStart(2, '0');
+
+  // Скільки хвилин за день доступно для запису: робочі години мінус перерви й блокування
+  function availableMinutes(date) {
+    const wd = weekdayOf(date);
+    const h = db.prepare('SELECT start_time, end_time FROM work_hours WHERE weekday = ?').get(wd);
+    if (!h || !h.start_time) return 0;
+    const s = toMin(h.start_time), e = toMin(h.end_time);
+    const busy = [
+      ...db.prepare('SELECT start_time, end_time FROM breaks WHERE weekday = ?').all(wd),
+      ...db.prepare('SELECT start_time, end_time FROM blocks WHERE date = ?').all(date),
+    ].map((b) => [Math.max(s, toMin(b.start_time)), Math.min(e, toMin(b.end_time))]).filter(([a, z]) => z > a)
+      .sort((x, y) => x[0] - y[0]);
+    let taken = 0, cursor = s; // перетини перерв і блокувань не рахуємо двічі
+    for (const [a, z] of busy) {
+      const from = Math.max(a, cursor);
+      if (z > from) { taken += z - from; cursor = z; }
+    }
+    return Math.max(0, e - s - taken);
+  }
+
+  app.get('/api/admin/stats', (req, res) => {
+    const month = isMonth(req.query.month) ? req.query.month : new Date().toISOString().slice(0, 7);
+    const [y, m] = month.split('-').map(Number);
+    const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const from = `${month}-01`, to = `${month}-${pad(days)}`;
+    const today = (() => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; })();
+
+    const appts = db.prepare(`SELECT a.date, a.start_time, a.end_time, a.status, a.client_phone, s.name AS service, s.price_uah
+      FROM appointments a JOIN services s ON s.id = a.service_id WHERE a.date BETWEEN ? AND ?`).all(from, to);
+    const active = appts.filter((a) => a.status !== 'cancelled');
+    const done = active.filter((a) => a.date < today);
+
+    // Нові клієнти: перший запис за всю історію припадає на цей місяць
+    const firstSeen = new Map();
+    for (const r of db.prepare('SELECT client_phone, MIN(date) AS first FROM appointments GROUP BY client_phone').all()) {
+      const k = last9(r.client_phone);
+      if (!firstSeen.has(k) || r.first < firstSeen.get(k)) firstSeen.set(k, r.first);
+    }
+    const newClients = [...firstSeen.values()].filter((d) => d >= from && d <= to).length;
+    const uniqueClients = new Set(active.map((a) => last9(a.client_phone))).size;
+
+    const byService = new Map();
+    for (const a of active) byService.set(a.service, (byService.get(a.service) || 0) + 1);
+    const topServices = [...byService.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count }));
+
+    let available = 0;
+    for (let d = 1; d <= days; d++) available += availableMinutes(`${month}-${pad(d)}`);
+    const booked = active.reduce((sum, a) => sum + (toMin(a.end_time) - toMin(a.start_time)), 0);
+
+    const priced = done.filter((a) => a.price_uah > 0);
+    const review = db.prepare(`SELECT COUNT(*) AS n, AVG(rating) AS avg FROM reviews WHERE date(created_at) BETWEEN ? AND ?`).get(from, to);
+
+    res.json({
+      month,
+      total: appts.length,
+      active: active.length,
+      done: done.length,
+      cancelled: appts.length - active.length,
+      newClients,
+      uniqueClients,
+      topServices,
+      loadPercent: available ? Math.round((booked / available) * 100) : 0,
+      bookedHours: Math.round(booked / 6) / 10,
+      availableHours: Math.round(available / 6) / 10,
+      revenue: priced.reduce((s, a) => s + a.price_uah, 0),
+      revenueCount: priced.length,
+      reviews: review.n,
+      avgRating: review.avg ? Math.round(review.avg * 10) / 10 : null,
+      waitlist: db.prepare("SELECT COUNT(*) AS n FROM waitlist WHERE date BETWEEN ? AND ?").get(from, to).n,
+    });
+  });
+}
+
+module.exports = { setupStats };

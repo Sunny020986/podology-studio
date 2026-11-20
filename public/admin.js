@@ -220,7 +220,7 @@
             <b id="threadTitle"></b>
             <button class="btn btn-ghost small danger" type="button" id="deleteConv">Видалити діалог</button>
           </div>
-          <div class="thread-body" id="threadBody"><div class="muted">Оберіть діалог зліва.</div></div>
+          <div class="thread-body" id="threadBody"><div class="muted">Оберіть діалог у списку.</div></div>
           <form class="reply-form" id="replyForm" hidden>
             <input class="input" id="replyInput" maxlength="1000" placeholder="Відповідь клієнту" autocomplete="off">
             <button class="btn btn-primary" type="submit">Надіслати</button>

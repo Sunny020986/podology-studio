@@ -52,15 +52,24 @@ function nowMin() {
   return d.getHours() * 60 + d.getMinutes();
 }
 
+// Час на прибирання після кожного візиту, хв (налаштовується в адмінці, за замовчуванням 0)
+function bufferMin(db) {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'buffer_min'").get();
+  const n = Number(row?.value);
+  return Number.isInteger(n) && n > 0 ? n : 0;
+}
+
 function freeSlots(db, dateStr, durationMin) {
   const hours = db.prepare('SELECT start_time, end_time FROM work_hours WHERE weekday = ?').get(weekdayOf(dateStr));
   if (!hours || !hours.start_time) return [];
 
   const dayStart = toMin(hours.start_time);
   const dayEnd = toMin(hours.end_time);
+  const buffer = bufferMin(db);
 
   const busy = [
-    ...db.prepare("SELECT start_time AS s, end_time AS e FROM appointments WHERE date = ? AND status != 'cancelled'").all(dateStr),
+    ...db.prepare("SELECT start_time AS s, end_time AS e FROM appointments WHERE date = ? AND status != 'cancelled'").all(dateStr)
+      .map((r) => ({ s: r.s, e: toHHMM(toMin(r.e) + buffer) })), // після візиту лишається час на прибирання
     ...db.prepare('SELECT start_time AS s, end_time AS e FROM blocks WHERE date = ?').all(dateStr),
     ...db.prepare('SELECT start_time AS s, end_time AS e FROM breaks WHERE weekday = ?').all(weekdayOf(dateStr)),
   ].map((r) => ({ s: toMin(r.s), e: toMin(r.e) }));
@@ -83,4 +92,4 @@ function addDays(dateStr, n) {
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
 
-module.exports = { freeSlots, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays, STEP_MIN };
+module.exports = { freeSlots, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays, STEP_MIN };

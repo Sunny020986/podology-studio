@@ -125,7 +125,10 @@
   async function renderHome() {
     const me = state.me;
     body.innerHTML = `
-      <p>Вітаю, <b>${esc(me.name)}</b>. Телефон: ${esc(me.phone)}</p>
+      <div class="acc-hello">
+        <p>Вітаю, <b>${esc(me.name)}</b>.<br><span class="muted">Телефон: ${esc(me.phone)}</span></p>
+        <button class="btn btn-ghost small acc-logout" type="button" data-act="logout"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg> Вийти</button>
+      </div>
       <div class="acc-tg">
         ${me.telegram
           ? '<p class="muted">Telegram підключено: нагадування про записи надходитимуть у бот.</p><button class="btn btn-ghost small" type="button" data-act="tg-unlink">Відключити Telegram</button>'
@@ -133,8 +136,7 @@
         <p class="acc-msg" id="tgMsg" role="status"></p>
       </div>
       <h3 class="acc-h">Мої записи</h3>
-      <ul class="acc-list" id="apptList"><li class="muted">Завантажую…</li></ul>
-      <div class="acc-actions"><button class="btn btn-ghost small" type="button" data-act="logout">Вийти</button></div>`;
+      <ul class="acc-list" id="apptList"><li class="muted">Завантажую…</li></ul>`;
     await loadAppointments();
   }
 

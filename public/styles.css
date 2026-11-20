@@ -518,3 +518,9 @@ html, body { overflow-x: clip; }       /* страховка: нічого не 
   0%, 100% { box-shadow: 0 0 0 3px rgba(142, 216, 198, 0.18), 0 0 10px rgba(142, 216, 198, 0.35); }
   50% { box-shadow: 0 0 0 3px rgba(142, 216, 198, 0.3), 0 0 18px rgba(142, 216, 198, 0.6); }
 }
+
+/* Кабінет: привітання і кнопка виходу в одному рядку */
+.acc-hello { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.acc-hello p { margin: 0; }
+.acc-logout { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.acc-logout:hover { color: var(--danger); border-color: var(--danger); }

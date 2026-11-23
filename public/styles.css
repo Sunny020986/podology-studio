@@ -640,3 +640,46 @@ html, body { overflow-x: clip; }       /* страховка: нічого не 
 .mf-photo { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .mf-photo img, .mf-photo-empty { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; }
 .mf-photo-empty { display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: 700; background: var(--active-bg); color: var(--accent-text, var(--accent)); }
+
+/* ===== Телефон: виправлення вигляду ===== */
+.toolbar { flex-wrap: wrap; }              /* панелі інструментів переносяться, а не вилазять за край */
+.toolbar .btn { white-space: nowrap; }
+.chat-fab { display: inline-flex; align-items: center; gap: 8px; }
+
+@media (max-width: 900px) {
+  /* Меню розділів на телефоні: другий рядок шапки, гортається вбік */
+  .nav { height: auto; min-height: 60px; flex-wrap: wrap; row-gap: 0; }
+  .nav-links { display: flex; order: 3; flex: 0 0 100%; gap: 20px; overflow-x: auto; white-space: nowrap;
+    padding: 0 0 10px; font-size: 14px; scrollbar-width: none; }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-links a { flex: none; }
+}
+@media (max-width: 560px) {
+  .nav { height: auto; }
+  /* Кнопка чату — кругла з іконкою, щоб не перекривати текст */
+  .chat-fab { width: 56px; height: 56px; padding: 0; border-radius: 50%; justify-content: center; }
+  .chat-fab .fab-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .footer { padding-bottom: 92px; }
+}
+
+@media (max-width: 700px) {
+  /* Адмінка */
+  .admin-wrap { padding: 14px 12px; }
+  .admin-top h2 { font-size: 22px; }
+  .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-bottom: 14px; padding-bottom: 2px; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: none; }
+  .panel { padding: 14px; }
+  .toolbar { gap: 8px; }
+  .cal-hint { margin-left: 0; flex-basis: 100%; }
+  .seg { flex-wrap: wrap; }
+  /* Робочі години: кожен день — окремий рядок-картка, без прокрутки вбік */
+  table:has(.hours-head), table:has(.hours-head) tbody { display: block; width: 100%; min-width: 0; }
+  .hours-head { display: none; }
+  tr[data-wd] { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto; gap: 6px 8px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  tr[data-wd] td { min-width: 0; border: 0; padding: 0; white-space: normal; }
+  tr[data-wd] td:first-child { grid-column: 1 / -1; font-weight: 600; }
+  tr[data-wd] input[type="time"] { width: 100%; min-width: 0; }
+  tr[data-wd] td:last-child { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  tr[data-wd] td:last-child::after { content: 'вихідний'; }
+}

@@ -598,7 +598,7 @@
       ${isSuper() ? `<div class="toolbar">${masterSelect('schedMaster', schedMasterId())}</div>` : ''}
       <h3 style="margin-bottom:12px">Робочі години${isSuper() ? '' : ': ' + esc(me.master.name)}</h3>
       <table>
-        <thead><tr><th>День</th><th>Початок</th><th>Кінець</th><th>Вихідний</th></tr></thead>
+        <thead class="hours-head"><tr><th>День</th><th>Початок</th><th>Кінець</th><th>Вихідний</th></tr></thead>
         <tbody>${rows.map((r) => `<tr data-wd="${r.weekday}">
           <td>${DAYS[r.weekday]}</td>
           <td><input type="time" class="st" value="${r.start_time || '09:00'}"></td>

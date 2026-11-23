@@ -99,3 +99,103 @@ function checkPassword(pw, stored) {
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 
 module.exports = { createMasterTables, activeMasters, masterOffers, hashPassword, checkPassword, sha, STATUSES, DEFAULT_HOURS };
+
+// ----- Керування майстрами (лише суперадмін; маршрути реєструються після перевірки ролі) -----
+function setupMasterAdmin({ app, db, todayStr }) {
+  const LOGIN_RX = /^[A-Za-z0-9._-]{3,30}$/;
+  const servicesOf = db.prepare('SELECT service_id FROM master_services WHERE master_id = ?');
+  const futureCount = (id) => db.prepare("SELECT COUNT(*) AS n FROM appointments WHERE master_id = ? AND date >= ? AND status != 'cancelled'").get(id, todayStr()).n;
+
+  function validate(body, creating) {
+    const name = String(body?.name ?? '').trim();
+    const login = String(body?.login ?? '').trim();
+    const password = String(body?.password ?? '');
+    if (name.length < 2 || name.length > 60) return { error: "Ім'я майстра: від 2 до 60 символів" };
+    if (!LOGIN_RX.test(login)) return { error: 'Логін: від 3 до 30 латинських літер, цифр, крапок, дефісів або підкреслень' };
+    if ((creating || password) && (password.length < 8 || password.length > 100)) return { error: 'Пароль: від 8 до 100 символів' };
+    const ids = Array.isArray(body?.services) ? [...new Set(body.services.map(Number))].filter((n) => Number.isInteger(n) && n > 0) : [];
+    const known = new Set(db.prepare('SELECT id FROM services').all().map((r) => r.id));
+    return { data: { name, login, password, services: ids.filter((id) => known.has(id)) } };
+  }
+  const setServices = (id, services) => {
+    db.prepare('DELETE FROM master_services WHERE master_id = ?').run(id);
+    const ins = db.prepare('INSERT INTO master_services (master_id, service_id) VALUES (?, ?)');
+    for (const s of services) ins.run(id, s);
+  };
+  const dropSessions = (id) => db.prepare('DELETE FROM master_sessions WHERE master_id = ?').run(id);
+  const loginTaken = (login, exceptId = 0) => !!db.prepare('SELECT 1 FROM masters WHERE login = ? AND id != ?').get(login, exceptId);
+
+  app.get('/api/admin/masters', (req, res) => {
+    res.json(db.prepare("SELECT id, name, login, status, pass_hash != '' AS has_password FROM masters WHERE status != 'deleted' ORDER BY id").all()
+      .map((m) => ({ ...m, has_password: !!m.has_password, services: servicesOf.all(m.id).map((r) => r.service_id), future: futureCount(m.id) })));
+  });
+
+  app.post('/api/admin/masters', (req, res) => {
+    const v = validate(req.body, true);
+    if (v.error) return res.status(400).json({ error: v.error });
+    if (loginTaken(v.data.login)) return res.status(409).json({ error: 'Такий логін уже зайнятий' });
+    const id = db.transaction(() => {
+      const newId = Number(db.prepare('INSERT INTO masters (name, login, pass_hash) VALUES (?, ?, ?)')
+        .run(v.data.name, v.data.login, hashPassword(v.data.password)).lastInsertRowid);
+      const insH = db.prepare('INSERT INTO master_hours (master_id, weekday, start_time, end_time) VALUES (?, ?, ?, ?)');
+      DEFAULT_HOURS.forEach(([s, e], wd) => insH.run(newId, wd, s, e));
+      setServices(newId, v.data.services);
+      return newId;
+    })();
+    res.status(201).json({ id });
+  });
+
+  app.put('/api/admin/masters/:id', (req, res) => {
+    const id = Number(req.params.id);
+    const m = db.prepare("SELECT * FROM masters WHERE id = ? AND status != 'deleted'").get(id);
+    if (!m) return res.status(404).json({ error: 'Майстра не знайдено' });
+    const v = validate(req.body, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+    if (loginTaken(v.data.login, id)) return res.status(409).json({ error: 'Такий логін уже зайнятий' });
+    db.transaction(() => {
+      db.prepare('UPDATE masters SET name = ?, login = ? WHERE id = ?').run(v.data.name, v.data.login, id);
+      if (v.data.password) {
+        db.prepare('UPDATE masters SET pass_hash = ? WHERE id = ?').run(hashPassword(v.data.password), id);
+        dropSessions(id); // після зміни пароля старі входи більше не діють
+      }
+      setServices(id, v.data.services);
+    })();
+    res.json({ ok: true });
+  });
+
+  app.post('/api/admin/masters/:id/block', (req, res) => {
+    const id = Number(req.params.id);
+    if (!db.prepare("UPDATE masters SET status = 'blocked' WHERE id = ? AND status = 'active'").run(id).changes) {
+      return res.status(404).json({ error: 'Майстра не знайдено або вже заблоковано' });
+    }
+    dropSessions(id);
+    res.json({ ok: true, future: futureCount(id) });
+  });
+
+  app.post('/api/admin/masters/:id/unblock', (req, res) => {
+    const id = Number(req.params.id);
+    if (!db.prepare("UPDATE masters SET status = 'active' WHERE id = ? AND status = 'blocked'").run(id).changes) {
+      return res.status(404).json({ error: 'Майстра не знайдено або він не заблокований' });
+    }
+    res.json({ ok: true });
+  });
+
+  // «Видалення» ховає майстра: він зникає з сайту й адмінки, а минулі записи й статистика лишаються
+  app.delete('/api/admin/masters/:id', (req, res) => {
+    const id = Number(req.params.id);
+    const m = db.prepare("SELECT * FROM masters WHERE id = ? AND status != 'deleted'").get(id);
+    if (!m) return res.status(404).json({ error: 'Майстра не знайдено' });
+    const others = db.prepare("SELECT COUNT(*) AS n FROM masters WHERE status != 'deleted' AND id != ?").get(id).n;
+    if (!others) return res.status(409).json({ error: 'Не можна видалити останнього майстра. Спершу додайте іншого' });
+    const future = futureCount(id);
+    if (future) return res.status(409).json({ error: `У майстра є майбутні записи: ${future}. Скасуйте їх або домовтеся з клієнтами, потім видаліть майстра` });
+    db.transaction(() => {
+      // Логін звільняється, щоб його можна було дати новому майстрові
+      db.prepare("UPDATE masters SET status = 'deleted', login = login || '~deleted~' || id WHERE id = ?").run(id);
+      dropSessions(id);
+    })();
+    res.json({ ok: true });
+  });
+}
+
+module.exports.setupMasterAdmin = setupMasterAdmin;

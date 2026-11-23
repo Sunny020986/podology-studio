@@ -12,7 +12,7 @@ const { setupRepeatReminders } = require('./repeat');
 const { setupWaitlist } = require('./waitlist');
 const { setupStats } = require('./stats');
 const { setupTips } = require('./tips');
-const { activeMasters, masterOffers } = require('./masters');
+const { activeMasters, masterOffers, checkPassword: checkMasterPassword, sha, setupMasterAdmin } = require('./masters');
 const { localBusinessJsonLd, setupSeo } = require('./seo');
 const { freeSlots, pickMaster, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
@@ -93,11 +93,22 @@ const requireAdmin = (req, res, next) => {
     return res.status(429).json({ error: `Забагато невдалих спроб входу. Спробуйте через ${loginLimiter.minutesLeft(req.ip)} хв` });
   }
   const h = req.headers.authorization || '';
-  if (!h.startsWith('Bearer ') || !tokenOk(h.slice(7))) {
-    loginLimiter.hit(req.ip);
-    return res.status(401).json({ error: 'Невірний токен' });
+  const token = h.startsWith('Bearer ') ? h.slice(7) : '';
+  if (tokenOk(token)) {
+    req.role = 'super';
+    return next();
   }
-  next();
+  // Майстер: токен сесії після входу за логіном і паролем; заблокований майстер одразу втрачає доступ
+  const s = token && db.prepare(`SELECT m.id, m.name FROM master_sessions ss JOIN masters m ON m.id = ss.master_id
+    WHERE ss.token_hash = ? AND ss.expires_at > ? AND m.status = 'active'`).get(sha(token), Date.now());
+  if (s) {
+    req.role = 'master';
+    req.masterId = s.id;
+    req.masterName = s.name;
+    return next();
+  }
+  loginLimiter.hit(req.ip);
+  return res.status(401).json({ error: 'Невірний токен або сесія завершилась' });
 };
 
 // ---------- Валідація ----------
@@ -307,8 +318,65 @@ app.post('/api/appointments', (req, res) => {
   }
 });
 
+// ---------- Вхід майстра в адмінку ----------
+const MASTER_SESSION_DAYS = 30;
+app.post('/api/master-login', (req, res) => {
+  if (loginLimiter.blocked(req.ip)) {
+    return res.status(429).json({ error: `Забагато невдалих спроб входу. Спробуйте через ${loginLimiter.minutesLeft(req.ip)} хв` });
+  }
+  const m = db.prepare("SELECT * FROM masters WHERE login = ? AND status != 'deleted'").get(String(req.body?.login ?? '').trim());
+  if (!m || !checkMasterPassword(String(req.body?.password ?? ''), m.pass_hash)) {
+    loginLimiter.hit(req.ip);
+    return res.status(401).json({ error: 'Невірний логін або пароль' });
+  }
+  if (m.status === 'blocked') return res.status(403).json({ error: 'Доступ заблоковано. Зверніться до адміністратора' });
+  const token = crypto.randomBytes(32).toString('base64url');
+  db.prepare('INSERT INTO master_sessions (token_hash, master_id, expires_at) VALUES (?, ?, ?)')
+    .run(sha(token), m.id, Date.now() + MASTER_SESSION_DAYS * 86400 * 1000);
+  res.json({ token, name: m.name });
+});
+
 // ---------- Адмін API ----------
 app.use('/api/admin', requireAdmin);
+
+// Майстрові доступні лише його записи, клієнти, графік, блокування й черга. Решта — тільки суперадміну.
+const MASTER_ROUTES = [
+  /^GET \/me$/, /^POST \/logout$/,
+  /^GET \/appointments$/, /^PATCH \/appointments\/\d+$/, /^PUT \/appointments\/\d+\/note$/, /^GET \/appointments\/\d+\/review-link$/,
+  /^GET \/clients$/, /^GET \/clients\/\d{9}$/, /^PUT \/clients\/\d{9}\/note$/,
+  /^GET \/schedule$/, /^PUT \/schedule\/\d$/, /^GET \/breaks$/, /^POST \/breaks$/, /^DELETE \/breaks\/\d+$/,
+  /^GET \/blocks$/, /^POST \/blocks$/, /^DELETE \/blocks\/\d+$/, /^GET \/waitlist$/, /^DELETE \/waitlist\/\d+$/,
+];
+app.use('/api/admin', (req, res, next) => {
+  if (req.role === 'super' || MASTER_ROUTES.some((rx) => rx.test(`${req.method} ${req.path}`))) return next();
+  res.status(403).json({ error: 'Недостатньо прав: це доступно лише адміністратору' });
+});
+
+// Який майстер у запиті: майстер — завжди він сам; суперадмін — обраний через masterId (або всі, якщо не обрано)
+const scopeMaster = (req) => {
+  if (req.role === 'master') return req.masterId;
+  const v = Number(req.query.masterId ?? req.body?.master_id);
+  return Number.isInteger(v) && v > 0 ? v : null;
+};
+const ownsAppt = (req, id) => req.role === 'super' || !!db.prepare('SELECT 1 FROM appointments WHERE id = ? AND master_id = ?').get(id, req.masterId);
+// Для графіка майстер обов'язковий: суперадмін має його обрати
+function scheduleMaster(req, res) {
+  const id = scopeMaster(req);
+  if (!id || !db.prepare("SELECT 1 FROM masters WHERE id = ? AND status != 'deleted'").get(id)) {
+    res.status(400).json({ error: 'Оберіть майстра' });
+    return null;
+  }
+  return id;
+}
+
+app.get('/api/admin/me', (req, res) => res.json(req.role === 'super'
+  ? { role: 'super' }
+  : { role: 'master', master: { id: req.masterId, name: req.masterName } }));
+app.post('/api/admin/logout', (req, res) => {
+  if (req.role === 'master') db.prepare('DELETE FROM master_sessions WHERE token_hash = ?').run(sha((req.headers.authorization || '').slice(7)));
+  res.json({ ok: true });
+});
+setupMasterAdmin({ app, db, todayStr });
 
 // Відгуки: публічні маршрути і маршрути адмінки (останні вже під перевіркою доступу)
 setupReviews({ app, db, telegram, todayStr, siteUrl, last9 });
@@ -374,10 +442,11 @@ app.get('/api/admin/appointments', (req, res) => {
   const to = isValidDate(req.query.to) ? req.query.to : from;
   res.json(
     db
-      .prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.client_name, a.client_phone, a.status, a.client_comment, s.name AS service
-                FROM appointments a JOIN services s ON s.id = a.service_id
-                WHERE a.date BETWEEN ? AND ? ORDER BY a.date, a.start_time`)
-      .all(from, to)
+      .prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.client_name, a.client_phone, a.status, a.client_comment,
+                       a.master_id, m.name AS master, s.name AS service
+                FROM appointments a JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id
+                WHERE a.date BETWEEN ? AND ? AND (? IS NULL OR a.master_id = ?) ORDER BY a.date, a.start_time`)
+      .all(from, to, scopeMaster(req), scopeMaster(req))
   );
 });
 
@@ -399,6 +468,7 @@ const setStatusTx = db.transaction((id, status) => {
 app.patch('/api/admin/appointments/:id', (req, res) => {
   const status = req.body?.status;
   if (!['new', 'confirmed', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Некоректний статус' });
+  if (!ownsAppt(req, Number(req.params.id))) return res.status(403).json({ error: 'Це запис іншого майстра' });
   try {
     setStatusTx(Number(req.params.id), status);
     if (status === 'cancelled') {
@@ -469,11 +539,13 @@ const isClientKey = (k) => /^\d{9}$/.test(k);
 const NOTE_MAX = 5000;
 
 // mode: 'active' — лише активні, 'archived' — лише в архіві, без параметра — усі (для вивантаження)
-function listClients(q, mode) {
+// masterId: лише клієнти, які були записані до цього майстра
+function listClients(q, mode, masterId = null) {
   const today = todayStr();
   const rows = db
-    .prepare('SELECT date, start_time, client_name, client_phone, status, updated_at FROM appointments ORDER BY date, start_time')
-    .all();
+    .prepare('SELECT date, start_time, client_name, client_phone, status, updated_at, master_id FROM appointments ORDER BY date, start_time')
+    .all()
+    .filter((r) => !masterId || r.master_id === masterId);
   const notes = new Map(db.prepare('SELECT phone_key, note, updated_at FROM client_notes').all().map((r) => [r.phone_key, r]));
   const archive = new Map(db.prepare('SELECT phone_key, pinned, manual, archived_at FROM client_archive').all().map((r) => [r.phone_key, r]));
   const map = new Map();
@@ -512,7 +584,7 @@ function listClients(q, mode) {
 }
 
 app.get('/api/admin/clients', (req, res) => {
-  res.json(listClients(req.query.q, req.query.archived === '1' ? 'archived' : 'active'));
+  res.json(listClients(req.query.q, req.query.archived === '1' ? 'archived' : 'active', scopeMaster(req)));
 });
 
 // Архів клієнтів: клієнт без змін довше за обраний термін переходить в архів. Будь-яка нова зміна повертає його в активні.
@@ -587,10 +659,11 @@ app.get('/api/admin/clients/:key', (req, res) => {
   const key = req.params.key;
   if (!isClientKey(key)) return res.status(400).json({ error: 'Некоректний клієнт' });
   const appointments = db
-    .prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.client_name, a.client_phone, a.status, a.note, s.name AS service
-              FROM appointments a JOIN services s ON s.id = a.service_id ORDER BY a.date DESC, a.start_time DESC`)
+    .prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.client_name, a.client_phone, a.status, a.note, a.master_id, m.name AS master, s.name AS service
+              FROM appointments a JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id
+              ORDER BY a.date DESC, a.start_time DESC`)
     .all()
-    .filter((a) => last9(a.client_phone) === key);
+    .filter((a) => last9(a.client_phone) === key && (req.role === 'super' || a.master_id === req.masterId));
   if (!appointments.length) return res.status(404).json({ error: 'Клієнта не знайдено' });
   const noteRow = db.prepare('SELECT note, updated_at FROM client_notes WHERE phone_key = ?').get(key);
   res.json({
@@ -605,6 +678,9 @@ app.get('/api/admin/clients/:key', (req, res) => {
 app.put('/api/admin/clients/:key/note', (req, res) => {
   const key = req.params.key;
   if (!isClientKey(key)) return res.status(400).json({ error: 'Некоректний клієнт' });
+  if (req.role === 'master' && !listClients(undefined, undefined, req.masterId).some((c) => c.key === key)) {
+    return res.status(403).json({ error: 'Це клієнт іншого майстра' });
+  }
   const note = String(req.body?.note ?? '').trim();
   if (note.length > NOTE_MAX) return res.status(400).json({ error: `Нотатка: не більше ${NOTE_MAX} символів` });
   db.prepare(`INSERT INTO client_notes (phone_key, note) VALUES (?, ?)
@@ -615,6 +691,7 @@ app.put('/api/admin/clients/:key/note', (req, res) => {
 app.put('/api/admin/appointments/:id/note', (req, res) => {
   const note = String(req.body?.note ?? '').trim();
   if (note.length > NOTE_MAX) return res.status(400).json({ error: `Нотатка: не більше ${NOTE_MAX} символів` });
+  if (!ownsAppt(req, Number(req.params.id))) return res.status(403).json({ error: 'Це запис іншого майстра' });
   const changed = db.prepare('UPDATE appointments SET note = ? WHERE id = ?').run(note, Number(req.params.id)).changes;
   if (!changed) return res.status(404).json({ error: 'Запис не знайдено' });
   res.json({ ok: true });
@@ -631,6 +708,7 @@ app.post('/api/admin/services', (req, res) => {
   const info = db
     .prepare('INSERT INTO services (name, description, duration_min, price_uah, price_note, repeat_weeks, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run(d.name, d.description, d.duration_min, d.price_uah, d.price_note, d.repeat_weeks, d.active);
+  db.prepare("INSERT OR IGNORE INTO master_services (master_id, service_id) SELECT id, ? FROM masters WHERE status = 'active'").run(Number(info.lastInsertRowid));
   res.status(201).json({ id: Number(info.lastInsertRowid) });
 });
 
@@ -652,59 +730,74 @@ app.put('/api/admin/buffer', (req, res) => {
 });
 
 app.get('/api/admin/schedule', (req, res) => {
-  res.json(db.prepare('SELECT weekday, start_time, end_time FROM work_hours ORDER BY weekday').all());
+  const mid = scheduleMaster(req, res);
+  if (!mid) return;
+  res.json(db.prepare('SELECT weekday, start_time, end_time FROM master_hours WHERE master_id = ? ORDER BY weekday').all(mid));
 });
 
 app.put('/api/admin/schedule/:weekday', (req, res) => {
   const wd = Number(req.params.weekday);
   if (!Number.isInteger(wd) || wd < 0 || wd > 6) return res.status(400).json({ error: 'День: від 0 (Пн) до 6 (Нд)' });
+  const mid = scheduleMaster(req, res);
+  if (!mid) return;
   const { start_time, end_time } = req.body || {};
+  const upsert = db.prepare(`INSERT INTO master_hours (master_id, weekday, start_time, end_time) VALUES (?, ?, ?, ?)
+    ON CONFLICT(master_id, weekday) DO UPDATE SET start_time = excluded.start_time, end_time = excluded.end_time`);
   if (start_time === null || start_time === undefined) {
-    db.prepare('UPDATE work_hours SET start_time = NULL, end_time = NULL WHERE weekday = ?').run(wd);
+    upsert.run(mid, wd, null, null);
     return res.json({ ok: true });
   }
   if (!isTime(start_time) || !isTime(end_time) || toMin(start_time) >= toMin(end_time)) {
     return res.status(400).json({ error: 'Початок має бути раніше за кінець' });
   }
-  db.prepare('UPDATE work_hours SET start_time = ?, end_time = ? WHERE weekday = ?').run(start_time, end_time, wd);
+  upsert.run(mid, wd, start_time, end_time);
   res.json({ ok: true });
 });
 
 app.get('/api/admin/blocks', (req, res) => {
+  const mid = scheduleMaster(req, res);
+  if (!mid) return;
   const date = isValidDate(req.query.date) ? req.query.date : todayStr();
-  res.json(db.prepare('SELECT id, date, start_time, end_time, note FROM blocks WHERE date = ? ORDER BY start_time').all(date));
+  res.json(db.prepare('SELECT id, date, start_time, end_time, note FROM blocks WHERE master_id = ? AND date = ? ORDER BY start_time').all(mid, date));
 });
 
 app.post('/api/admin/blocks', (req, res) => {
+  const mid = scheduleMaster(req, res);
+  if (!mid) return;
   const { date, start_time, end_time, note } = req.body || {};
   if (!isValidDate(date)) return res.status(400).json({ error: 'Некоректна дата' });
   if (!isTime(start_time) || !isTime(end_time) || toMin(start_time) >= toMin(end_time)) {
     return res.status(400).json({ error: 'Початок має бути раніше за кінець' });
   }
   const info = db
-    .prepare('INSERT INTO blocks (date, start_time, end_time, note) VALUES (?, ?, ?, ?)')
-    .run(date, start_time, end_time, String(note ?? '').trim().slice(0, 100));
+    .prepare('INSERT INTO blocks (date, start_time, end_time, note, master_id) VALUES (?, ?, ?, ?, ?)')
+    .run(date, start_time, end_time, String(note ?? '').trim().slice(0, 100), mid);
   res.status(201).json({ id: Number(info.lastInsertRowid) });
 });
 
 app.delete('/api/admin/blocks/:id', (req, res) => {
-  db.prepare('DELETE FROM blocks WHERE id = ?').run(Number(req.params.id));
+  if (req.role === 'master') db.prepare('DELETE FROM blocks WHERE id = ? AND master_id = ?').run(Number(req.params.id), req.masterId);
+  else db.prepare('DELETE FROM blocks WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true });
 });
 
 // Щотижневі перерви (обід тощо)
 app.get('/api/admin/breaks', (req, res) => {
-  res.json(db.prepare('SELECT id, weekday, start_time, end_time, note FROM breaks ORDER BY start_time, weekday').all());
+  const mid = scheduleMaster(req, res);
+  if (!mid) return;
+  res.json(db.prepare('SELECT id, weekday, start_time, end_time, note FROM breaks WHERE master_id = ? ORDER BY start_time, weekday').all(mid));
 });
 
-const addBreaksTx = db.transaction((weekdays, start, end, note) => {
-  const ins = db.prepare('INSERT OR IGNORE INTO breaks (weekday, start_time, end_time, note) VALUES (?, ?, ?, ?)');
+const addBreaksTx = db.transaction((masterId, weekdays, start, end, note) => {
+  const ins = db.prepare('INSERT OR IGNORE INTO breaks (master_id, weekday, start_time, end_time, note) VALUES (?, ?, ?, ?, ?)');
   let added = 0;
-  for (const wd of weekdays) added += ins.run(wd, start, end, note).changes;
+  for (const wd of weekdays) added += ins.run(masterId, wd, start, end, note).changes;
   return added;
 });
 
 app.post('/api/admin/breaks', (req, res) => {
+  const mid = scheduleMaster(req, res);
+  if (!mid) return;
   const { weekdays, start_time, end_time, note } = req.body || {};
   const days = Array.isArray(weekdays) ? [...new Set(weekdays.map(Number))] : [];
   if (!days.length || days.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) {
@@ -713,18 +806,19 @@ app.post('/api/admin/breaks', (req, res) => {
   if (!isTime(start_time) || !isTime(end_time) || toMin(start_time) >= toMin(end_time)) {
     return res.status(400).json({ error: 'Початок має бути раніше за кінець' });
   }
-  const added = addBreaksTx(days, start_time, end_time, String(note ?? '').trim().slice(0, 60));
+  const added = addBreaksTx(mid, days, start_time, end_time, String(note ?? '').trim().slice(0, 60));
 
   // Скільки вже наявних майбутніх записів потрапляє на нову перерву: вони залишаються чинними
   const clashes = db
-    .prepare("SELECT date FROM appointments WHERE date >= ? AND status != 'cancelled' AND start_time < ? AND end_time > ?")
-    .all(todayStr(), end_time, start_time)
+    .prepare("SELECT date FROM appointments WHERE master_id = ? AND date >= ? AND status != 'cancelled' AND start_time < ? AND end_time > ?")
+    .all(mid, todayStr(), end_time, start_time)
     .filter((a) => days.includes(weekdayOf(a.date))).length;
   res.status(201).json({ added, clashes });
 });
 
 app.delete('/api/admin/breaks/:id', (req, res) => {
-  db.prepare('DELETE FROM breaks WHERE id = ?').run(Number(req.params.id));
+  if (req.role === 'master') db.prepare('DELETE FROM breaks WHERE id = ? AND master_id = ?').run(Number(req.params.id), req.masterId);
+  else db.prepare('DELETE FROM breaks WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true });
 });
 

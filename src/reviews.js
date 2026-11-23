@@ -121,6 +121,7 @@ function setupReviews({ app, db, telegram, todayStr, siteUrl, last9 }) {
   app.get('/api/admin/appointments/:id/review-link', (req, res) => {
     const a = db.prepare('SELECT * FROM appointments WHERE id = ?').get(Number(req.params.id));
     if (!a) return res.status(404).json({ error: 'Запис не знайдено' });
+    if (req.role === 'master' && a.master_id !== req.masterId) return res.status(403).json({ error: 'Це запис іншого майстра' });
     const link = linkFor(ensureCode(a));
     if (!link) return res.status(400).json({ error: 'Спершу вкажіть адресу сайту в адмінці, вкладка «Кабінет»' });
     res.json({ link });

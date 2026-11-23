@@ -88,12 +88,17 @@ function setupWaitlist({ app, db, telegram, freeSlots, isBookableDate, horizonDa
 
   // ----- Адмінка (маршрути реєструються після перевірки доступу адміна) -----
   app.get('/api/admin/waitlist', (req, res) => {
-    res.json(db.prepare(`SELECT w.id, w.date, w.name, w.phone, w.status, (w.tg_chat_id IS NOT NULL) AS telegram, s.name AS service
-      FROM waitlist w JOIN services s ON s.id = w.service_id
-      WHERE w.status IN ('waiting', 'notified') AND w.date >= ? ORDER BY w.date, w.id`).all(todayStr()));
+    // Майстер бачить заявки до себе і заявки «до будь-кого»
+    const mine = req.role === 'master' ? req.masterId : null;
+    res.json(db.prepare(`SELECT w.id, w.date, w.name, w.phone, w.status, (w.tg_chat_id IS NOT NULL) AS telegram, s.name AS service,
+        w.master_id, m.name AS master
+      FROM waitlist w JOIN services s ON s.id = w.service_id LEFT JOIN masters m ON m.id = w.master_id
+      WHERE w.status IN ('waiting', 'notified') AND w.date >= ? AND (? IS NULL OR w.master_id IS NULL OR w.master_id = ?)
+      ORDER BY w.date, w.id`).all(todayStr(), mine, mine));
   });
   app.delete('/api/admin/waitlist/:id', (req, res) => {
-    db.prepare("UPDATE waitlist SET status = 'removed' WHERE id = ?").run(Number(req.params.id));
+    if (req.role === 'master') db.prepare("UPDATE waitlist SET status = 'removed' WHERE id = ? AND master_id = ?").run(Number(req.params.id), req.masterId);
+    else db.prepare("UPDATE waitlist SET status = 'removed' WHERE id = ?").run(Number(req.params.id));
     res.json({ ok: true });
   });
 

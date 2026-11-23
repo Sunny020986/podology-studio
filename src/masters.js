@@ -74,6 +74,11 @@ function createMasterTables(db) {
     }
   })();
   db.exec('CREATE INDEX IF NOT EXISTS idx_appt_master_date ON appointments(master_id, date)');
+  // Особистий Telegram майстра, опис і фото для блоку «Наші майстри»
+  const mcols = colsOf('masters');
+  if (!mcols.includes('tg_chat_id')) db.exec('ALTER TABLE masters ADD COLUMN tg_chat_id TEXT');
+  if (!mcols.includes('bio')) db.exec("ALTER TABLE masters ADD COLUMN bio TEXT NOT NULL DEFAULT ''");
+  if (!mcols.includes('photo')) db.exec("ALTER TABLE masters ADD COLUMN photo TEXT NOT NULL DEFAULT ''");
 }
 
 // ----- Допоміжні запити -----
@@ -126,8 +131,8 @@ function setupMasterAdmin({ app, db, todayStr }) {
   const loginTaken = (login, exceptId = 0) => !!db.prepare('SELECT 1 FROM masters WHERE login = ? AND id != ?').get(login, exceptId);
 
   app.get('/api/admin/masters', (req, res) => {
-    res.json(db.prepare("SELECT id, name, login, status, pass_hash != '' AS has_password FROM masters WHERE status != 'deleted' ORDER BY id").all()
-      .map((m) => ({ ...m, has_password: !!m.has_password, services: servicesOf.all(m.id).map((r) => r.service_id), future: futureCount(m.id) })));
+    res.json(db.prepare("SELECT id, name, login, status, bio, photo, pass_hash != '' AS has_password, tg_chat_id IS NOT NULL AS telegram FROM masters WHERE status != 'deleted' ORDER BY id").all()
+      .map((m) => ({ ...m, has_password: !!m.has_password, telegram: !!m.telegram, services: servicesOf.all(m.id).map((r) => r.service_id), future: futureCount(m.id) })));
   });
 
   app.post('/api/admin/masters', (req, res) => {

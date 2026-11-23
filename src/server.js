@@ -12,9 +12,10 @@ const { setupRepeatReminders } = require('./repeat');
 const { setupWaitlist } = require('./waitlist');
 const { setupStats } = require('./stats');
 const { setupTips } = require('./tips');
+const { setupAdminAppointments } = require('./admin-appointments');
 const { activeMasters, masterOffers, checkPassword: checkMasterPassword, sha, setupMasterAdmin } = require('./masters');
 const { localBusinessJsonLd, setupSeo } = require('./seo');
-const { freeSlots, pickMaster, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
+const { freeSlots, masterFreeSlots, pickMaster, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -245,12 +246,12 @@ app.get('/api/next-slot', (req, res) => {
 // Перевірка вільного часу і запис виконуються в одній транзакції, тому два клієнти не займуть один слот.
 const last9 = (phone) => phone.replace(/\D/g, '').slice(-9); // номер без коду країни, щоб +380 50... і 050... збігалися
 
-const bookTx = db.transaction(({ service, date, time, name, phone, comment, masterId }) => {
+const bookTx = db.transaction(({ service, date, time, name, phone, comment, masterId, skipPhoneLimit = false, status = 'new' }) => {
   const samePhone = db
     .prepare("SELECT client_phone FROM appointments WHERE date >= ? AND status != 'cancelled'")
     .all(todayStr())
     .filter((r) => last9(r.client_phone) === last9(phone)).length;
-  if (samePhone >= MAX_ACTIVE_PER_PHONE) {
+  if (!skipPhoneLimit && samePhone >= MAX_ACTIVE_PER_PHONE) {
     throw Object.assign(
       new Error(`На цей номер уже є ${MAX_ACTIVE_PER_PHONE} активні записи. Щоб додати ще, напишіть оператору в чат`),
       { status: 429 }
@@ -264,10 +265,16 @@ const bookTx = db.transaction(({ service, date, time, name, phone, comment, mast
   const end = toHHMM(toMin(time) + service.duration_min);
   const remindCode = 'r' + crypto.randomBytes(9).toString('base64url');
   const info = db
-    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code, client_comment, master_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(service.id, date, time, end, name, phone, remindCode, comment ?? '', master);
+    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code, client_comment, master_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(service.id, date, time, end, name, phone, remindCode, comment ?? '', master, status);
   return { id: info.lastInsertRowid, remindCode, masterId: master };
 });
+
+// Особисте сповіщення майстру в його Telegram, якщо він підключив бота в адмінці
+function notifyMasterOf(masterId, text) {
+  const chat = masterId && db.prepare("SELECT tg_chat_id FROM masters WHERE id = ? AND status = 'active'").get(masterId)?.tg_chat_id;
+  if (chat) telegram.sendToClient(chat, text);
+}
 
 // Скільки годин до візиту клієнт може сам скасувати чи перенести запис (налаштовується в адмінці)
 const DEFAULT_CHANGE_HOURS = 24;
@@ -278,7 +285,7 @@ function readChangeHours() {
 }
 const accounts = setupAccounts({
   app, db, telegram, freeSlots, todayStr, isBookableDate, isTime,
-  horizonDays: HORIZON_DAYS, makeLimiter, notifyMaster: (t) => telegram.notifyMaster(t), changeHours: readChangeHours,
+  horizonDays: HORIZON_DAYS, makeLimiter, notifyMaster: (t) => telegram.notifyMaster(t), changeHours: readChangeHours, notifyMasterOf,
 });
 
 
@@ -308,6 +315,7 @@ app.post('/api/appointments', (req, res) => {
     if (wantMaster && !masterOffers(db, wantMaster, service.id)) return res.status(400).json({ error: 'Цей майстер не виконує обрану послугу' });
     const { id, remindCode, masterId: assigned } = bookTx({ service, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, masterId: wantMaster });
     const masterName = db.prepare('SELECT name FROM masters WHERE id = ?').get(assigned)?.name || '';
+    notifyMasterOf(assigned, `🗓 Новий запис до вас\n${service.name}\n${date.split('-').reverse().join('.')} о ${time}\n${cleanName}, ${cleanPhone}${cleanComment ? '\nКоментар: ' + cleanComment : ''}`);
     bookingLimiter.hit(req.ip);
     telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, master: masterName });
     res.status(201).json({ id: Number(id), date, time, service: service.name, master: masterName, remindLink: telegram.remindLink(remindCode) });
@@ -346,6 +354,8 @@ const MASTER_ROUTES = [
   /^GET \/clients$/, /^GET \/clients\/\d{9}$/, /^PUT \/clients\/\d{9}\/note$/,
   /^GET \/schedule$/, /^PUT \/schedule\/\d$/, /^GET \/breaks$/, /^POST \/breaks$/, /^DELETE \/breaks\/\d+$/,
   /^GET \/blocks$/, /^POST \/blocks$/, /^DELETE \/blocks\/\d+$/, /^GET \/waitlist$/, /^DELETE \/waitlist\/\d+$/,
+  /^POST \/appointments$/, /^PATCH \/appointments\/\d+\/move$/, /^GET \/slots$/, /^GET \/calendar$/,
+  /^POST \/me\/telegram$/, /^DELETE \/me\/telegram$/,
 ];
 app.use('/api/admin', (req, res, next) => {
   if (req.role === 'super' || MASTER_ROUTES.some((rx) => rx.test(`${req.method} ${req.path}`))) return next();
@@ -371,12 +381,40 @@ function scheduleMaster(req, res) {
 
 app.get('/api/admin/me', (req, res) => res.json(req.role === 'super'
   ? { role: 'super' }
-  : { role: 'master', master: { id: req.masterId, name: req.masterName } }));
+  : { role: 'master', master: { id: req.masterId, name: req.masterName },
+      telegram: !!db.prepare('SELECT tg_chat_id FROM masters WHERE id = ?').get(req.masterId)?.tg_chat_id }));
+
+// Майстер підключає свій Telegram: бот надсилатиме йому його нові записи, скасування й перенесення
+const MASTER_LINK_MINUTES = 15;
+app.post('/api/admin/me/telegram', (req, res) => {
+  if (req.role !== 'master') return res.status(400).json({ error: 'Це налаштування для майстра' });
+  const code = crypto.randomBytes(6).toString('base64url');
+  db.prepare("INSERT INTO account_codes (kind, key, value, expires_at) VALUES ('mlink', ?, ?, ?) ON CONFLICT(kind, key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at")
+    .run(sha(code), String(req.masterId), Date.now() + MASTER_LINK_MINUTES * 60000);
+  const link = telegram.remindLink(`m_${code}`);
+  if (!link) return res.status(503).json({ error: 'Бот Telegram ще не налаштований. Попросіть адміністратора налаштувати його у вкладці «Кабінет»' });
+  res.json({ link, minutes: MASTER_LINK_MINUTES });
+});
+app.delete('/api/admin/me/telegram', (req, res) => {
+  if (req.role === 'master') db.prepare('UPDATE masters SET tg_chat_id = NULL WHERE id = ?').run(req.masterId);
+  res.json({ ok: true });
+});
+function linkMasterTelegram(code, chatId) {
+  const row = db.prepare("SELECT value, expires_at FROM account_codes WHERE kind = 'mlink' AND key = ?").get(sha(code));
+  if (!row || row.expires_at < Date.now()) return 'Посилання застаріло. Згенеруйте нове в адмінці.';
+  db.prepare("DELETE FROM account_codes WHERE kind = 'mlink' AND key = ?").run(sha(code));
+  db.prepare('UPDATE masters SET tg_chat_id = ? WHERE id = ?').run(chatId, Number(row.value));
+  return '✅ Готово! Тепер ваші нові записи, скасування й перенесення надходитимуть сюди.';
+}
 app.post('/api/admin/logout', (req, res) => {
   if (req.role === 'master') db.prepare('DELETE FROM master_sessions WHERE token_hash = ?').run(sha((req.headers.authorization || '').slice(7)));
   res.json({ ok: true });
 });
 setupMasterAdmin({ app, db, todayStr });
+setupAdminAppointments({
+  app, db, telegram, bookTx, masterFreeSlots, freeSlots, masterOffers, isValidDate, isTime,
+  toMin, toHHMM, todayStr, addDays, masterParam, ownsAppt, notifyMasterOf, last9,
+});
 
 // Відгуки: публічні маршрути і маршрути адмінки (останні вже під перевіркою доступу)
 setupReviews({ app, db, telegram, todayStr, siteUrl, last9 });
@@ -443,7 +481,7 @@ app.get('/api/admin/appointments', (req, res) => {
   res.json(
     db
       .prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.client_name, a.client_phone, a.status, a.client_comment,
-                       a.master_id, m.name AS master, s.name AS service
+                       a.master_id, a.service_id, m.name AS master, s.name AS service
                 FROM appointments a JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id
                 WHERE a.date BETWEEN ? AND ? AND (? IS NULL OR a.master_id = ?) ORDER BY a.date, a.start_time`)
       .all(from, to, scopeMaster(req), scopeMaster(req))
@@ -473,6 +511,8 @@ app.patch('/api/admin/appointments/:id', (req, res) => {
     setStatusTx(Number(req.params.id), status);
     if (status === 'cancelled') {
       notifyClientCancelled(Number(req.params.id));
+      const c = apptForClient('a.id = ?', Number(req.params.id));
+      if (c && req.role !== 'master') notifyMasterOf(c.master_id, `❌ Запис скасовано\n${c.service}, ${telegram.fmtDate(c.date)} о ${c.start_time}\n${c.client_name}, ${c.client_phone}`);
       waitlist.checkWaitlist().catch(() => {}); // звільнився час: може, хтось на нього чекає
     }
     res.json({ ok: true });
@@ -496,6 +536,7 @@ const studioLine = () => {
 telegram.onStart((code, chatId) => {
   if (code.startsWith('acc_')) return accounts.linkTelegram(code.slice(4), chatId);
   if (code.startsWith('w_')) return waitlist.linkTelegram(code.slice(2), chatId);
+  if (code.startsWith('m_')) return linkMasterTelegram(code.slice(2), chatId);
   const a = apptForClient('a.remind_code = ?', code);
   if (!a) return 'Не знайшли цей запис. Можливо, посилання застаріло. Запишіться на сайті ще раз або подзвоніть нам.';
   if (a.status === 'cancelled') return 'Цей запис скасовано. Щоб записатися знову, скористайтеся сайтом.';

@@ -51,7 +51,7 @@ function createAccountTables(db) {
   `);
 }
 
-function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate, isTime, horizonDays, makeLimiter, notifyMaster, changeHours }) {
+function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate, isTime, horizonDays, makeLimiter, notifyMaster, changeHours, notifyMasterOf = () => {} }) {
   const loginLimiter = makeLimiter(10, 15 * 60 * 1000);
   const resetLimiter = makeLimiter(5, 60 * 60 * 1000);
 
@@ -157,6 +157,7 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
     if (!canChange(a)) return res.status(403).json({ error: `Скасувати можна не пізніше ніж за ${changeHours()} год до візиту. Напишіть оператору в чат` });
     db.prepare("UPDATE appointments SET status = 'cancelled' WHERE id = ?").run(a.id);
     notifyMaster(`❌ Клієнт скасував запис\n${a.service}\n${a.date.split('-').reverse().join('.')} о ${a.start_time}\n${req.account.name}, ${req.account.phone}`);
+    notifyMasterOf(a.master_id, `❌ Клієнт скасував запис до вас\n${a.service}\n${a.date.split('-').reverse().join('.')} о ${a.start_time}\n${req.account.name}, ${req.account.phone}`);
     res.json({ ok: true });
   });
 
@@ -175,6 +176,7 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
     const end = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
     db.prepare('UPDATE appointments SET date = ?, start_time = ?, end_time = ?, reminded = 0 WHERE id = ?').run(date, time, end, a.id);
     notifyMaster(`🔁 Клієнт переніс запис\n${a.service}\n${date.split('-').reverse().join('.')} о ${time}\n${req.account.name}, ${req.account.phone}`);
+    notifyMasterOf(a.master_id, `🔁 Клієнт переніс запис до вас\n${a.service}\n${date.split('-').reverse().join('.')} о ${time}\n${req.account.name}, ${req.account.phone}`);
     res.json({ ok: true, date, time });
   });
 

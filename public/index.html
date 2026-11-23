@@ -92,10 +92,15 @@
           <ul id="serviceSuggest" class="suggest" role="listbox" hidden></ul>
         </div>
 
-        <label class="step-label" for="dateInput">2. Дата</label>
+        <div id="masterStep" hidden>
+          <label class="step-label" for="masterSelect">2. Майстер</label>
+          <select id="masterSelect" class="input"><option value="">Будь-який вільний</option></select>
+        </div>
+
+        <label class="step-label" for="dateInput"><span class="step-num" data-step="date">2</span>. Дата</label>
         <input type="date" id="dateInput" class="input">
 
-        <div class="step-label">3. Час</div>
+        <div class="step-label"><span class="step-num" data-step="time">3</span>. Час</div>
         <div id="slotsGrid" class="slots-grid"></div>
         <div class="hint" id="slotsHint"></div>
         <div class="wait-box" id="waitBox" hidden>
@@ -111,7 +116,7 @@
       </div>
 
       <form class="card" id="bookingForm" novalidate>
-        <div class="step-label">4. Ваші дані</div>
+        <div class="step-label"><span class="step-num" data-step="data">4</span>. Ваші дані</div>
         <input class="input" id="nameInput" name="name" placeholder="Ім'я" autocomplete="name" maxlength="60">
         <input class="input" id="phoneInput" name="phone" placeholder="Телефон, наприклад +380501234567" autocomplete="tel" maxlength="30">
         <textarea class="input" id="commentInput" name="comment" rows="2" maxlength="500" placeholder="Коментар (необов'язково): побажання, що турбує, як зручніше дзвонити"></textarea>

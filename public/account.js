@@ -152,9 +152,9 @@
       const upcoming = items.filter((a) => a.upcoming);
       const past = items.filter((a) => !a.upcoming);
       const row = (a) => `
-        <li class="acc-appt" data-appt="${a.id}" data-sid="${a.service_id}">
+        <li class="acc-appt" data-appt="${a.id}" data-sid="${a.service_id}" data-mid="${a.master_id || ''}">
           <div><b>${esc(a.service)}</b></div>
-          <div class="muted">${fmt(a.date)} о ${a.start_time}–${a.end_time} · ${STATUS_TEXT[a.status] || esc(a.status)}</div>
+          <div class="muted">${fmt(a.date)} о ${a.start_time}–${a.end_time}${a.master ? ' · майстер ' + esc(a.master) : ''} · ${STATUS_TEXT[a.status] || esc(a.status)}</div>
           ${a.upcoming && a.status !== 'cancelled' && a.canChange
             ? `<div class="acc-actions">
                  <button class="btn btn-ghost small" type="button" data-act="move" data-id="${a.id}">Перенести</button>
@@ -263,7 +263,8 @@
     const sid = li?.dataset.sid;
     const box = document.querySelector(`[data-move-slots="${id}"]`);
     try {
-      const r = await api(`/api/slots?serviceId=${sid}&date=${input.value}`);
+      const mid = li?.dataset.mid;
+      const r = await api(`/api/slots?serviceId=${sid}&date=${input.value}` + (mid ? '&masterId=' + mid : ''));
       box.innerHTML = r.slots.length
         ? r.slots.map((t) => `<button class="slot" type="button" data-slot data-id="${id}" data-date="${input.value}" data-time="${t}">${t}</button>`).join('')
         : '<span class="muted">На цю дату вільного часу немає.</span>';

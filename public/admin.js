@@ -16,6 +16,23 @@
   let clientQuery = '';
   let clientsArchived = false; // вкладка «Клієнти»: показувати архів замість активних
   let currentClient = null;
+  // Хто увійшов: суперадмін (керує всім) або майстер (бачить лише своє)
+  let me = { role: 'super' };
+  let masters = [];          // для суперадміна: усі майстри для вибору у вкладках
+  let apptMaster = '';       // «Записи»: фільтр за майстром ('' = усі)
+  let schedMaster = null;    // «Розклад» і «Блокування»: чий графік редагуємо
+  let statsMaster = '';      // «Статистика»: '' = увесь кабінет
+  const MASTER_TABS = ['appointments', 'clients', 'schedule', 'blocks'];
+  const isSuper = () => me.role === 'super';
+  // Майстер, чий графік показуємо: для майстра це він сам, для суперадміна — обраний (або перший)
+  const schedMasterId = () => (isSuper() ? (schedMaster || masters.find((m) => m.status === 'active')?.id || masters[0]?.id) : me.master.id);
+  const schedQ = () => (isSuper() ? 'masterId=' + schedMasterId() : '');
+  function masterSelect(id, value, allLabel) {
+    if (!isSuper()) return '';
+    return '<label>Майстер <select id="' + id + '">' + (allLabel ? '<option value="">' + allLabel + '</option>' : '') +
+      masters.map((m) => '<option value="' + m.id + '"' + (String(m.id) === String(value) ? ' selected' : '') + '>' + esc(m.name) +
+        (m.status === 'blocked' ? ' (заблоковано)' : '') + '</option>').join('') + '</select></label>';
+  }
   const fmtDate = (d) => (d ? d.split('-').reverse().join('.') : '—');
 
   async function api(path, opts = {}) {
@@ -45,7 +62,7 @@
     e.preventDefault();
     token = $('#tokenInput').value.trim();
     try {
-      await api('/api/admin/services');
+      await api('/api/admin/me');
       sessionStorage.setItem('adminToken', token);
       start();
     } catch (err) {
@@ -53,7 +70,33 @@
     }
   });
 
-  $('#logoutBtn').addEventListener('click', logout);
+  // Перемикач «Адміністратор / Майстер» на сторінці входу
+  document.querySelectorAll('[data-login-mode]').forEach((b) => b.addEventListener('click', () => {
+    const master = b.dataset.loginMode === 'master';
+    document.querySelectorAll('[data-login-mode]').forEach((x) => x.classList.toggle('active', x === b));
+    $('#loginForm').hidden = master;
+    $('#masterLoginForm').hidden = !master;
+  }));
+  $('#masterLoginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const r = await fetch('/api/master-login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ login: $('#mLogin').value, password: $('#mPass').value }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'Не вдалося увійти');
+      token = data.token;
+      sessionStorage.setItem('adminToken', token);
+      $('#mPass').value = '';
+      start();
+    } catch (err) {
+      $('#mLoginMsg').textContent = err.message;
+    }
+  });
+
+  $('#logoutBtn').addEventListener('click', () => {
+    if (!isSuper()) fetch('/api/admin/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + token } }).catch(() => {});
+    logout();
+  });
 
   function logout() {
     token = '';
@@ -64,10 +107,19 @@
     $('#login').hidden = false;
   }
 
-  function start() {
+  async function start() {
+    try {
+      me = await api('/api/admin/me');
+      masters = isSuper() ? await api('/api/admin/masters') : [];
+    } catch (err) {
+      return;
+    }
     $('#login').hidden = true;
     $('#app').hidden = false;
-    connectWs();
+    $('#adminTitle').textContent = isSuper() ? 'Адмінка' : 'Адмінка · ' + me.master.name;
+    // Майстрові показуємо лише його вкладки; чат лише для адміністратора
+    document.querySelectorAll('[data-tab]').forEach((b) => { b.hidden = !(isSuper() || MASTER_TABS.includes(b.dataset.tab)); });
+    if (isSuper()) connectWs();
     show('appointments');
   }
 
@@ -83,6 +135,7 @@
     reviews: renderReviews,
     stats: renderStats,
     tips: renderTips,
+    masters: renderMasters,
   };
 
   function show(name) {
@@ -107,17 +160,18 @@
     const list = await api('/api/admin/waitlist');
     $('#view').innerHTML = apptToolbar() +
       '<p class="muted">Клієнти, яким не вистачило вільного часу. Коли час звільняється, бот повідомляє першого в черзі. Якщо в клієнта немає Telegram, повідомлення приходить вам, щоб зателефонувати.</p>' +
-      '<table><thead><tr><th>Дата</th><th>Послуга</th><th>Клієнт</th><th>Телефон</th><th>Telegram</th><th>Статус</th><th></th></tr></thead><tbody>' +
-      (list.length ? list.map((w) => '<tr><td>' + fmtDate(w.date) + '</td><td>' + esc(w.service) + '</td><td>' + esc(w.name) + '</td><td>' + esc(w.phone) + '</td>' +
+      '<table><thead><tr><th>Дата</th><th>Послуга</th><th>Майстер</th><th>Клієнт</th><th>Телефон</th><th>Telegram</th><th>Статус</th><th></th></tr></thead><tbody>' +
+      (list.length ? list.map((w) => '<tr><td>' + fmtDate(w.date) + '</td><td>' + esc(w.service) + '</td><td>' + esc(w.master || 'будь-хто') + '</td><td>' + esc(w.name) + '</td><td>' + esc(w.phone) + '</td>' +
         '<td>' + (w.telegram ? 'так' : '—') + '</td><td>' + (WAIT_STATUS[w.status] || esc(w.status)) + '</td>' +
         '<td><button class="btn btn-ghost small danger" type="button" data-del-wait="' + w.id + '">Прибрати</button></td></tr>').join('')
-        : '<tr><td colspan="7" class="muted">У черзі нікого немає.</td></tr>') + '</tbody></table>';
+        : '<tr><td colspan="8" class="muted">У черзі нікого немає.</td></tr>') + '</tbody></table>';
   }
   const apptToolbar = () => `
       <div class="toolbar">
         <button class="btn ${!apptArchive && !apptWaitlist ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptUpcoming">Поточні і майбутні</button>
         <button class="btn ${apptArchive && !apptWaitlist ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptArchiveBtn">Архів</button>
         <button class="btn ${apptWaitlist ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptWaitBtn">Черга очікування</button>
+        ${apptWaitlist ? '' : masterSelect('apptMaster', apptMaster, 'Усі майстри')}
       </div>`;
 
   async function renderAppointments() {
@@ -125,38 +179,39 @@
     const [from, to] = apptArchive ? ['2000-01-01', shiftDay(today(), -1)] : [today(), '2999-12-31'];
     $('#view').innerHTML = `${apptToolbar()}
       <table>
-        <thead><tr><th>Дата</th><th>Час</th><th>Послуга</th><th>Клієнт</th><th>Телефон</th><th>Коментар клієнта</th><th>Статус</th></tr></thead>
+        <thead><tr><th>Дата</th><th>Час</th><th>Послуга</th>${isSuper() ? '<th>Майстер</th>' : ''}<th>Клієнт</th><th>Телефон</th><th>Коментар клієнта</th><th>Статус</th></tr></thead>
         <tbody id="apptRows"></tbody>
       </table>`;
-    let rows = await api(`/api/admin/appointments?from=${from}&to=${to}`);
+    let rows = await api(`/api/admin/appointments?from=${from}&to=${to}` + (isSuper() && apptMaster ? '&masterId=' + apptMaster : ''));
     if (apptArchive) rows = rows.slice().reverse(); // в архіві найновіші зверху
     $('#apptRows').innerHTML = rows.length
       ? rows.map((r) => `<tr>
           <td>${fmtDate(r.date)}</td>
           <td>${r.start_time}–${r.end_time}</td>
           <td>${esc(r.service)}</td>
+          ${isSuper() ? `<td>${esc(r.master || '—')}</td>` : ''}
           <td>${esc(r.client_name)}</td>
           <td>${esc(r.client_phone)}</td>
           <td>${esc(r.client_comment || '—')}</td>
           <td><select data-appt="${r.id}">${Object.entries(STATUS)
             .map(([k, v]) => `<option value="${k}" ${k === r.status ? 'selected' : ''}>${v}</option>`).join('')}</select>${apptArchive && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-review-link="${r.id}" title="Скопіювати посилання на форму відгуку">Відгук</button>` : ''}</td>
         </tr>`).join('')
-      : `<tr><td colspan="6" class="muted">${apptArchive ? 'В архіві поки немає записів.' : 'Поточних і майбутніх записів немає.'}</td></tr>`;
+      : `<tr><td colspan="8" class="muted">${apptArchive ? 'В архіві поки немає записів.' : 'Поточних і майбутніх записів немає.'}</td></tr>`;
   }
 
   // ----- Клієнти -----
   async function renderClients() {
-    const arch = await api('/api/admin/archive-months');
+    const arch = isSuper() ? await api('/api/admin/archive-months') : { options: [], months: 0 };
     const archiveOpts = arch.options.map((m) => '<option value="' + m + '"' + (m === arch.months ? ' selected' : '') + '>' + m + ' міс.</option>').join('');
     $('#view').innerHTML = `
       <div class="toolbar">
         <input type="search" id="clientSearch" placeholder="Пошук: імʼя або телефон" value="${esc(clientQuery)}" style="flex:1;max-width:340px">
-        <button class="btn btn-ghost small" type="button" id="clientsCsv">Вивантажити в CSV</button>
+        ${isSuper() ? '<button class="btn btn-ghost small" type="button" id="clientsCsv">Вивантажити в CSV</button>' : ''}
       </div>
       <div class="toolbar">
         <button class="btn ${clientsArchived ? 'btn-ghost' : 'btn-primary'} small" type="button" id="clientsActiveBtn">Активні</button>
         <button class="btn ${clientsArchived ? 'btn-primary' : 'btn-ghost'} small" type="button" id="clientsArchiveBtn">Архів</button>
-        <label class="muted" style="margin-left:auto">В архів, якщо без змін понад <select id="archiveMonths">${archiveOpts}</select></label>
+        ${isSuper() ? `<label class="muted" style="margin-left:auto">В архів, якщо без змін понад <select id="archiveMonths">${archiveOpts}</select></label>` : ''}
       </div>
       <table>
         <thead><tr><th>Імʼя</th><th>Телефон</th><th>Візитів</th><th>Останній візит</th><th>Наступний запис</th><th>Нотатка</th><th></th></tr></thead>
@@ -183,7 +238,7 @@
           <td>${fmtDate(c.last_visit)}</td>
           <td>${fmtDate(c.next_visit)}</td>
           <td>${c.has_note ? 'є' : '—'}</td>
-          <td>${c.archived
+          <td>${!isSuper() ? '' : c.archived
             ? '<button class="btn btn-ghost small" type="button" data-restore="' + c.key + '">Повернути</button>'
             : '<button class="btn btn-ghost small" type="button" data-archive-client="' + c.key + '">В архів</button>'}</td>
         </tr>`).join('')
@@ -310,12 +365,13 @@
 
   // ----- Розклад -----
   async function renderSchedule() {
-    const rows = await api('/api/admin/schedule');
-    const { minutes: bufferMin } = await api('/api/admin/buffer');
-    const { hours: changeHours, options: changeOptions } = await api('/api/admin/change-hours');
+    const rows = await api('/api/admin/schedule?' + schedQ());
+    const { minutes: bufferMin } = isSuper() ? await api('/api/admin/buffer') : { minutes: 0 };
+    const { hours: changeHours, options: changeOptions } = isSuper() ? await api('/api/admin/change-hours') : { hours: 0, options: [] };
     const changeOpts = changeOptions.map((h) => `<option value="${h}" ${h === changeHours ? 'selected' : ''}>${h} год</option>`).join('');
     $('#view').innerHTML = `
-      <h3 style="margin-bottom:12px">Робочі години</h3>
+      ${isSuper() ? `<div class="toolbar">${masterSelect('schedMaster', schedMasterId())}</div>` : ''}
+      <h3 style="margin-bottom:12px">Робочі години${isSuper() ? '' : ': ' + esc(me.master.name)}</h3>
       <table>
         <thead><tr><th>День</th><th>Початок</th><th>Кінець</th><th>Вихідний</th></tr></thead>
         <tbody>${rows.map((r) => `<tr data-wd="${r.weekday}">
@@ -326,7 +382,7 @@
         </tr>`).join('')}</tbody>
       </table>
       <button class="btn btn-primary" id="saveSchedule" type="button">Зберегти розклад</button>
-
+${isSuper() ? `
       <h3 style="margin:32px 0 6px">Прибирання між клієнтами</h3>
       <div class="muted">Цей час резервується після кожного візиту, щоб лишився час прибрати робоче місце. Клієнти на нього не запишуться.</div>
       <form class="inline-form" id="bufferForm">
@@ -340,6 +396,7 @@
         <label>Не пізніше ніж за <select name="hours" id="changeHoursSelect">${changeOpts}</select></label>
         <button class="btn btn-primary small" type="submit">Зберегти</button>
       </form>
+` : ''}
 
       <h3 style="margin:32px 0 6px">Перерви</h3>
       <div class="muted">Перерва повторюється щотижня у позначені дні. На цей час клієнти записатися не зможуть.</div>
@@ -352,7 +409,7 @@
       </form>
       <ul class="list" id="breakList"></ul>`;
     await renderBreaks();
-    $('#changeHoursForm').addEventListener('submit', async (e) => {
+    $('#changeHoursForm')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       try {
         await api('/api/admin/change-hours', { method: 'PUT', body: { hours: Number($('#changeHoursSelect').value) } });
@@ -361,7 +418,7 @@
         notify(err.message, true);
       }
     });
-    $('#bufferForm').addEventListener('submit', async (e) => {
+    $('#bufferForm')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       try {
         await api('/api/admin/buffer', { method: 'PUT', body: { minutes: Number($('#bufferMinutes').value) } });
@@ -374,7 +431,7 @@
       try {
         for (const tr of document.querySelectorAll('[data-wd]')) {
           const off = tr.querySelector('.off').checked;
-          await api(`/api/admin/schedule/${tr.dataset.wd}`, {
+          await api(`/api/admin/schedule/${tr.dataset.wd}?` + schedQ(), {
             method: 'PUT',
             body: { start_time: off ? null : tr.querySelector('.st').value, end_time: off ? null : tr.querySelector('.et').value },
           });
@@ -388,7 +445,7 @@
 
   // Список перерв. Однакові перерви в різні дні показуються одним рядком.
   async function renderBreaks() {
-    const list = await api('/api/admin/breaks');
+    const list = await api('/api/admin/breaks?' + schedQ());
     const groups = new Map();
     for (const b of list) {
       const key = `${b.start_time}|${b.end_time}|${b.note}`;
@@ -406,7 +463,7 @@
   // ----- Блокування -----
   async function renderBlocks() {
     $('#view').innerHTML = `
-      <div class="toolbar"><label>Дата <input type="date" id="blockDate" value="${blockDate}"></label></div>
+      <div class="toolbar">${masterSelect('blockMaster', schedMasterId())}<label>Дата <input type="date" id="blockDate" value="${blockDate}"></label></div>
       <form class="inline-form" id="blockForm">
         <input type="time" name="start_time" required>
         <input type="time" name="end_time" required>
@@ -414,7 +471,7 @@
         <button class="btn btn-primary small" type="submit">Додати блок</button>
       </form>
       <ul class="list" id="blockList"></ul>`;
-    const list = await api(`/api/admin/blocks?date=${blockDate}`);
+    const list = await api(`/api/admin/blocks?date=${blockDate}&` + schedQ());
     $('#blockList').innerHTML = list.length
       ? list.map((b) => `<li><span>${b.start_time}–${b.end_time} ${esc(b.note)}</span>
           <button class="btn btn-ghost small" type="button" data-del-block="${b.id}">Видалити</button></li>`).join('')
@@ -461,6 +518,78 @@
         <button class="btn btn-primary small" type="submit">Додати</button>
       </form>`;
   }
+
+  // ----- Майстри (лише суперадмін) -----
+  const M_STATUS = { active: 'Працює', blocked: 'Заблоковано' };
+  let editingMaster = null; // null — список, 'new' — новий майстер, число — редагування
+  async function renderMasters() {
+    masters = await api('/api/admin/masters');
+    if (editingMaster !== null) {
+      const services = await api('/api/admin/services');
+      const m = editingMaster === 'new'
+        ? { name: '', login: '', services: services.filter((s) => s.active).map((s) => s.id), has_password: false }
+        : masters.find((x) => x.id === editingMaster);
+      if (!m) { editingMaster = null; return renderMasters(); }
+      const isNew = editingMaster === 'new';
+      $('#view').innerHTML =
+        '<button class="btn btn-ghost small" type="button" id="masterBack">← До списку майстрів</button>' +
+        '<form class="master-form" id="masterForm">' +
+        '<h3>' + (isNew ? 'Новий майстер' : esc(m.name)) + '</h3>' +
+        '<label class="step-label" for="mfName">Ім\'я (так його бачать клієнти)</label>' +
+        '<input class="input" id="mfName" maxlength="60" required value="' + esc(m.name) + '">' +
+        '<label class="step-label" for="mfLogin">Логін для входу в адмінку</label>' +
+        '<input class="input" id="mfLogin" maxlength="30" required autocomplete="off" placeholder="напр. olena" value="' + esc(m.login) + '">' +
+        '<label class="step-label" for="mfPass">' + (isNew ? 'Пароль (не менше 8 символів)' : 'Новий пароль' + (m.has_password ? ' (порожньо — не змінювати)' : ' — ще не задано, майстер не може увійти')) + '</label>' +
+        '<input class="input" id="mfPass" type="text" minlength="8" maxlength="100" autocomplete="new-password"' + (isNew ? ' required' : '') + '>' +
+        '<fieldset class="svc-field"><legend class="step-label">Послуги, які робить майстер</legend>' +
+        '<div class="toolbar"><button class="btn btn-ghost small" type="button" id="svcAll">Позначити всі</button><button class="btn btn-ghost small" type="button" id="svcNone">Зняти всі</button></div>' +
+        '<div class="svc-grid">' + services.map((s) => '<label class="svc-check"><input type="checkbox" name="svc" value="' + s.id + '"' +
+          (m.services.includes(s.id) ? ' checked' : '') + '> ' + esc(s.name) + (s.active ? '' : ' <span class="muted">(вимкнена)</span>') + '</label>').join('') + '</div></fieldset>' +
+        '<p class="muted">Передайте майстрові логін і пароль: він входить в адмінку через «Майстер» і бачить лише свої записи, клієнтів, графік і блокування.</p>' +
+        '<div class="toolbar"><button class="btn btn-primary" type="submit">' + (isNew ? 'Додати майстра' : 'Зберегти') + '</button></div>' +
+        '</form>';
+      return;
+    }
+    $('#view').innerHTML =
+      '<div class="toolbar"><button class="btn btn-primary small" type="button" id="masterNew">+ Новий майстер</button>' +
+      '<span class="muted">Графік кожного майстра налаштовується у вкладках «Розклад» і «Блокування».</span></div>' +
+      '<table><thead><tr><th>Ім\'я</th><th>Логін</th><th>Статус</th><th>Послуг</th><th>Майбутніх записів</th><th></th></tr></thead><tbody>' +
+      masters.map((m) => '<tr>' +
+        '<td>' + esc(m.name) + (m.has_password ? '' : '<div class="muted small-note">пароль не задано: увійти не може</div>') + '</td>' +
+        '<td>' + esc(m.login) + '</td>' +
+        '<td><span class="m-status m-' + m.status + '">' + (M_STATUS[m.status] || esc(m.status)) + '</span></td>' +
+        '<td>' + m.services.length + '</td><td>' + m.future + '</td>' +
+        '<td class="m-actions">' +
+          '<button class="btn btn-ghost small" type="button" data-edit-master="' + m.id + '">Редагувати</button>' +
+          '<button class="btn btn-ghost small" type="button" data-sched-master="' + m.id + '">Графік</button>' +
+          (m.status === 'active'
+            ? '<button class="btn btn-ghost small" type="button" data-block-master="' + m.id + '">Заблокувати</button>'
+            : '<button class="btn btn-ghost small" type="button" data-unblock-master="' + m.id + '">Розблокувати</button>') +
+          '<button class="btn btn-ghost small danger" type="button" data-del-master="' + m.id + '">Видалити</button>' +
+        '</td></tr>').join('') +
+      '</tbody></table>';
+  }
+  // Форма майстра: окремий обробник, щоб не потрапити в загальну обробку форм нижче
+  $('#view').addEventListener('submit', async (e) => {
+    if (e.target.id !== 'masterForm') return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const body = {
+      name: $('#mfName').value,
+      login: $('#mfLogin').value,
+      password: $('#mfPass').value,
+      services: [...document.querySelectorAll('#masterForm input[name="svc"]:checked')].map((x) => Number(x.value)),
+    };
+    try {
+      if (editingMaster === 'new') await api('/api/admin/masters', { method: 'POST', body });
+      else await api('/api/admin/masters/' + editingMaster, { method: 'PUT', body });
+      notify(editingMaster === 'new' ? 'Майстра додано' : 'Збережено');
+      editingMaster = null;
+      await renderMasters();
+    } catch (err) {
+      notify(err.message, true);
+    }
+  });
 
   // ----- Поради з догляду -----
   let editingTip = null; // null — список, 'new' — нова порада, число — редагування
@@ -510,11 +639,11 @@
   // ----- Статистика -----
   let statsMonth = today().slice(0, 7);
   async function renderStats() {
-    const s = await api('/api/admin/stats?month=' + statsMonth);
+    const s = await api('/api/admin/stats?month=' + statsMonth + (statsMaster ? '&masterId=' + statsMaster : ''));
     const tile = (value, label, hint) => '<div class="stat-tile"><div class="stat-tile-num">' + value + '</div><div class="stat-tile-label">' + label + '</div>' + (hint ? '<div class="muted stat-tile-hint">' + hint + '</div>' : '') + '</div>';
     const maxTop = Math.max(1, ...s.topServices.map((t) => t.count));
     $('#view').innerHTML =
-      '<div class="toolbar"><label>Місяць <input type="month" id="statsMonth" value="' + s.month + '"></label></div>' +
+      '<div class="toolbar"><label>Місяць <input type="month" id="statsMonth" value="' + s.month + '"></label>' + masterSelect('statsMaster', statsMaster, 'Увесь кабінет') + '</div>' +
       '<div class="stat-tiles">' +
         tile(s.active, 'записів', 'з них відбулось: ' + s.done) +
         tile(s.cancelled, 'скасовано', s.total ? Math.round((s.cancelled / s.total) * 100) + '% від усіх' : '') +
@@ -629,6 +758,10 @@
 
   view.addEventListener('change', async (e) => {
     try {
+      if (e.target.id === 'apptMaster') { apptMaster = e.target.value; return await renderAppointments(); }
+      if (e.target.id === 'schedMaster') { schedMaster = Number(e.target.value); return await renderSchedule(); }
+      if (e.target.id === 'blockMaster') { schedMaster = Number(e.target.value); return await renderBlocks(); }
+      if (e.target.id === 'statsMaster') { statsMaster = e.target.value; return await renderStats(); }
       if (e.target.id === 'archiveMonths') {
         await api('/api/admin/archive-months', { method: 'PUT', body: { months: Number(e.target.value) } });
         notify('Збережено');
@@ -681,6 +814,31 @@
       }
 
       if (e.target.id === 'clientsCsv') return await downloadClientsCsv();
+      if (e.target.id === 'masterNew') { editingMaster = 'new'; return await renderMasters(); }
+      if (e.target.id === 'masterBack') { editingMaster = null; return await renderMasters(); }
+      if (e.target.id === 'svcAll' || e.target.id === 'svcNone') {
+        document.querySelectorAll('#masterForm input[name="svc"]').forEach((x) => { x.checked = e.target.id === 'svcAll'; });
+        return;
+      }
+      if (e.target.dataset.editMaster) { editingMaster = Number(e.target.dataset.editMaster); return await renderMasters(); }
+      if (e.target.dataset.schedMaster) { schedMaster = Number(e.target.dataset.schedMaster); return show('schedule'); }
+      if (e.target.dataset.blockMaster) {
+        if (!confirm('Заблокувати майстра? Він не зможе входити в адмінку, а клієнти не бачитимуть його вільний час. Наявні записи лишаться.')) return;
+        const r = await api('/api/admin/masters/' + e.target.dataset.blockMaster + '/block', { method: 'POST' });
+        notify(r.future ? 'Заблоковано. У майстра лишаються майбутні записи: ' + r.future + '. Перевірте їх у «Записах».' : 'Майстра заблоковано', !!r.future);
+        return await renderMasters();
+      }
+      if (e.target.dataset.unblockMaster) {
+        await api('/api/admin/masters/' + e.target.dataset.unblockMaster + '/unblock', { method: 'POST' });
+        notify('Майстра розблоковано');
+        return await renderMasters();
+      }
+      if (e.target.dataset.delMaster) {
+        if (!confirm('Видалити майстра? Він зникне з сайту й адмінки, а історія його записів збережеться.')) return;
+        await api('/api/admin/masters/' + e.target.dataset.delMaster, { method: 'DELETE' });
+        notify('Майстра видалено, історію збережено');
+        return await renderMasters();
+      }
       if (e.target.id === 'tipNew') { editingTip = 'new'; return await renderTips(); }
       if (e.target.id === 'tipBack') { editingTip = null; return await renderTips(); }
       if (e.target.dataset.editTip) { editingTip = Number(e.target.dataset.editTip); return await renderTips(); }
@@ -803,7 +961,7 @@
         const weekdays = [...form.querySelectorAll('input[name="wd"]:checked')].map((x) => Number(x.value));
         const r = await api('/api/admin/breaks', {
           method: 'POST',
-          body: { weekdays, start_time: data.start_time, end_time: data.end_time, note: data.note },
+          body: { weekdays, start_time: data.start_time, end_time: data.end_time, note: data.note, master_id: isSuper() ? schedMasterId() : undefined },
         });
         await renderBreaks();
         if (!r.added) return notify('Така перерва вже є');
@@ -816,7 +974,7 @@
       if (form.id === 'blockForm') {
         await api('/api/admin/blocks', {
           method: 'POST',
-          body: { date: blockDate, start_time: data.start_time, end_time: data.end_time, note: data.note },
+          body: { date: blockDate, start_time: data.start_time, end_time: data.end_time, note: data.note, master_id: isSuper() ? schedMasterId() : undefined },
         });
         notify('Блок додано');
         return await renderBlocks();
@@ -864,6 +1022,6 @@
 
   // Початковий стан: якщо токен уже є в сесії, одразу заходимо
   if (token) {
-    api('/api/admin/services').then(start).catch(() => {});
+    start();
   }
 })();

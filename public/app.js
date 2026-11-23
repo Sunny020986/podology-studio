@@ -89,11 +89,32 @@
   settingsReady.then((cfg) => { if (cfg.studio) applyStudio(cfg.studio); });
 
   // ----- Стан запису -----
-  const state = { services: [], serviceId: null, date: today(), time: null, reqId: 0 };
+  const state = { services: [], serviceId: null, date: today(), time: null, reqId: 0, masters: [], masterId: '' };
+  // Майстри: вибір показується, лише коли їх більше одного. '' = «будь-який вільний»
+  const masterQ = () => (state.masterId ? '&masterId=' + state.masterId : '');
+  const masterName = (id) => state.masters.find((m) => String(m.id) === String(id))?.name || '';
+  function renderMasterOptions() {
+    const many = state.masters.length > 1;
+    $('#masterStep').hidden = !many;
+    // Номери кроків зсуваються, коли з'являється крок «Майстер»
+    document.querySelectorAll('.step-num').forEach((el) => {
+      el.textContent = String({ date: 2, time: 3, data: 4 }[el.dataset.step] + (many ? 1 : 0));
+    });
+    if (!many) { state.masterId = ''; return; }
+    const list = state.masters.filter((m) => !state.serviceId || m.services.includes(state.serviceId));
+    if (state.masterId && !list.some((m) => String(m.id) === String(state.masterId))) state.masterId = '';
+    $('#masterSelect').innerHTML = '<option value="">Будь-який вільний</option>' +
+      list.map((m) => '<option value="' + m.id + '"' + (String(m.id) === String(state.masterId) ? ' selected' : '') + '>' + esc(m.name) + '</option>').join('');
+  }
+  $('#masterSelect').addEventListener('change', (e) => {
+    state.masterId = e.target.value;
+    pickNearestDate();
+  });
 
   async function loadServices() {
     const r = await fetch('/api/services');
     state.services = await r.json();
+    state.masters = await fetch('/api/masters').then((x) => x.json()).catch(() => []);
     $('#servicesList').innerHTML = state.services.map((s) => `
       <button class="service" type="button" data-id="${s.id}">
         <span class="service-name">${esc(s.name)}</span>
@@ -133,7 +154,8 @@
   async function pickNearestDate() {
     if (!state.serviceId) return refreshSlots();
     try {
-      const r = await fetch(`/api/next-slot?serviceId=${state.serviceId}`);
+      renderMasterOptions(); // послуга могла змінитись: показуємо лише майстрів, які її роблять
+      const r = await fetch(`/api/next-slot?serviceId=${state.serviceId}` + masterQ());
       const data = r.ok ? await r.json() : null;
       if (data?.date) {
         state.date = data.date;
@@ -164,7 +186,7 @@
     msg.classList.remove('ok');
     try {
       const r = await fetch('/api/waitlist', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serviceId: state.serviceId, date: state.date, name: $('#waitName').value, phone: $('#waitPhone').value }) });
+        body: JSON.stringify({ serviceId: state.serviceId, date: state.date, name: $('#waitName').value, phone: $('#waitPhone').value, masterId: state.masterId || undefined }) });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || 'Помилка, спробуйте ще раз');
       $('#waitForm').hidden = true;
@@ -187,7 +209,7 @@
 
     const reqId = ++state.reqId;
     $('#slotsHint').textContent = 'Завантажую вільний час…';
-    const r = await fetch(`/api/slots?serviceId=${state.serviceId}&date=${state.date}`);
+    const r = await fetch(`/api/slots?serviceId=${state.serviceId}&date=${state.date}` + masterQ());
     const data = await r.json();
     if (reqId !== state.reqId) return; // відповідь застаріла, вже вибрано іншу дату або послугу
     if (!r.ok) {
@@ -206,7 +228,7 @@
   function updateSummary() {
     const s = state.services.find((x) => x.id == state.serviceId);
     $('#summary').textContent = state.time && s
-      ? `${s.name}, ${fmtDate(state.date)}, ${state.time}–${addMin(state.time, s.duration_min)} (триває ${durText(s.duration_min)})`
+      ? `${s.name}${state.masterId ? ', майстер ' + masterName(state.masterId) : ''}, ${fmtDate(state.date)}, ${state.time}–${addMin(state.time, s.duration_min)} (триває ${durText(s.duration_min)})`
       : s ? `Процедура триває ${durText(s.duration_min)}. Оберіть час, щоб продовжити.` : 'Оберіть час, щоб продовжити.';
     $('#submitBtn').disabled = !state.time;
   }
@@ -296,6 +318,7 @@
       name: $('#nameInput').value,
       phone: $('#phoneInput').value,
       comment: $('#commentInput').value,
+      masterId: state.masterId ? Number(state.masterId) : undefined,
     };
     // Кнопка вимкнена, поки сервер не відповів: повторне натискання не надішле другий запит
     const btn = $('#submitBtn');
@@ -326,7 +349,7 @@
     msg.className = 'msg ok';
     const svc = state.services.find((x) => x.name === data.service);
     const span = svc ? `${data.time}–${addMin(data.time, svc.duration_min)} (триває ${durText(svc.duration_min)})` : `о ${data.time}`;
-    msg.textContent = `Дякуємо! Ви записані: ${data.service}, ${fmtDate(data.date)}, ${span}. Номер запису: ${data.id}.`;
+    msg.textContent = `Дякуємо! Ви записані: ${data.service}${data.master && state.masters.length > 1 ? ', майстер ' + data.master : ''}, ${fmtDate(data.date)}, ${span}. Номер запису: ${data.id}.`;
     if (data.remindLink) {
       $('#remindBtn').href = data.remindLink;
       $('#remindBtn').hidden = false;

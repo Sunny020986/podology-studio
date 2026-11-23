@@ -116,6 +116,9 @@ function openDb() {
       pinned      INTEGER NOT NULL DEFAULT 0
     );
   `);
+  // manual = 1: майстер переніс клієнта в архів сам; він лишається там до нової дії з його записами
+  const archCols = db.prepare('PRAGMA table_info(client_archive)').all().map((c) => c.name);
+  if (!archCols.includes('manual')) db.exec('ALTER TABLE client_archive ADD COLUMN manual INTEGER NOT NULL DEFAULT 0');
   // Нагадування в Telegram: код для посилання, чат клієнта, чи вже нагадали
   if (!apptCols.includes('remind_code')) db.exec('ALTER TABLE appointments ADD COLUMN remind_code TEXT');
   if (!apptCols.includes('tg_chat_id')) db.exec('ALTER TABLE appointments ADD COLUMN tg_chat_id TEXT');

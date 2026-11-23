@@ -459,7 +459,7 @@ function listClients(q, mode) {
     .prepare('SELECT date, start_time, client_name, client_phone, status, updated_at FROM appointments ORDER BY date, start_time')
     .all();
   const notes = new Map(db.prepare('SELECT phone_key, note, updated_at FROM client_notes').all().map((r) => [r.phone_key, r]));
-  const archive = new Map(db.prepare('SELECT phone_key, pinned FROM client_archive').all().map((r) => [r.phone_key, r.pinned]));
+  const archive = new Map(db.prepare('SELECT phone_key, pinned, manual, archived_at FROM client_archive').all().map((r) => [r.phone_key, r]));
   const map = new Map();
   for (const r of rows) {
     const key = last9(r.client_phone);
@@ -480,7 +480,10 @@ function listClients(q, mode) {
   let list = [...map.values()].map((c) => {
     const n = notes.get(c.key);
     if (n && n.updated_at > c.last_change) c.last_change = n.updated_at;
-    return { ...c, has_note: !!(n && n.note), archived: archive.get(c.key) === 0 };
+    const a = archive.get(c.key);
+    // Вручну заархівований клієнт повертається в активні одразу після нової дії з його записами
+    const archived = !!a && a.pinned === 0 && !(a.manual && c.last_change > a.archived_at);
+    return { ...c, has_note: !!(n && n.note), archived };
   });
   if (mode === 'active') list = list.filter((c) => !c.archived);
   if (mode === 'archived') list = list.filter((c) => c.archived);
@@ -512,9 +515,13 @@ function syncArchive() {
   db.transaction(() => {
     const add = db.prepare('INSERT OR IGNORE INTO client_archive (phone_key) VALUES (?)');
     const drop = db.prepare('DELETE FROM client_archive WHERE phone_key = ?');
+    const row = db.prepare('SELECT manual, archived_at FROM client_archive WHERE phone_key = ?');
     for (const c of listClients(undefined)) {
-      if (staleKeys.has(c.key)) add.run(c.key);
-      else drop.run(c.key);
+      if (staleKeys.has(c.key)) { add.run(c.key); continue; }
+      const r = row.get(c.key);
+      // Ручний архів не скасовуємо, поки після нього не було нових змін
+      if (r && r.manual && !(c.last_change > r.archived_at)) continue;
+      drop.run(c.key);
     }
   })();
 }
@@ -532,7 +539,16 @@ app.put('/api/admin/archive-months', (req, res) => {
 app.post('/api/admin/clients/:key/restore', (req, res) => {
   const key = req.params.key;
   if (!isClientKey(key)) return res.status(400).json({ error: 'Некоректний клієнт' });
-  db.prepare('INSERT INTO client_archive (phone_key, pinned) VALUES (?, 1) ON CONFLICT(phone_key) DO UPDATE SET pinned = 1').run(key);
+  db.prepare('INSERT INTO client_archive (phone_key, pinned) VALUES (?, 1) ON CONFLICT(phone_key) DO UPDATE SET pinned = 1, manual = 0').run(key);
+  res.json({ ok: true });
+});
+
+// Перенести клієнта в архів вручну. Дані не видаляються: клієнта можна повернути кнопкою «Повернути»
+app.post('/api/admin/clients/:key/archive', (req, res) => {
+  const key = req.params.key;
+  if (!isClientKey(key)) return res.status(400).json({ error: 'Некоректний клієнт' });
+  db.prepare(`INSERT INTO client_archive (phone_key, pinned, manual, archived_at) VALUES (?, 0, 1, datetime('now'))
+              ON CONFLICT(phone_key) DO UPDATE SET pinned = 0, manual = 1, archived_at = datetime('now')`).run(key);
   res.json({ ok: true });
 });
 

@@ -183,9 +183,11 @@
           <td>${fmtDate(c.last_visit)}</td>
           <td>${fmtDate(c.next_visit)}</td>
           <td>${c.has_note ? 'є' : '—'}</td>
-          <td>${c.archived ? '<button class="btn btn-ghost small" type="button" data-restore="' + c.key + '">Повернути</button>' : ''}</td>
+          <td>${c.archived
+            ? '<button class="btn btn-ghost small" type="button" data-restore="' + c.key + '">Повернути</button>'
+            : '<button class="btn btn-ghost small" type="button" data-archive-client="' + c.key + '">В архів</button>'}</td>
         </tr>`).join('')
-      : `<tr><td colspan="7" class="muted">${q ? 'Нікого не знайдено.' : clientsArchived ? 'В архіві нікого немає.' : 'Клієнтів ще немає: вони зʼявляться після першого запису.'}</td></tr>`;
+      : `<tr><td colspan="7" class="muted">${q ? 'Нікого не знайдено.' : clientsArchived ? 'В архіві нікого немає.' : 'Активних клієнтів немає. Нові зʼявляться після запису, решта може бути в архіві.'}</td></tr>`;
   }
 
   async function renderClient(key) {
@@ -704,6 +706,11 @@
       if (e.target.id === 'clientsActiveBtn' || e.target.id === 'clientsArchiveBtn') {
         clientsArchived = e.target.id === 'clientsArchiveBtn';
         return await renderClients();
+      }
+      if (e.target.dataset.archiveClient) {
+        await api('/api/admin/clients/' + e.target.dataset.archiveClient + '/archive', { method: 'POST' });
+        notify('Клієнта перенесено в архів');
+        return await loadClients();
       }
       if (e.target.dataset.restore) {
         await api('/api/admin/clients/' + e.target.dataset.restore + '/restore', { method: 'POST' });

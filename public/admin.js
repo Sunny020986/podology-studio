@@ -164,6 +164,8 @@
 
   function show(name) {
     document.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+    const activeTab = document.querySelector('.tabs .active');
+    if (activeTab && activeTab.parentElement.scrollWidth > activeTab.parentElement.clientWidth) activeTab.scrollIntoView({ block: 'nearest', inline: 'center' });
     if (name === 'clients') currentClient = null; // вкладка завжди відкривається зі списку
     views[name]().catch((e) => notify(e.message, true));
   }
@@ -309,7 +311,7 @@
       if (afTime && !r.slots.includes(afTime)) afTime = null;
       box.innerHTML = r.slots.length
         ? r.slots.map((t) => '<button type="button" class="slot' + (t === afTime ? ' selected' : '') + '" data-af-time="' + t + '">' + t + '</button>').join('')
-        : '<span class="muted">На цю дату вільного часу немає.</span>';
+        : '<span class="muted slots-empty">На цю дату вільного часу немає.</span>';
     } catch (err) {
       box.innerHTML = '<span class="muted">' + esc(err.message) + '</span>';
     }
@@ -738,7 +740,7 @@ ${isSuper() ? `
     <td data-label="Тривалість, хв"><input type="number" class="f-dur" min="5" max="480" step="5" value="${s.duration_min}"></td>
     <td data-label="Ціна, грн"><input type="number" class="f-price" min="0" step="10" value="${s.price_uah}"></td>
     <td data-label="Орієнтовна ціна (текст)" class="c-wide"><input type="text" class="f-note" maxlength="60" value="${esc(s.price_note)}" placeholder="напр. від 1380 грн"></td>
-    <td data-label="Повтор через, тижнів (0 — ні)"><input type="number" class="f-repeat" min="0" max="52" step="1" value="${s.repeat_weeks || 0}" aria-label="Нагадати про повторний візит через, тижнів" title="0 — не нагадувати"></td>
+    <td data-label="Повтор, тижнів"><input type="number" class="f-repeat" min="0" max="52" step="1" value="${s.repeat_weeks || 0}" aria-label="Нагадати про повторний візит через, тижнів" title="0 — не нагадувати"></td>
     <td data-label="Активна" class="c-check"><label><input type="checkbox" class="f-active" ${s.active ? 'checked' : ''}> <span class="m-only">Показувати на сайті</span></label></td>
     <td class="c-wide"><button class="btn btn-ghost small" type="button" data-save-service="${s.id}">Зберегти</button></td>
   </tr>`;

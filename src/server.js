@@ -18,6 +18,7 @@ const { localBusinessJsonLd, setupSeo } = require('./seo');
 const { freeSlots, masterFreeSlots, pickMaster, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
+const { securityHeaders, setupHealth } = require('./security');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const DATA_DIR = path.dirname(DB_PATH);
 
@@ -153,6 +154,7 @@ function updateRow(table, id, data) {
 const app = express();
 app.disable('x-powered-by');
 if (TRUST_PROXY) app.set('trust proxy', 1);
+app.use(securityHeaders);
 app.use(express.json({ limit: '100kb' }));
 // Головна сторінка з тегами для прев'ю посилання (Telegram, Viber, Facebook) і пошуковиків.
 // Повна адреса картинки береться із запиту, бо месенджери не розуміють відносних шляхів.
@@ -187,6 +189,7 @@ app.get(['/', '/index.html'], (req, res) => {
   res.type('html').send(INDEX_HTML.replace('<!--SEO-->', () => tags).replace('<title>Онлайн-запис до подолога</title>', `<title>${attr(title)}</title>`));
 });
 
+setupHealth({ app, db, root: path.join(__dirname, '..') });
 app.use(express.static(PUBLIC_DIR));
 app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'admin.html')));
 

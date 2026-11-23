@@ -78,6 +78,20 @@ systemctl start podology-backup.service   # перший запуск одраз
 journalctl -u podology-backup -n 20       # результат
 ```
 
+## Перевірка, чи сайт живий
+
+`GET /healthz` відповідає `200` і `{"ok":true,"version":"<коміт>"}`, коли сервер працює і база читається, або `503`, якщо база недоступна.
+
+Сторож `scripts/healthcheck.js` перевіряє цю адресу кожні 2 хвилини й пише в Telegram-чат кабінету (той, що задано в адмінці), коли сайт не відповідає 2 перевірки поспіль, і ще раз — коли знову працює:
+
+```bash
+cp deploy/podology-health.service deploy/podology-health.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now podology-health.timer
+systemctl start podology-health.service   # перша перевірка одразу
+journalctl -u podology-health -n 5        # має бути «OK <коміт>»
+```
+
 Відновлення: зупиніть сайт (`systemctl stop podology`), замініть `data/studio.db` потрібною копією, видаліть поруч файли `studio.db-wal` і `studio.db-shm`, якщо вони є, і запустіть сайт знову.
 
 Часовий пояс береться з комп'ютера, де запущено сервер. Для Києва це має бути `Europe/Kyiv`.

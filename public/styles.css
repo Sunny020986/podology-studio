@@ -716,3 +716,18 @@ html, body { overflow-x: clip; }       /* страховка: нічого не 
   .auto-cards td select { min-height: 40px; padding: 6px 10px; }
   .auto-cards td[colspan] { grid-column: 1 / -1; justify-content: center; color: var(--muted); }
 }
+@media (max-width: 700px) {
+  /* Перша клітинка картки — заголовок (дата запису, ім'я клієнта, майстра) */
+  .auto-cards td[data-label]:first-child { font-size: 16px; font-weight: 600; justify-content: flex-start; text-align: left; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .auto-cards td[data-label]:first-child::before { display: none; }
+  /* Вкладки: м'яке затухання праворуч підказує, що рядок гортається */
+  .tabs { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); padding-right: 28px; }
+  .auto-cards td:not([data-label]) .btn, .auto-cards td .cv > .btn { min-height: 40px; }
+}
+.slots-empty { grid-column: 1 / -1; }
+@media (max-width: 700px) {
+  /* Статистика: дві плитки в рядку замість однієї */
+  .stat-tiles { grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 10px; }
+  .stat-tile { padding: 12px; }
+  .stat-tile-num { font-size: 24px; }
+}

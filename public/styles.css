@@ -589,3 +589,6 @@ html, body { overflow-x: clip; }       /* страховка: нічого не 
 .m-blocked { background: rgba(181, 72, 93, 0.12); color: var(--danger); }
 .m-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .small-note { font-size: 12px; }
+
+/* Списки вибору в панелі інструментів адмінки (майстер, місяць тощо) */
+.toolbar select { padding: 8px 10px; border: 1px solid var(--field-line); border-radius: 10px; background: var(--field); color: var(--ink); font: inherit; font-size: 14px; }

@@ -20,9 +20,9 @@
   let me = { role: 'super' };
   let masters = [];          // для суперадміна: усі майстри для вибору у вкладках
   let apptMaster = '';       // «Записи»: фільтр за майстром ('' = усі)
-  let schedMaster = null;    // «Розклад» і «Блокування»: чий графік редагуємо
+  let schedMaster = null;    // «Розклад»: чий графік (години, перерви, блокування) редагуємо
   let statsMaster = '';      // «Статистика»: '' = увесь кабінет
-  const MASTER_TABS = ['appointments', 'clients', 'schedule', 'blocks'];
+  const MASTER_TABS = ['appointments', 'clients', 'schedule'];
   const isSuper = () => me.role === 'super';
   // Майстер, чий графік показуємо: для майстра це він сам, для суперадміна — обраний (або перший)
   const schedMasterId = () => (isSuper() ? (schedMaster || masters.find((m) => m.status === 'active')?.id || masters[0]?.id) : me.master.id);
@@ -129,7 +129,6 @@
     clients: renderClients,
     chat: renderChat,
     schedule: renderSchedule,
-    blocks: renderBlocks,
     services: renderServices,
     studio: renderStudio,
     reviews: renderReviews,
@@ -407,8 +406,20 @@ ${isSuper() ? `
         <input name="note" value="Обід" placeholder="Назва" maxlength="60">
         <button class="btn btn-primary small" type="submit">Додати перерву</button>
       </form>
-      <ul class="list" id="breakList"></ul>`;
+      <ul class="list" id="breakList"></ul>
+
+      <h3 style="margin:32px 0 6px">Разові блокування</h3>
+      <div class="muted">Закриває час на конкретну дату: лікар, особиста справа, відпустка. Щоб закрити цілий день, вкажіть увесь робочий час. Записи, що вже стоять у цей час, не скасовуються: перенесіть їх у «Записах».</div>
+      <div class="toolbar" style="margin-top:10px"><label>Дата <input type="date" id="blockDate" value="${blockDate}"></label></div>
+      <form class="inline-form" id="blockForm">
+        <label>з <input type="time" name="start_time" required></label>
+        <label>до <input type="time" name="end_time" required></label>
+        <input name="note" placeholder="Причина (необов'язково)" maxlength="100">
+        <button class="btn btn-primary small" type="submit">Заблокувати час</button>
+      </form>
+      <ul class="list" id="blockList"></ul>`;
     await renderBreaks();
+    await renderBlocks();
     $('#changeHoursForm')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       try {
@@ -460,17 +471,9 @@ ${isSuper() ? `
       : '<li class="muted">Перерв ще немає.</li>';
   }
 
-  // ----- Блокування -----
+  // Разові блокування на обрану дату (розділ у вкладці «Розклад»)
   async function renderBlocks() {
-    $('#view').innerHTML = `
-      <div class="toolbar">${masterSelect('blockMaster', schedMasterId())}<label>Дата <input type="date" id="blockDate" value="${blockDate}"></label></div>
-      <form class="inline-form" id="blockForm">
-        <input type="time" name="start_time" required>
-        <input type="time" name="end_time" required>
-        <input name="note" placeholder="Причина (необов'язково)" maxlength="100">
-        <button class="btn btn-primary small" type="submit">Додати блок</button>
-      </form>
-      <ul class="list" id="blockList"></ul>`;
+    if (!$('#blockList')) return;
     const list = await api(`/api/admin/blocks?date=${blockDate}&` + schedQ());
     $('#blockList').innerHTML = list.length
       ? list.map((b) => `<li><span>${b.start_time}–${b.end_time} ${esc(b.note)}</span>
@@ -552,7 +555,7 @@ ${isSuper() ? `
     }
     $('#view').innerHTML =
       '<div class="toolbar"><button class="btn btn-primary small" type="button" id="masterNew">+ Новий майстер</button>' +
-      '<span class="muted">Графік кожного майстра налаштовується у вкладках «Розклад» і «Блокування».</span></div>' +
+      '<span class="muted">Графік кожного майстра (години, перерви, разові блокування) налаштовується у вкладці «Розклад».</span></div>' +
       '<table><thead><tr><th>Ім\'я</th><th>Логін</th><th>Статус</th><th>Послуг</th><th>Майбутніх записів</th><th></th></tr></thead><tbody>' +
       masters.map((m) => '<tr>' +
         '<td>' + esc(m.name) + (m.has_password ? '' : '<div class="muted small-note">пароль не задано: увійти не може</div>') + '</td>' +
@@ -760,7 +763,6 @@ ${isSuper() ? `
     try {
       if (e.target.id === 'apptMaster') { apptMaster = e.target.value; return await renderAppointments(); }
       if (e.target.id === 'schedMaster') { schedMaster = Number(e.target.value); return await renderSchedule(); }
-      if (e.target.id === 'blockMaster') { schedMaster = Number(e.target.value); return await renderBlocks(); }
       if (e.target.id === 'statsMaster') { statsMaster = e.target.value; return await renderStats(); }
       if (e.target.id === 'archiveMonths') {
         await api('/api/admin/archive-months', { method: 'PUT', body: { months: Number(e.target.value) } });

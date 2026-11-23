@@ -3,15 +3,15 @@ function setupStats({ app, db, toMin, weekdayOf, last9 }) {
   const isMonth = (m) => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(m));
   const pad = (n) => String(n).padStart(2, '0');
 
-  // Скільки хвилин за день доступно для запису: робочі години мінус перерви й блокування
-  function availableMinutes(date) {
+  // Скільки хвилин за день доступно для запису в одного майстра: робочі години мінус перерви й блокування
+  function availableMinutes(date, masterId) {
     const wd = weekdayOf(date);
-    const h = db.prepare('SELECT start_time, end_time FROM work_hours WHERE weekday = ?').get(wd);
+    const h = db.prepare('SELECT start_time, end_time FROM master_hours WHERE master_id = ? AND weekday = ?').get(masterId, wd);
     if (!h || !h.start_time) return 0;
     const s = toMin(h.start_time), e = toMin(h.end_time);
     const busy = [
-      ...db.prepare('SELECT start_time, end_time FROM breaks WHERE weekday = ?').all(wd),
-      ...db.prepare('SELECT start_time, end_time FROM blocks WHERE date = ?').all(date),
+      ...db.prepare('SELECT start_time, end_time FROM breaks WHERE master_id = ? AND weekday = ?').all(masterId, wd),
+      ...db.prepare('SELECT start_time, end_time FROM blocks WHERE master_id = ? AND date = ?').all(masterId, date),
     ].map((b) => [Math.max(s, toMin(b.start_time)), Math.min(e, toMin(b.end_time))]).filter(([a, z]) => z > a)
       .sort((x, y) => x[0] - y[0]);
     let taken = 0, cursor = s; // перетини перерв і блокувань не рахуємо двічі
@@ -29,14 +29,20 @@ function setupStats({ app, db, toMin, weekdayOf, last9 }) {
     const from = `${month}-01`, to = `${month}-${pad(days)}`;
     const today = (() => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; })();
 
-    const appts = db.prepare(`SELECT a.date, a.start_time, a.end_time, a.status, a.client_phone, s.name AS service, s.price_uah
-      FROM appointments a JOIN services s ON s.id = a.service_id WHERE a.date BETWEEN ? AND ?`).all(from, to);
+    // masterId: статистика одного майстра; без нього — по всьому кабінету
+    const masterId = Number(req.query.masterId) > 0 ? Number(req.query.masterId) : null;
+    const appts = db.prepare(`SELECT a.date, a.start_time, a.end_time, a.status, a.client_phone, a.master_id, s.name AS service, s.price_uah
+      FROM appointments a JOIN services s ON s.id = a.service_id WHERE a.date BETWEEN ? AND ?`).all(from, to)
+      .filter((a) => !masterId || a.master_id === masterId);
     const active = appts.filter((a) => a.status !== 'cancelled');
     const done = active.filter((a) => a.date < today);
 
     // Нові клієнти: перший запис за всю історію припадає на цей місяць
     const firstSeen = new Map();
-    for (const r of db.prepare('SELECT client_phone, MIN(date) AS first FROM appointments GROUP BY client_phone').all()) {
+    const firstRows = masterId
+      ? db.prepare('SELECT client_phone, MIN(date) AS first FROM appointments WHERE master_id = ? GROUP BY client_phone').all(masterId)
+      : db.prepare('SELECT client_phone, MIN(date) AS first FROM appointments GROUP BY client_phone').all();
+    for (const r of firstRows) {
       const k = last9(r.client_phone);
       if (!firstSeen.has(k) || r.first < firstSeen.get(k)) firstSeen.set(k, r.first);
     }
@@ -47,8 +53,9 @@ function setupStats({ app, db, toMin, weekdayOf, last9 }) {
     for (const a of active) byService.set(a.service, (byService.get(a.service) || 0) + 1);
     const topServices = [...byService.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count }));
 
+    const masterIds = masterId ? [masterId] : db.prepare("SELECT id FROM masters WHERE status = 'active'").all().map((r) => r.id);
     let available = 0;
-    for (let d = 1; d <= days; d++) available += availableMinutes(`${month}-${pad(d)}`);
+    for (let d = 1; d <= days; d++) for (const id of masterIds) available += availableMinutes(`${month}-${pad(d)}`, id);
     const booked = active.reduce((sum, a) => sum + (toMin(a.end_time) - toMin(a.start_time)), 0);
 
     const priced = done.filter((a) => a.price_uah > 0);

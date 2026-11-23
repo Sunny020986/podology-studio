@@ -31,6 +31,7 @@ function setupWaitlist({ app, db, telegram, freeSlots, isBookableDate, horizonDa
 
   app.post('/api/waitlist', (req, res) => {
     const { serviceId, date } = req.body || {};
+    const masterId = Number.isInteger(Number(req.body?.masterId)) && Number(req.body.masterId) > 0 ? Number(req.body.masterId) : null;
     const name = String(req.body?.name ?? '').trim();
     const phone = String(req.body?.phone ?? '').trim();
     const service = db.prepare('SELECT id, name FROM services WHERE id = ? AND active = 1').get(Number(serviceId));
@@ -46,7 +47,7 @@ function setupWaitlist({ app, db, telegram, freeSlots, isBookableDate, horizonDa
     if (mine.length >= MAX_PER_PHONE) return res.status(429).json({ error: `Можна мати не більше ${MAX_PER_PHONE} заявок одночасно` });
     limiter.hit(req.ip);
     const code = crypto.randomBytes(8).toString('base64url');
-    db.prepare('INSERT INTO waitlist (service_id, date, name, phone, code) VALUES (?, ?, ?, ?, ?)').run(service.id, date, name, phone, code);
+    db.prepare('INSERT INTO waitlist (service_id, date, name, phone, code, master_id) VALUES (?, ?, ?, ?, ?, ?)').run(service.id, date, name, phone, code, masterId);
     telegram.notifyMaster(`⏳ Новий запит у списку очікування\n${service.name}, ${fmt(date)}\n${name}, ${phone}`);
     res.status(201).json({ ok: true, telegramLink: telegram.remindLink(`w_${code}`) });
   });
@@ -70,7 +71,7 @@ function setupWaitlist({ app, db, telegram, freeSlots, isBookableDate, horizonDa
       if (recent && Date.now() - recent < NEXT_AFTER_MS) continue; // попередній у черзі ще має час записатися
       const queue = db.prepare(`SELECT w.*, s.name AS service, s.duration_min FROM waitlist w JOIN services s ON s.id = w.service_id
         WHERE w.date = ? AND w.status = 'waiting' ORDER BY w.id`).all(date);
-      const first = queue.find((w) => freeSlots(db, date, w.duration_min).length > 0);
+      const first = queue.find((w) => freeSlots(db, date, w.duration_min, { masterId: w.master_id, serviceId: w.service_id }).length > 0);
       if (!first) continue;
       db.prepare("UPDATE waitlist SET status = 'notified', notified_at = ? WHERE id = ?").run(Date.now(), first.id);
       const where = base ? `${base.replace(/\/+$/, '')}/#booking` : 'на сайті';

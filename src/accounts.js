@@ -90,8 +90,8 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
   const canChange = (a) => a.status !== 'cancelled' && hoursUntil(a.date, a.start_time) >= changeHours();
 
   const accountPhoneAppts = (acc) => db.prepare(`
-      SELECT a.id, a.date, a.start_time, a.end_time, a.client_phone, a.status, s.id AS service_id, s.name AS service, s.duration_min
-      FROM appointments a JOIN services s ON s.id = a.service_id ORDER BY a.date DESC, a.start_time DESC`)
+      SELECT a.id, a.date, a.start_time, a.end_time, a.client_phone, a.status, a.master_id, m.name AS master, s.id AS service_id, s.name AS service, s.duration_min
+      FROM appointments a JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id ORDER BY a.date DESC, a.start_time DESC`)
     .all().filter((a) => last9(a.client_phone) === last9(acc.phone));
 
   const ownAppt = (acc, id) => accountPhoneAppts(acc).find((a) => a.id === id);
@@ -145,7 +145,7 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
   app.get('/api/account/appointments', requireAccount, (req, res) => {
     const today = todayStr();
     res.json(accountPhoneAppts(req.account).map((a) => ({
-      id: a.id, service_id: a.service_id, date: a.date, start_time: a.start_time, end_time: a.end_time, status: a.status,
+      id: a.id, service_id: a.service_id, master_id: a.master_id, master: a.master || '', date: a.date, start_time: a.start_time, end_time: a.end_time, status: a.status,
       service: a.service, upcoming: a.date >= today && a.status !== 'cancelled', canChange: canChange(a),
     })));
   });
@@ -167,7 +167,8 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
     const { date, time } = req.body || {};
     if (!isBookableDate(date, horizonDays)) return res.status(400).json({ error: 'Некоректна дата' });
     if (!isTime(time)) return res.status(400).json({ error: 'Некоректний час' });
-    const free = freeSlots(db, date, a.duration_min, a.id); // власний запис не рахується як зайнятий
+    // Перенесення до того самого майстра; власний запис не рахується як зайнятий
+    const free = freeSlots(db, date, a.duration_min, { masterId: a.master_id, excludeId: a.id });
     if (!free.includes(time)) return res.status(409).json({ error: 'Цей час уже недоступний, оберіть інший' });
     const toMinutes = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
     const endMin = toMinutes(time) + a.duration_min;

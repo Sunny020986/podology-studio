@@ -12,8 +12,9 @@ const { setupRepeatReminders } = require('./repeat');
 const { setupWaitlist } = require('./waitlist');
 const { setupStats } = require('./stats');
 const { setupTips } = require('./tips');
+const { activeMasters, masterOffers } = require('./masters');
 const { localBusinessJsonLd, setupSeo } = require('./seo');
-const { freeSlots, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
+const { freeSlots, pickMaster, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -179,8 +180,18 @@ app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'admin.html')
 
 // ---------- Публічне API ----------
 app.get('/api/services', (req, res) => {
-  res.json(db.prepare('SELECT id, name, description, duration_min, price_uah, price_note FROM services WHERE active = 1 ORDER BY id').all());
+  res.json(db.prepare(`SELECT id, name, description, duration_min, price_uah, price_note FROM services s WHERE active = 1
+    AND EXISTS (SELECT 1 FROM master_services ms JOIN masters m ON m.id = ms.master_id WHERE ms.service_id = s.id AND m.status = 'active')
+    ORDER BY id`).all());
 });
+
+// Активні майстри для вибору на сайті і послуги, які робить кожен
+app.get('/api/masters', (req, res) => {
+  const svc = db.prepare('SELECT service_id FROM master_services WHERE master_id = ?');
+  res.json(activeMasters(db).map((m) => ({ id: m.id, name: m.name, services: svc.all(m.id).map((r) => r.service_id) })));
+});
+// masterId із запиту: число або порожньо («будь-який вільний»)
+const masterParam = (v) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(v) : null);
 
 // Поля кабінету й максимальна довжина кожного. name обов'язкове, решта може бути порожньою.
 const STUDIO_FIELDS = {
@@ -199,21 +210,22 @@ app.get('/api/settings', (req, res) => {
 });
 
 app.get('/api/slots', (req, res) => {
-  const service = db.prepare('SELECT duration_min FROM services WHERE id = ? AND active = 1').get(Number(req.query.serviceId));
+  const service = db.prepare('SELECT id, duration_min FROM services WHERE id = ? AND active = 1').get(Number(req.query.serviceId));
   const date = String(req.query.date || '');
   if (!service) return res.status(400).json({ error: 'Невідома послуга' });
   if (!isBookableDate(date, HORIZON_DAYS)) return res.status(400).json({ error: `Запис відкрито від сьогодні до ${maxDateStr(HORIZON_DAYS)}` });
-  res.json({ date, slots: freeSlots(db, date, service.duration_min) });
+  res.json({ date, slots: freeSlots(db, date, service.duration_min, { masterId: masterParam(req.query.masterId), serviceId: service.id }) });
 });
 
 // Найближчий день з вільним часом для послуги, щоб клієнт одразу бачив записи, а не порожню дату
 app.get('/api/next-slot', (req, res) => {
-  const service = db.prepare('SELECT duration_min FROM services WHERE id = ? AND active = 1').get(Number(req.query.serviceId));
+  const service = db.prepare('SELECT id, duration_min FROM services WHERE id = ? AND active = 1').get(Number(req.query.serviceId));
   if (!service) return res.status(400).json({ error: 'Невідома послуга' });
+  const opts = { masterId: masterParam(req.query.masterId), serviceId: service.id };
   for (let i = 0; i <= HORIZON_DAYS; i++) {
     const date = addDays(todayStr(), i);
     if (!isBookableDate(date, HORIZON_DAYS)) break;
-    const slots = freeSlots(db, date, service.duration_min);
+    const slots = freeSlots(db, date, service.duration_min, opts);
     if (slots.length) return res.json({ date, slots });
   }
   res.json({ date: null, slots: [] });
@@ -222,7 +234,7 @@ app.get('/api/next-slot', (req, res) => {
 // Перевірка вільного часу і запис виконуються в одній транзакції, тому два клієнти не займуть один слот.
 const last9 = (phone) => phone.replace(/\D/g, '').slice(-9); // номер без коду країни, щоб +380 50... і 050... збігалися
 
-const bookTx = db.transaction(({ service, date, time, name, phone, comment }) => {
+const bookTx = db.transaction(({ service, date, time, name, phone, comment, masterId }) => {
   const samePhone = db
     .prepare("SELECT client_phone FROM appointments WHERE date >= ? AND status != 'cancelled'")
     .all(todayStr())
@@ -233,16 +245,17 @@ const bookTx = db.transaction(({ service, date, time, name, phone, comment }) =>
       { status: 429 }
     );
   }
-  const free = freeSlots(db, date, service.duration_min);
-  if (!free.includes(time)) {
+  // Конкретний майстер або, для «будь-кого», вільний майстер з найменшою кількістю записів цього дня
+  const master = pickMaster(db, date, service.duration_min, time, { masterId, serviceId: service.id });
+  if (!master) {
     throw Object.assign(new Error('Цей час уже недоступний, оберіть інший'), { status: 409 });
   }
   const end = toHHMM(toMin(time) + service.duration_min);
   const remindCode = 'r' + crypto.randomBytes(9).toString('base64url');
   const info = db
-    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code, client_comment) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(service.id, date, time, end, name, phone, remindCode, comment ?? '');
-  return { id: info.lastInsertRowid, remindCode };
+    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code, client_comment, master_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(service.id, date, time, end, name, phone, remindCode, comment ?? '', master);
+  return { id: info.lastInsertRowid, remindCode, masterId: master };
 });
 
 // Скільки годин до візиту клієнт може сам скасувати чи перенести запис (налаштовується в адмінці)
@@ -259,7 +272,7 @@ const accounts = setupAccounts({
 
 
 app.post('/api/appointments', (req, res) => {
-  const { serviceId, date, time, name, phone, comment } = req.body || {};
+  const { serviceId, date, time, name, phone, comment, masterId } = req.body || {};
   const service = db.prepare('SELECT * FROM services WHERE id = ? AND active = 1').get(Number(serviceId));
   if (!service) return res.status(400).json({ error: 'Невідома послуга' });
   if (!isBookableDate(date, HORIZON_DAYS)) return res.status(400).json({ error: `Запис відкрито від сьогодні до ${maxDateStr(HORIZON_DAYS)}` });
@@ -280,10 +293,13 @@ app.post('/api/appointments', (req, res) => {
 
   try {
     const cleanComment = String(comment ?? '').trim().slice(0, 500);
-    const { id, remindCode } = bookTx({ service, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment });
+    const wantMaster = masterParam(masterId);
+    if (wantMaster && !masterOffers(db, wantMaster, service.id)) return res.status(400).json({ error: 'Цей майстер не виконує обрану послугу' });
+    const { id, remindCode, masterId: assigned } = bookTx({ service, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, masterId: wantMaster });
+    const masterName = db.prepare('SELECT name FROM masters WHERE id = ?').get(assigned)?.name || '';
     bookingLimiter.hit(req.ip);
-    telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment });
-    res.status(201).json({ id: Number(id), date, time, service: service.name, remindLink: telegram.remindLink(remindCode) });
+    telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, master: masterName });
+    res.status(201).json({ id: Number(id), date, time, service: service.name, master: masterName, remindLink: telegram.remindLink(remindCode) });
   } catch (e) {
     if (e.status) return res.status(e.status).json({ error: e.message });
     console.error(e);
@@ -367,12 +383,12 @@ app.get('/api/admin/appointments', (req, res) => {
 
 // Скасований запис можна повернути лише тоді, коли його час досі вільний від інших записів.
 const setStatusTx = db.transaction((id, status) => {
-  const appt = db.prepare('SELECT id, date, start_time, end_time, status FROM appointments WHERE id = ?').get(id);
+  const appt = db.prepare('SELECT id, date, start_time, end_time, status, master_id FROM appointments WHERE id = ?').get(id);
   if (!appt) throw Object.assign(new Error('Запис не знайдено'), { status: 404 });
   if (appt.status === 'cancelled' && status !== 'cancelled') {
     const clash = db
-      .prepare("SELECT 1 FROM appointments WHERE date = ? AND id != ? AND status != 'cancelled' AND start_time < ? AND end_time > ?")
-      .get(appt.date, id, appt.end_time, appt.start_time);
+      .prepare("SELECT 1 FROM appointments WHERE master_id = ? AND date = ? AND id != ? AND status != 'cancelled' AND start_time < ? AND end_time > ?")
+      .get(appt.master_id, appt.date, id, appt.end_time, appt.start_time);
     if (clash) {
       throw Object.assign(new Error('Цей час уже зайнятий іншим записом. Спочатку скасуйте або перенесіть той запис'), { status: 409 });
     }

@@ -3,7 +3,10 @@ const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 
 // Розмітка schema.org про кабінет: назва, адреса, телефон, години роботи, послуги. Відвідувачі її не бачать.
 function localBusinessJsonLd(db, s, base) {
-  const hours = db.prepare('SELECT weekday, start_time, end_time FROM work_hours WHERE start_time IS NOT NULL ORDER BY weekday').all();
+  // Години кабінету: від найранішого початку до найпізнішого кінця серед активних майстрів
+  const hours = db.prepare(`SELECT h.weekday, MIN(h.start_time) AS start_time, MAX(h.end_time) AS end_time
+    FROM master_hours h JOIN masters m ON m.id = h.master_id
+    WHERE m.status = 'active' AND h.start_time IS NOT NULL GROUP BY h.weekday ORDER BY h.weekday`).all();
   const services = db.prepare('SELECT name, price_uah FROM services WHERE active = 1 ORDER BY id').all();
   const data = {
     '@context': 'https://schema.org',

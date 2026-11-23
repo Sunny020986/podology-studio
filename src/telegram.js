@@ -178,8 +178,8 @@ function createTelegram(db) {
 
   const fmtDate = (d) => d.split('-').reverse().join('.');
 
-  function newAppointment({ service, date, time, name, phone, comment }) {
-    fire(`🗓 Новий запис\n${service}\n${fmtDate(date)} о ${time}\n${name}, ${phone}${comment ? '\nКоментар: ' + comment : ''}`);
+  function newAppointment({ service, date, time, name, phone, comment, master }) {
+    fire(`🗓 Новий запис\n${service}${master ? ' · майстер: ' + master : ''}\n${fmtDate(date)} о ${time}\n${name}, ${phone}${comment ? '\nКоментар: ' + comment : ''}`);
   }
 
   const lastChatNotice = new Map();

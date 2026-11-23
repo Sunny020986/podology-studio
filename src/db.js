@@ -6,6 +6,7 @@ const { createReviewTables } = require('./reviews');
 const { createRepeatColumns } = require('./repeat');
 const { createWaitlistTable } = require('./waitlist');
 const { createTipsTable } = require('./tips');
+const { createMasterTables } = require('./masters');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'studio.db');
 
@@ -137,6 +138,7 @@ function openDb() {
   migrateServicesV2(db);
   addServicesOnce(db, 'services_v3', EXTRA_SERVICES_V3);
   setPriceNoteOnce(db);
+  createMasterTables(db); // після стартових даних: перший майстр отримує наявний розклад, послуги й записи
   return db;
 }
 

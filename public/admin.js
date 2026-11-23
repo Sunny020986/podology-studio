@@ -756,7 +756,7 @@ ${isSuper() ? `
     if (editingMaster !== null) {
       const services = await api('/api/admin/services');
       const m = editingMaster === 'new'
-        ? { name: '', login: '', services: services.filter((s) => s.active).map((s) => s.id), has_password: false }
+        ? { name: '', login: '', bio: '', photo: '', services: services.filter((s) => s.active).map((s) => s.id), has_password: false }
         : masters.find((x) => x.id === editingMaster);
       if (!m) { editingMaster = null; return renderMasters(); }
       const isNew = editingMaster === 'new';
@@ -770,6 +770,13 @@ ${isSuper() ? `
         '<input class="input" id="mfLogin" maxlength="30" required autocomplete="off" placeholder="напр. olena" value="' + esc(m.login) + '">' +
         '<label class="step-label" for="mfPass">' + (isNew ? 'Пароль (не менше 8 символів)' : 'Новий пароль' + (m.has_password ? ' (порожньо — не змінювати)' : ' — ще не задано, майстер не може увійти')) + '</label>' +
         '<input class="input" id="mfPass" type="text" minlength="8" maxlength="100" autocomplete="new-password"' + (isNew ? ' required' : '') + '>' +
+        '<label class="step-label" for="mfBio">Про майстра (для блоку «Наші майстри» на сайті)</label>' +
+        '<textarea class="input" id="mfBio" rows="3" maxlength="600" placeholder="Досвід, спеціалізація, чим допомагає">' + esc(m.bio || '') + '</textarea>' +
+        (isNew ? '<p class="muted">Фото можна додати після збереження майстра.</p>'
+          : '<div class="step-label">Фото</div><div class="mf-photo">' +
+            (m.photo ? '<img src="/media/masters/' + esc(m.photo) + '" alt="Фото: ' + esc(m.name) + '" id="mfPhotoImg">' : '<div class="mf-photo-empty" id="mfPhotoImg">' + esc(m.name.slice(0, 1)) + '</div>') +
+            '<label class="btn btn-ghost small">Завантажити фото<input type="file" id="mfPhoto" accept="image/*" hidden></label>' +
+            (m.photo ? '<button class="btn btn-ghost small danger" type="button" id="mfPhotoDel">Прибрати фото</button>' : '') + '</div>') +
         '<fieldset class="svc-field"><legend class="step-label">Послуги, які робить майстер</legend>' +
         '<div class="toolbar"><button class="btn btn-ghost small" type="button" id="svcAll">Позначити всі</button><button class="btn btn-ghost small" type="button" id="svcNone">Зняти всі</button></div>' +
         '<div class="svc-grid">' + services.map((s) => '<label class="svc-check"><input type="checkbox" name="svc" value="' + s.id + '"' +
@@ -799,6 +806,35 @@ ${isSuper() ? `
         '</td></tr>').join('') +
       '</tbody></table>';
   }
+  // Фото майстра: стискаємо в браузері до 600 px (JPEG), щоб не завантажувати важкі файли з телефона
+  async function shrinkPhoto(file, max = 600) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((ok, fail) => { const i = new Image(); i.onload = () => ok(i); i.onerror = fail; i.src = url; });
+      const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.naturalWidth * k);
+      c.height = Math.round(img.naturalHeight * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      return await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.85));
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  $('#view').addEventListener('change', async (e) => {
+    if (e.target.id !== 'mfPhoto' || !e.target.files[0]) return;
+    try {
+      const blob = await shrinkPhoto(e.target.files[0]);
+      const r = await fetch('/api/admin/masters/' + editingMaster + '/photo', { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'image/jpeg' }, body: blob });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'Не вдалося завантажити фото');
+      notify('Фото оновлено');
+      await renderMasters();
+    } catch (err) {
+      notify(err.message || 'Не вдалося прочитати фото', true);
+    }
+  });
+
   // Форма майстра: окремий обробник, щоб не потрапити в загальну обробку форм нижче
   $('#view').addEventListener('submit', async (e) => {
     if (e.target.id !== 'masterForm') return;
@@ -809,6 +845,7 @@ ${isSuper() ? `
       login: $('#mfLogin').value,
       password: $('#mfPass').value,
       services: [...document.querySelectorAll('#masterForm input[name="svc"]:checked')].map((x) => Number(x.value)),
+      bio: $('#mfBio').value,
     };
     try {
       if (editingMaster === 'new') await api('/api/admin/masters', { method: 'POST', body });
@@ -1089,6 +1126,11 @@ ${isSuper() ? `
       if (e.target.id === 'clientsCsv') return await downloadClientsCsv();
       if (e.target.id === 'masterNew') { editingMaster = 'new'; return await renderMasters(); }
       if (e.target.id === 'masterBack') { editingMaster = null; return await renderMasters(); }
+      if (e.target.id === 'mfPhotoDel') {
+        await api('/api/admin/masters/' + editingMaster + '/photo', { method: 'DELETE' });
+        notify('Фото прибрано');
+        return await renderMasters();
+      }
       if (e.target.id === 'svcAll' || e.target.id === 'svcNone') {
         document.querySelectorAll('#masterForm input[name="svc"]').forEach((x) => { x.checked = e.target.id === 'svcAll'; });
         return;

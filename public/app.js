@@ -106,6 +106,35 @@
     $('#masterSelect').innerHTML = '<option value="">Будь-який вільний</option>' +
       list.map((m) => '<option value="' + m.id + '"' + (String(m.id) === String(state.masterId) ? ' selected' : '') + '>' + esc(m.name) + '</option>').join('');
   }
+  // «Наші майстри»: показуємо, коли майстрів двоє й більше або в майстра є фото чи опис
+  function renderTeam() {
+    const list = state.masters;
+    const show = list.length > 1 || list.some((m) => m.photo || m.bio);
+    $('#team').hidden = !show;
+    if (!show) return;
+    $('#teamList').innerHTML = list.map((m) => '<div class="card team-card">' +
+      (m.photo ? '<img class="team-photo" src="' + esc(m.photo) + '" alt="Фото: ' + esc(m.name) + '" loading="lazy">'
+        : '<div class="team-photo team-initial" aria-hidden="true">' + esc(m.name.slice(0, 1)) + '</div>') +
+      '<div class="team-name">' + esc(m.name) + '</div>' +
+      (m.bio ? '<div class="team-bio">' + esc(m.bio) + '</div>' : '') +
+      (list.length > 1 ? '<button class="btn btn-ghost small team-book" type="button" data-book-master="' + m.id + '">Записатися до майстра</button>' : '') +
+      '</div>').join('');
+  }
+  $('#teamList').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-book-master]');
+    if (!btn) return;
+    const m = state.masters.find((x) => String(x.id) === btn.dataset.bookMaster);
+    if (!m) return;
+    // Якщо обрана послуга не в цього майстра, беремо першу з його послуг
+    if (!m.services.includes(state.serviceId)) {
+      const s = state.services.find((x) => m.services.includes(x.id));
+      if (s) { state.serviceId = s.id; $('#serviceSearch').value = s.name; }
+    }
+    state.masterId = String(m.id);
+    pickNearestDate();
+    $('#booking').scrollIntoView({ behavior: 'smooth' });
+  });
+
   $('#masterSelect').addEventListener('change', (e) => {
     state.masterId = e.target.value;
     pickNearestDate();
@@ -115,6 +144,7 @@
     const r = await fetch('/api/services');
     state.services = await r.json();
     state.masters = await fetch('/api/masters').then((x) => x.json()).catch(() => []);
+    renderTeam();
     $('#servicesList').innerHTML = state.services.map((s) => `
       <button class="service" type="button" data-id="${s.id}">
         <span class="service-name">${esc(s.name)}</span>

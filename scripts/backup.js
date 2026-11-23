@@ -37,6 +37,13 @@ async function main() {
   if (ok !== 'ok') throw new Error(`Копія пошкоджена: ${ok}`);
   console.log(`Копію збережено: ${dest} (${(fs.statSync(dest).size / 1024).toFixed(0)} КБ, записів: ${appts})`);
 
+  // Фото майстрів лежать поруч із базою (data/uploads): копіюємо папку повністю, вона невелика
+  const uploads = path.join(path.dirname(DB_PATH), 'uploads');
+  if (fs.existsSync(uploads)) {
+    fs.cpSync(uploads, path.join(BACKUP_DIR, 'uploads'), { recursive: true });
+    console.log(`Фото скопійовано: ${path.join(BACKUP_DIR, 'uploads')}`);
+  }
+
   const cutoff = Date.now() - KEEP_DAYS * 24 * 60 * 60 * 1000;
   for (const f of fs.readdirSync(BACKUP_DIR)) {
     const full = path.join(BACKUP_DIR, f);
@@ -49,6 +56,9 @@ async function main() {
   if (REMOTE) {
     try {
       execFileSync('scp', ['-q', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', dest, REMOTE], { stdio: 'inherit' });
+      if (fs.existsSync(uploads)) {
+        execFileSync('scp', ['-q', '-r', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', path.join(BACKUP_DIR, 'uploads'), REMOTE], { stdio: 'inherit' });
+      }
     } catch (e) {
       if (e.code === 'ENOENT') throw new Error('Немає програми scp. Встановіть: apt install -y openssh-client');
       throw new Error(`Не вдалося скопіювати на ${REMOTE}. Перевірте адресу і SSH-ключ (ssh ${REMOTE.split(':')[0]} має пускати без пароля)`);

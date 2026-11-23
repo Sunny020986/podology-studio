@@ -2,6 +2,8 @@
 // Суперадмін (токен ADMIN_TOKEN) додає, блокує і приховує майстрів. Прихований майстер зникає з сайту
 // й адмінки, але його минулі записи й статистика зберігаються.
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const STATUSES = ['active', 'blocked', 'deleted'];
 const DEFAULT_HOURS = [['09:00', '18:00'], ['09:00', '18:00'], ['09:00', '18:00'], ['09:00', '18:00'], ['09:00', '18:00'], [null, null], [null, null]];
@@ -106,7 +108,7 @@ const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 module.exports = { createMasterTables, activeMasters, masterOffers, hashPassword, checkPassword, sha, STATUSES, DEFAULT_HOURS };
 
 // ----- Керування майстрами (лише суперадмін; маршрути реєструються після перевірки ролі) -----
-function setupMasterAdmin({ app, db, todayStr }) {
+function setupMasterAdmin({ app, db, todayStr, dataDir, express }) {
   const LOGIN_RX = /^[A-Za-z0-9._-]{3,30}$/;
   const servicesOf = db.prepare('SELECT service_id FROM master_services WHERE master_id = ?');
   const futureCount = (id) => db.prepare("SELECT COUNT(*) AS n FROM appointments WHERE master_id = ? AND date >= ? AND status != 'cancelled'").get(id, todayStr()).n;
@@ -120,7 +122,9 @@ function setupMasterAdmin({ app, db, todayStr }) {
     if ((creating || password) && (password.length < 8 || password.length > 100)) return { error: 'Пароль: від 8 до 100 символів' };
     const ids = Array.isArray(body?.services) ? [...new Set(body.services.map(Number))].filter((n) => Number.isInteger(n) && n > 0) : [];
     const known = new Set(db.prepare('SELECT id FROM services').all().map((r) => r.id));
-    return { data: { name, login, password, services: ids.filter((id) => known.has(id)) } };
+    const bio = String(body?.bio ?? '').trim();
+    if (bio.length > 600) return { error: 'Опис майстра: до 600 символів' };
+    return { data: { name, login, password, bio, services: ids.filter((id) => known.has(id)) } };
   }
   const setServices = (id, services) => {
     db.prepare('DELETE FROM master_services WHERE master_id = ?').run(id);
@@ -140,8 +144,8 @@ function setupMasterAdmin({ app, db, todayStr }) {
     if (v.error) return res.status(400).json({ error: v.error });
     if (loginTaken(v.data.login)) return res.status(409).json({ error: 'Такий логін уже зайнятий' });
     const id = db.transaction(() => {
-      const newId = Number(db.prepare('INSERT INTO masters (name, login, pass_hash) VALUES (?, ?, ?)')
-        .run(v.data.name, v.data.login, hashPassword(v.data.password)).lastInsertRowid);
+      const newId = Number(db.prepare('INSERT INTO masters (name, login, pass_hash, bio) VALUES (?, ?, ?, ?)')
+        .run(v.data.name, v.data.login, hashPassword(v.data.password), v.data.bio).lastInsertRowid);
       const insH = db.prepare('INSERT INTO master_hours (master_id, weekday, start_time, end_time) VALUES (?, ?, ?, ?)');
       DEFAULT_HOURS.forEach(([s, e], wd) => insH.run(newId, wd, s, e));
       setServices(newId, v.data.services);
@@ -158,7 +162,7 @@ function setupMasterAdmin({ app, db, todayStr }) {
     if (v.error) return res.status(400).json({ error: v.error });
     if (loginTaken(v.data.login, id)) return res.status(409).json({ error: 'Такий логін уже зайнятий' });
     db.transaction(() => {
-      db.prepare('UPDATE masters SET name = ?, login = ? WHERE id = ?').run(v.data.name, v.data.login, id);
+      db.prepare('UPDATE masters SET name = ?, login = ?, bio = ? WHERE id = ?').run(v.data.name, v.data.login, v.data.bio, id);
       if (v.data.password) {
         db.prepare('UPDATE masters SET pass_hash = ? WHERE id = ?').run(hashPassword(v.data.password), id);
         dropSessions(id); // після зміни пароля старі входи більше не діють
@@ -182,6 +186,39 @@ function setupMasterAdmin({ app, db, todayStr }) {
     if (!db.prepare("UPDATE masters SET status = 'active' WHERE id = ? AND status = 'blocked'").run(id).changes) {
       return res.status(404).json({ error: 'Майстра не знайдено або він не заблокований' });
     }
+    res.json({ ok: true });
+  });
+
+  // ----- Фото майстра. Браузер адмінки стискає фото до 600 px; сервер приймає JPEG, PNG або WebP до 2 МБ -----
+  const uploadDir = path.join(dataDir, 'uploads', 'masters');
+  const KINDS = [
+    { ext: 'jpg', ok: (b) => b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF },
+    { ext: 'png', ok: (b) => b.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])) },
+    { ext: 'webp', ok: (b) => b.slice(0, 4).toString() === 'RIFF' && b.slice(8, 12).toString() === 'WEBP' },
+  ];
+  const removePhoto = (file) => {
+    if (file && /^[\w.-]+$/.test(file)) fs.rm(path.join(uploadDir, file), { force: true }, () => {});
+  };
+  app.put('/api/admin/masters/:id/photo', express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '2mb' }), (req, res) => {
+    const id = Number(req.params.id);
+    const m = db.prepare("SELECT photo FROM masters WHERE id = ? AND status != 'deleted'").get(id);
+    if (!m) return res.status(404).json({ error: 'Майстра не знайдено' });
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const kind = buf.length > 12 && KINDS.find((k) => k.ok(buf));
+    if (!kind) return res.status(400).json({ error: 'Потрібне фото у форматі JPEG, PNG або WebP до 2 МБ' });
+    fs.mkdirSync(uploadDir, { recursive: true });
+    const file = `${id}-${crypto.randomBytes(8).toString('hex')}.${kind.ext}`;
+    fs.writeFileSync(path.join(uploadDir, file), buf);
+    db.prepare('UPDATE masters SET photo = ? WHERE id = ?').run(file, id);
+    removePhoto(m.photo);
+    res.json({ photo: '/media/masters/' + file });
+  });
+  app.delete('/api/admin/masters/:id/photo', (req, res) => {
+    const id = Number(req.params.id);
+    const m = db.prepare('SELECT photo FROM masters WHERE id = ?').get(id);
+    if (!m) return res.status(404).json({ error: 'Майстра не знайдено' });
+    db.prepare("UPDATE masters SET photo = '' WHERE id = ?").run(id);
+    removePhoto(m.photo);
     res.json({ ok: true });
   });
 

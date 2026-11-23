@@ -200,7 +200,18 @@ app.get('/api/services', (req, res) => {
 // Активні майстри для вибору на сайті і послуги, які робить кожен
 app.get('/api/masters', (req, res) => {
   const svc = db.prepare('SELECT service_id FROM master_services WHERE master_id = ?');
-  res.json(activeMasters(db).map((m) => ({ id: m.id, name: m.name, services: svc.all(m.id).map((r) => r.service_id) })));
+  const extra = db.prepare('SELECT bio, photo FROM masters WHERE id = ?');
+  res.json(activeMasters(db).map((m) => {
+    const x = extra.get(m.id);
+    return { id: m.id, name: m.name, bio: x.bio, photo: x.photo ? '/media/masters/' + x.photo : '', services: svc.all(m.id).map((r) => r.service_id) };
+  }));
+});
+// Фото майстрів зберігаються поруч із базою (data/uploads/masters), а не в public
+app.get('/media/masters/:file', (req, res) => {
+  const file = String(req.params.file);
+  if (!/^\d+-[a-f0-9]{16}\.(jpg|png|webp)$/.test(file)) return res.status(404).end();
+  res.set('Cache-Control', 'public, max-age=604800');
+  res.sendFile(path.join(DATA_DIR, 'uploads', 'masters', file), (err) => { if (err && !res.headersSent) res.status(404).end(); });
 });
 // masterId із запиту: число або порожньо («будь-який вільний»)
 const masterParam = (v) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(v) : null);
@@ -410,7 +421,7 @@ app.post('/api/admin/logout', (req, res) => {
   if (req.role === 'master') db.prepare('DELETE FROM master_sessions WHERE token_hash = ?').run(sha((req.headers.authorization || '').slice(7)));
   res.json({ ok: true });
 });
-setupMasterAdmin({ app, db, todayStr });
+setupMasterAdmin({ app, db, todayStr, dataDir: DATA_DIR, express });
 setupAdminAppointments({
   app, db, telegram, bookTx, masterFreeSlots, freeSlots, masterOffers, isValidDate, isTime,
   toMin, toHHMM, todayStr, addDays, masterParam, ownsAppt, notifyMasterOf, last9,

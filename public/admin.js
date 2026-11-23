@@ -120,6 +120,7 @@
     // Майстрові показуємо лише його вкладки; чат лише для адміністратора
     document.querySelectorAll('[data-tab]').forEach((b) => { b.hidden = !(isSuper() || MASTER_TABS.includes(b.dataset.tab)); });
     if (isSuper()) connectWs();
+    renderMasterTg();
     show('appointments');
   }
 
@@ -167,13 +168,25 @@
   }
   const apptToolbar = () => `
       <div class="toolbar">
+        <button class="btn btn-primary small" type="button" id="apptNew">+ Новий запис</button>
+        <span class="seg" role="group" aria-label="Вигляд">
+          <button class="btn ${apptView === 'table' ? 'btn-primary' : 'btn-ghost'} small" type="button" id="viewTable">Таблиця</button>
+          <button class="btn ${apptView === 'day' ? 'btn-primary' : 'btn-ghost'} small" type="button" id="viewDay">День</button>
+          <button class="btn ${apptView === 'week' ? 'btn-primary' : 'btn-ghost'} small" type="button" id="viewWeek">Тиждень</button>
+        </span>
+        ${apptView !== 'table' ? masterSelect('apptMaster', apptMaster, apptView === 'week' ? '' : 'Усі майстри') : ''}
+      </div>
+      ${apptView !== 'table' ? '' : `<div class="toolbar">
         <button class="btn ${!apptArchive && !apptWaitlist ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptUpcoming">Поточні і майбутні</button>
         <button class="btn ${apptArchive && !apptWaitlist ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptArchiveBtn">Архів</button>
         <button class="btn ${apptWaitlist ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptWaitBtn">Черга очікування</button>
         ${apptWaitlist ? '' : masterSelect('apptMaster', apptMaster, 'Усі майстри')}
-      </div>`;
+      </div>`}`;
 
+  let lastApptRows = [];
   async function renderAppointments() {
+    if (apptForm) return renderApptForm();
+    if (apptView !== 'table') return renderCalendar();
     if (apptWaitlist) return renderWaitlist();
     const [from, to] = apptArchive ? ['2000-01-01', shiftDay(today(), -1)] : [today(), '2999-12-31'];
     $('#view').innerHTML = `${apptToolbar()}
@@ -183,6 +196,7 @@
       </table>`;
     let rows = await api(`/api/admin/appointments?from=${from}&to=${to}` + (isSuper() && apptMaster ? '&masterId=' + apptMaster : ''));
     if (apptArchive) rows = rows.slice().reverse(); // в архіві найновіші зверху
+    lastApptRows = rows;
     $('#apptRows').innerHTML = rows.length
       ? rows.map((r) => `<tr>
           <td>${fmtDate(r.date)}</td>
@@ -193,10 +207,222 @@
           <td>${esc(r.client_phone)}</td>
           <td>${esc(r.client_comment || '—')}</td>
           <td><select data-appt="${r.id}">${Object.entries(STATUS)
-            .map(([k, v]) => `<option value="${k}" ${k === r.status ? 'selected' : ''}>${v}</option>`).join('')}</select>${apptArchive && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-review-link="${r.id}" title="Скопіювати посилання на форму відгуку">Відгук</button>` : ''}</td>
+            .map(([k, v]) => `<option value="${k}" ${k === r.status ? 'selected' : ''}>${v}</option>`).join('')}</select>${apptArchive && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-review-link="${r.id}" title="Скопіювати посилання на форму відгуку">Відгук</button>` : ''}${!apptArchive && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-move-appt="${r.id}">Перенести</button>` : ''}</td>
         </tr>`).join('')
       : `<tr><td colspan="8" class="muted">${apptArchive ? 'В архіві поки немає записів.' : 'Поточних і майбутніх записів немає.'}</td></tr>`;
   }
+
+  // ----- Новий запис і перенесення (форма в «Записах») -----
+  let apptView = 'table';   // 'table' | 'day' | 'week'
+  let calDate = today();
+  let apptForm = null;      // null | { mode: 'new', preset } | { mode: 'move', appt }
+  let afTime = null;        // обраний час у формі
+  let afData = null;        // послуги й майстри для форми
+  const weekdayOf = (d) => (new Date(d + 'T12:00:00').getDay() + 6) % 7; // 0 = понеділок
+  const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  const toHHMM = (m) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+
+  async function loadFormData() {
+    const [services, mastersPub] = await Promise.all([
+      fetch('/api/services').then((r) => r.json()),
+      fetch('/api/masters').then((r) => r.json()),
+    ]);
+    // Майстер бачить лише свої послуги
+    const own = !isSuper() ? mastersPub.find((m) => m.id === me.master.id) : null;
+    afData = { services: own ? services.filter((s) => own.services.includes(s.id)) : services, masters: mastersPub };
+  }
+
+  async function renderApptForm() {
+    await loadFormData();
+    const move = apptForm.mode === 'move';
+    const a = move ? apptForm.appt : null;
+    const preset = apptForm.preset || {};
+    const serviceId = move ? a.service_id : (preset.serviceId || afData.services[0]?.id);
+    const masterId = move ? a.master_id : (preset.masterId || '');
+    const date = move ? a.date : (preset.date && preset.date >= today() ? preset.date : today());
+    afTime = preset.time || null;
+    const svcOptions = afData.services.map((s) => '<option value="' + s.id + '"' + (s.id === serviceId ? ' selected' : '') + '>' + esc(s.name) + ' · ' + s.duration_min + ' хв</option>').join('');
+    $('#view').innerHTML =
+      '<button class="btn btn-ghost small" type="button" id="apptFormBack">← Назад</button>' +
+      '<form class="appt-form" id="apptForm">' +
+      '<h3>' + (move ? 'Перенести запис' : 'Новий запис') + '</h3>' +
+      (move ? '<p class="muted">' + esc(a.client_name) + ', ' + esc(a.client_phone) + ' · ' + esc(a.service) + ' · зараз: ' + fmtDate(a.date) + ' о ' + a.start_time + (a.master ? ', майстер ' + esc(a.master) : '') + '</p>' : '') +
+      (move ? '<input type="hidden" id="afService" value="' + serviceId + '">'
+        : '<label class="step-label" for="afService">Послуга</label><select class="input" id="afService">' + svcOptions + '</select>') +
+      (isSuper() ? '<label class="step-label" for="afMaster">Майстер</label><select class="input" id="afMaster"></select>' : '') +
+      '<label class="step-label" for="afDate">Дата</label><input class="input" type="date" id="afDate" min="' + today() + '" value="' + date + '">' +
+      '<div class="step-label">Вільний час</div><div class="slots-grid" id="afSlots"></div>' +
+      (move ? '' :
+        '<label class="step-label" for="afName">Клієнт</label><input class="input" id="afName" maxlength="60" placeholder="Ім\'я" required>' +
+        '<input class="input" id="afPhone" type="tel" maxlength="30" placeholder="Телефон" required>' +
+        '<textarea class="input" id="afComment" rows="2" maxlength="500" placeholder="Коментар (необов\'язково)"></textarea>') +
+      '<div class="toolbar"><button class="btn btn-primary" type="submit">' + (move ? 'Перенести' : 'Записати') + '</button></div>' +
+      '</form>';
+    fillMasterOptions(masterId);
+    await loadFormSlots();
+  }
+
+  function fillMasterOptions(selected) {
+    const sel = $('#afMaster');
+    if (!sel) return;
+    const sid = Number($('#afService').value);
+    const list = afData.masters.filter((m) => m.services.includes(sid));
+    const move = apptForm.mode === 'move';
+    sel.innerHTML = (move ? '' : '<option value="">Будь-який вільний</option>') +
+      list.map((m) => '<option value="' + m.id + '"' + (String(m.id) === String(selected) ? ' selected' : '') + '>' + esc(m.name) + '</option>').join('');
+  }
+
+  async function loadFormSlots() {
+    const box = $('#afSlots');
+    if (!box) return;
+    const sid = $('#afService').value;
+    const date = $('#afDate').value;
+    const mid = $('#afMaster') ? $('#afMaster').value : '';
+    const ex = apptForm.mode === 'move' ? '&excludeId=' + apptForm.appt.id : '';
+    box.innerHTML = '<span class="muted">Завантажую…</span>';
+    try {
+      const r = await api('/api/admin/slots?serviceId=' + sid + '&date=' + date + (mid ? '&masterId=' + mid : '') + ex);
+      if (afTime && !r.slots.includes(afTime)) afTime = null;
+      box.innerHTML = r.slots.length
+        ? r.slots.map((t) => '<button type="button" class="slot' + (t === afTime ? ' selected' : '') + '" data-af-time="' + t + '">' + t + '</button>').join('')
+        : '<span class="muted">На цю дату вільного часу немає.</span>';
+    } catch (err) {
+      box.innerHTML = '<span class="muted">' + esc(err.message) + '</span>';
+    }
+  }
+
+  // Подання форми запису: окремий обробник, щоб не потрапити в загальну обробку форм нижче
+  $('#view').addEventListener('submit', async (e) => {
+    if (e.target.id !== 'apptForm') return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (!afTime) return notify('Оберіть вільний час', true);
+    const mid = $('#afMaster') ? $('#afMaster').value : '';
+    try {
+      if (apptForm.mode === 'move') {
+        const r = await api('/api/admin/appointments/' + apptForm.appt.id + '/move', { method: 'PATCH', body: { date: $('#afDate').value, time: afTime, masterId: mid ? Number(mid) : undefined } });
+        notify('Запис перенесено: ' + fmtDate(r.date) + ' о ' + r.time + (isSuper() ? ', майстер ' + r.master : ''));
+      } else {
+        const r = await api('/api/admin/appointments', { method: 'POST', body: {
+          serviceId: Number($('#afService').value), masterId: mid ? Number(mid) : undefined, date: $('#afDate').value, time: afTime,
+          name: $('#afName').value, phone: $('#afPhone').value, comment: $('#afComment').value,
+        } });
+        notify('Запис додано' + (isSuper() ? ', майстер ' + r.master : ''));
+      }
+      apptForm = null;
+      await renderAppointments();
+    } catch (err) {
+      notify(err.message, true);
+      if (/зайнят/.test(err.message)) loadFormSlots();
+    }
+  });
+
+  // ----- Календар дня й тижня -----
+  const PPM = 1.4; // пікселів на хвилину: година = 84 px
+  const mondayOf = (d) => shiftDay(d, -weekdayOf(d));
+
+  async function renderCalendar() {
+    const week = apptView === 'week';
+    const from = week ? mondayOf(calDate) : calDate;
+    const to = week ? shiftDay(from, 6) : calDate;
+    // Тиждень показуємо для одного майстра; день — для обраного або всіх
+    const mid = !isSuper() ? '' : (week ? (apptMaster || masters.find((m) => m.status === 'active')?.id || '') : apptMaster);
+    const data = await api('/api/admin/calendar?from=' + from + '&to=' + to + (mid ? '&masterId=' + mid : ''));
+    const cols = week
+      ? Array.from({ length: 7 }, (_, i) => ({ date: shiftDay(from, i), master: data.masters[0] }))
+      : data.masters.map((m) => ({ date: calDate, master: m }));
+    const hoursOf = (c) => c.master && data.hours.find((h) => h.master_id === c.master.id && h.weekday === weekdayOf(c.date));
+    // Межі сітки: від найранішого початку до найпізнішого кінця (з урахуванням записів), округлено до годин
+    let start = 24 * 60, end = 0;
+    for (const c of cols) {
+      const h = hoursOf(c);
+      if (h && h.start_time) { start = Math.min(start, toMin(h.start_time)); end = Math.max(end, toMin(h.end_time)); }
+    }
+    for (const a of data.appointments) { start = Math.min(start, toMin(a.start_time)); end = Math.max(end, toMin(a.end_time)); }
+    if (start >= end) { start = 9 * 60; end = 18 * 60; }
+    start = Math.floor(start / 60) * 60;
+    end = Math.ceil(end / 60) * 60;
+    const height = (end - start) * PPM;
+    const y = (t) => (toMin(t) - start) * PPM;
+    const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
+
+    const axis = '<div class="cal-axis" style="height:' + height + 'px">' +
+      Array.from({ length: (end - start) / 60 + 1 }, (_, i) => '<span style="top:' + (i * 60 * PPM) + 'px">' + toHHMM(start + i * 60) + '</span>').join('') + '</div>';
+    const colHtml = cols.map((c) => {
+      if (!c.master) return '';
+      const h = hoursOf(c);
+      const wd = weekdayOf(c.date);
+      let inner = '';
+      if (!h || !h.start_time) {
+        inner += '<div class="cal-off" style="top:0;height:' + height + 'px"><span>Вихідний</span></div>';
+      } else {
+        if (toMin(h.start_time) > start) inner += '<div class="cal-off" style="top:0;height:' + y(h.start_time) + 'px"></div>';
+        if (toMin(h.end_time) < end) inner += '<div class="cal-off" style="top:' + y(h.end_time) + 'px;height:' + (height - y(h.end_time)) + 'px"></div>';
+      }
+      for (const b of data.breaks.filter((x) => x.master_id === c.master.id && x.weekday === wd)) {
+        inner += '<div class="cal-break" style="top:' + y(b.start_time) + 'px;height:' + (y(b.end_time) - y(b.start_time)) + 'px"><span>' + esc(b.note || 'Перерва') + '</span></div>';
+      }
+      for (const b of data.blocks.filter((x) => x.master_id === c.master.id && x.date === c.date)) {
+        inner += '<div class="cal-block" style="top:' + y(b.start_time) + 'px;height:' + (y(b.end_time) - y(b.start_time)) + 'px"><span>' + esc(b.note || 'Заблоковано') + '</span></div>';
+      }
+      for (const a of data.appointments.filter((x) => x.master_id === c.master.id && x.date === c.date)) {
+        const hgt = Math.max(22, y(a.end_time) - y(a.start_time));
+        inner += '<button type="button" class="cal-appt st-' + a.status + '" data-cal-appt="' + a.id + '" style="top:' + y(a.start_time) + 'px;height:' + hgt + 'px" title="' +
+          esc(a.start_time + '–' + a.end_time + ' ' + a.client_name + ', ' + a.client_phone + ' · ' + a.service) + '">' +
+          '<b>' + a.start_time + '</b> ' + esc(a.client_name) + '<span>' + esc(a.service) + '</span></button>';
+      }
+      const head = week
+        ? DAY_NAMES[wd] + ' ' + c.date.slice(8, 10) + '.' + c.date.slice(5, 7)
+        : esc(c.master.name);
+      return '<div class="cal-col"><div class="cal-head' + (c.date === today() ? ' is-today' : '') + '">' + head + '</div>' +
+        '<div class="cal-body" style="height:' + height + 'px" data-cal-date="' + c.date + '" data-cal-master="' + c.master.id + '" data-cal-start="' + start + '">' + inner + '</div></div>';
+    }).join('');
+
+    const title = week
+      ? 'Тиждень ' + fmtDate(from) + ' – ' + fmtDate(to) + (data.masters[0] ? ' · ' + esc(data.masters[0].name) : '')
+      : DAY_NAMES[weekdayOf(calDate)] + ', ' + fmtDate(calDate);
+    $('#view').innerHTML = apptToolbar() +
+      '<div class="toolbar cal-nav">' +
+        '<button class="btn btn-ghost small" type="button" data-cal-shift="-1" aria-label="Назад">‹</button>' +
+        '<button class="btn btn-ghost small" type="button" data-cal-shift="0">Сьогодні</button>' +
+        '<button class="btn btn-ghost small" type="button" data-cal-shift="1" aria-label="Вперед">›</button>' +
+        '<input type="date" id="calDate" value="' + calDate + '"><b class="cal-title">' + title + '</b>' +
+        '<span class="muted cal-hint">Клік по вільному місцю — новий запис, по запису — перенесення.</span>' +
+      '</div>' +
+      (cols.length && cols[0].master
+        ? '<div class="cal-wrap"><div class="cal-grid" style="grid-template-columns: 56px repeat(' + cols.length + ', minmax(150px, 1fr))">' +
+          '<div class="cal-col cal-axis-col"><div class="cal-head"></div>' + axis + '</div>' + colHtml + '</div></div>'
+        : '<p class="muted">Немає активних майстрів для показу.</p>');
+    window.__calAppts = data.appointments; // для відкриття форми перенесення
+    window.__calMasters = data.masters;
+  }
+
+  // Рядок Telegram для майстра під вкладками
+  function renderMasterTg() {
+    const box = $('#masterTg');
+    if (isSuper()) { box.hidden = true; return; }
+    box.hidden = false;
+    box.innerHTML = me.telegram
+      ? '<span>✅ Telegram підключено: ваші нові записи, скасування й перенесення надходять у бот.</span><button class="btn btn-ghost small" type="button" id="mtgOff">Відключити</button>'
+      : '<span>Підключіть Telegram, щоб отримувати свої нові записи, скасування й перенесення.</span><button class="btn btn-primary small" type="button" id="mtgOn">Підключити Telegram</button>';
+  }
+  $('#masterTg').addEventListener('click', async (e) => {
+    try {
+      if (e.target.id === 'mtgOn') {
+        const r = await api('/api/admin/me/telegram', { method: 'POST' });
+        window.open(r.link, '_blank', 'noopener');
+        notify('Відкрийте бота і натисніть «Старт». Посилання діє ' + r.minutes + ' хв. Потім оновіть сторінку.');
+      }
+      if (e.target.id === 'mtgOff') {
+        await api('/api/admin/me/telegram', { method: 'DELETE' });
+        me.telegram = false;
+        renderMasterTg();
+        notify('Telegram відключено');
+      }
+    } catch (err) {
+      notify(err.message, true);
+    }
+  });
 
   // ----- Клієнти -----
   async function renderClients() {
@@ -556,11 +782,12 @@ ${isSuper() ? `
     $('#view').innerHTML =
       '<div class="toolbar"><button class="btn btn-primary small" type="button" id="masterNew">+ Новий майстер</button>' +
       '<span class="muted">Графік кожного майстра (години, перерви, разові блокування) налаштовується у вкладці «Розклад».</span></div>' +
-      '<table><thead><tr><th>Ім\'я</th><th>Логін</th><th>Статус</th><th>Послуг</th><th>Майбутніх записів</th><th></th></tr></thead><tbody>' +
+      '<table><thead><tr><th>Ім\'я</th><th>Логін</th><th>Статус</th><th>Telegram</th><th>Послуг</th><th>Майбутніх записів</th><th></th></tr></thead><tbody>' +
       masters.map((m) => '<tr>' +
         '<td>' + esc(m.name) + (m.has_password ? '' : '<div class="muted small-note">пароль не задано: увійти не може</div>') + '</td>' +
         '<td>' + esc(m.login) + '</td>' +
         '<td><span class="m-status m-' + m.status + '">' + (M_STATUS[m.status] || esc(m.status)) + '</span></td>' +
+        '<td>' + (m.telegram ? 'підключено' : '<span class="muted">—</span>') + '</td>' +
         '<td>' + m.services.length + '</td><td>' + m.future + '</td>' +
         '<td class="m-actions">' +
           '<button class="btn btn-ghost small" type="button" data-edit-master="' + m.id + '">Редагувати</button>' +
@@ -762,6 +989,9 @@ ${isSuper() ? `
   view.addEventListener('change', async (e) => {
     try {
       if (e.target.id === 'apptMaster') { apptMaster = e.target.value; return await renderAppointments(); }
+      if (e.target.id === 'afService') { fillMasterOptions($('#afMaster')?.value || ''); afTime = null; return await loadFormSlots(); }
+      if (e.target.id === 'afMaster' || e.target.id === 'afDate') { return await loadFormSlots(); }
+      if (e.target.id === 'calDate') { if (e.target.value) calDate = e.target.value; return await renderAppointments(); }
       if (e.target.id === 'schedMaster') { schedMaster = Number(e.target.value); return await renderSchedule(); }
       if (e.target.id === 'statsMaster') { statsMaster = e.target.value; return await renderStats(); }
       if (e.target.id === 'archiveMonths') {
@@ -796,6 +1026,47 @@ ${isSuper() ? `
 
   view.addEventListener('click', async (e) => {
     try {
+      if (e.target.id === 'apptNew') {
+        apptForm = { mode: 'new', preset: { date: apptView === 'table' ? today() : calDate, masterId: isSuper() ? apptMaster : '' } };
+        return await renderAppointments();
+      }
+      if (e.target.id === 'apptFormBack') { apptForm = null; return await renderAppointments(); }
+      if (['viewTable', 'viewDay', 'viewWeek'].includes(e.target.id)) {
+        apptView = { viewTable: 'table', viewDay: 'day', viewWeek: 'week' }[e.target.id];
+        apptForm = null;
+        return await renderAppointments();
+      }
+      const shiftBtn = e.target.closest('[data-cal-shift]');
+      if (shiftBtn) {
+        const n = Number(shiftBtn.dataset.calShift);
+        calDate = n === 0 ? today() : shiftDay(calDate, n * (apptView === 'week' ? 7 : 1));
+        return await renderAppointments();
+      }
+      const calAppt = e.target.closest('[data-cal-appt]');
+      if (calAppt) {
+        const a = (window.__calAppts || []).find((x) => String(x.id) === calAppt.dataset.calAppt);
+        if (!a) return;
+        if (a.date < today()) return notify('Минулий запис перенести не можна', true);
+        apptForm = { mode: 'move', appt: { ...a, master: (window.__calMasters || []).find((m) => m.id === a.master_id)?.name || '' } };
+        return await renderAppointments();
+      }
+      if (e.target.classList && e.target.classList.contains('cal-body')) {
+        const body = e.target;
+        const minute = Number(body.dataset.calStart) + Math.floor(e.offsetY / PPM / 30) * 30;
+        if (body.dataset.calDate < today()) return;
+        apptForm = { mode: 'new', preset: { date: body.dataset.calDate, masterId: isSuper() ? body.dataset.calMaster : '', time: toHHMM(minute) } };
+        return await renderAppointments();
+      }
+      if (e.target.dataset.moveAppt) {
+        const a = lastApptRows.find((x) => String(x.id) === e.target.dataset.moveAppt);
+        if (a) { apptForm = { mode: 'move', appt: a }; return await renderAppointments(); }
+        return;
+      }
+      if (e.target.dataset.afTime) {
+        afTime = e.target.dataset.afTime;
+        document.querySelectorAll('[data-af-time]').forEach((b) => b.classList.toggle('selected', b === e.target));
+        return;
+      }
       if (e.target.id === 'apptUpcoming' || e.target.id === 'apptArchiveBtn' || e.target.id === 'apptWaitBtn') {
         apptWaitlist = e.target.id === 'apptWaitBtn';
         apptArchive = e.target.id === 'apptArchiveBtn';

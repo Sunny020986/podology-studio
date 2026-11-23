@@ -683,3 +683,36 @@ html, body { overflow-x: clip; }       /* страховка: нічого не 
   tr[data-wd] td:last-child { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
   tr[data-wd] td:last-child::after { content: 'вихідний'; }
 }
+
+/* Таблиці з полями (Послуги): на комп'ютері таблиця, на телефоні — картки з підписами */
+.m-only { display: none; }
+@media (max-width: 700px) {
+  .card-table, .card-table tbody { display: block; width: 100%; }
+  .card-table thead { display: none; }
+  .card-table tr { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 10px 12px; padding: 14px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--card, transparent); }
+  .card-table td { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 0; border: 0; white-space: normal; }
+  .card-table td[data-label]::before { content: attr(data-label); font-size: 12px; color: var(--muted); }
+  .card-table td.c-wide { grid-column: 1 / -1; }
+  .card-table td input:not([type="checkbox"]) { width: 100%; min-width: 0; }
+  .card-table td.c-check label { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; }
+  .card-table .m-only { display: inline; }
+  .card-table td.c-wide .btn { width: 100%; padding: 10px; }
+  #serviceForm input { flex: 1 1 100%; min-width: 0; }
+  #serviceForm .btn { width: 100%; padding: 10px; }
+}
+@media (max-width: 700px) {
+  /* Автокартки для решти таблиць: підпис ліворуч, значення праворуч; поля й довгий текст — на всю ширину */
+  .auto-cards tr { grid-template-columns: minmax(0,1fr); gap: 8px; }
+  .auto-cards td { flex-direction: row; align-items: baseline; justify-content: space-between; gap: 12px; text-align: right; overflow-wrap: anywhere; }
+  .auto-cards td[data-label]::before { flex: 0 0 auto; max-width: 45%; text-align: left; }
+  .auto-cards td:not([data-label]) { justify-content: flex-start; flex-wrap: wrap; text-align: left; }
+  .auto-cards td:has(input:not([type="checkbox"]), textarea, select) { flex-direction: column; align-items: stretch; text-align: left; }
+  .auto-cards td textarea, .auto-cards td select { width: 100%; }
+  .auto-cards td:empty { display: none; }
+}
+@media (max-width: 700px) {
+  .auto-cards td .cv { min-width: 0; }
+  .auto-cards td:has(input:not([type="checkbox"]), textarea, select) .cv { width: 100%; }
+  .auto-cards td select { min-height: 40px; padding: 6px 10px; }
+  .auto-cards td[colspan] { grid-column: 1 / -1; justify-content: center; color: var(--muted); }
+}

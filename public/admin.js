@@ -1,5 +1,29 @@
 (() => {
   const $ = (s) => document.querySelector(s);
+  // Телефон: кожна таблиця адмінки стає картками. Підпис клітинки береться із заголовка колонки.
+  const cardifyTables = (root) => {
+    root.querySelectorAll('table').forEach((t) => {
+      if (t.querySelector('.hours-head') || (t.classList.contains('card-table') && !t.classList.contains('auto-cards'))) return;
+      const heads = [...t.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+      if (!heads.length) return;
+      t.classList.add('card-table', 'auto-cards');
+      t.querySelectorAll('tbody tr').forEach((tr) => {
+        [...tr.children].forEach((td, i) => {
+          if (td.dataset.cv || td.colSpan > 1) return;
+          td.dataset.cv = '1';
+          if (!heads[i]) return;
+          td.dataset.label = heads[i];
+          // Вміст клітинки — в одну обгортку, щоб підпис і значення стояли поруч
+          const box = document.createElement('div');
+          box.className = 'cv';
+          while (td.firstChild) box.appendChild(td.firstChild);
+          td.appendChild(box);
+        });
+      });
+    });
+  };
+  new MutationObserver(() => { const v = document.getElementById('view'); if (v) cardifyTables(v); })
+    .observe(document.documentElement, { childList: true, subtree: true });
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const today = () => {
     const d = new Date();
@@ -709,14 +733,14 @@ ${isSuper() ? `
 
   // ----- Послуги -----
   const serviceRow = (s) => `<tr>
-    <td><input type="text" class="f-name" value="${esc(s.name)}"></td>
-    <td><input type="text" class="f-desc" value="${esc(s.description)}"></td>
-    <td><input type="number" class="f-dur" min="5" max="480" step="5" value="${s.duration_min}"></td>
-    <td><input type="number" class="f-price" min="0" step="10" value="${s.price_uah}"></td>
-    <td><input type="text" class="f-note" maxlength="60" value="${esc(s.price_note)}" placeholder="напр. від 1380 грн"></td>
-    <td><input type="number" class="f-repeat" min="0" max="52" step="1" value="${s.repeat_weeks || 0}" aria-label="Нагадати про повторний візит через, тижнів" title="0 — не нагадувати"></td>
-    <td><input type="checkbox" class="f-active" ${s.active ? 'checked' : ''}></td>
-    <td><button class="btn btn-ghost small" type="button" data-save-service="${s.id}">Зберегти</button></td>
+    <td data-label="Назва" class="c-wide"><input type="text" class="f-name" value="${esc(s.name)}"></td>
+    <td data-label="Опис" class="c-wide"><input type="text" class="f-desc" value="${esc(s.description)}"></td>
+    <td data-label="Тривалість, хв"><input type="number" class="f-dur" min="5" max="480" step="5" value="${s.duration_min}"></td>
+    <td data-label="Ціна, грн"><input type="number" class="f-price" min="0" step="10" value="${s.price_uah}"></td>
+    <td data-label="Орієнтовна ціна (текст)" class="c-wide"><input type="text" class="f-note" maxlength="60" value="${esc(s.price_note)}" placeholder="напр. від 1380 грн"></td>
+    <td data-label="Повтор через, тижнів (0 — ні)"><input type="number" class="f-repeat" min="0" max="52" step="1" value="${s.repeat_weeks || 0}" aria-label="Нагадати про повторний візит через, тижнів" title="0 — не нагадувати"></td>
+    <td data-label="Активна" class="c-check"><label><input type="checkbox" class="f-active" ${s.active ? 'checked' : ''}> <span class="m-only">Показувати на сайті</span></label></td>
+    <td class="c-wide"><button class="btn btn-ghost small" type="button" data-save-service="${s.id}">Зберегти</button></td>
   </tr>`;
 
   const readServiceRow = (row) => ({
@@ -732,7 +756,7 @@ ${isSuper() ? `
   async function renderServices() {
     const list = await api('/api/admin/services');
     $('#view').innerHTML = `
-      <table>
+      <table class="card-table">
         <thead><tr><th>Назва</th><th>Опис</th><th>Хв</th><th>Ціна, грн</th><th>Орієнтовна ціна (текст)</th><th title="Через скільки тижнів бот нагадає про повторний візит. 0 — не нагадувати">Повтор, тижнів</th><th>Активна</th><th></th></tr></thead>
         <tbody>${list.map(serviceRow).join('')}</tbody>
       </table>

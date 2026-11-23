@@ -20,6 +20,7 @@ systemctl restart podology
 
 ### Після оновлення (5 хвилин)
 - [ ] `systemctl status podology` — `active (running)`, без перезапусків.
+- [ ] `curl -s http://127.0.0.1:3000/healthz` — `"ok":true` і `version` = новий коміт.
 - [ ] `journalctl -u podology -n 50 --no-pager` — без `Error`.
 - [ ] Головна сторінка відкривається, список послуг є.
 - [ ] Вільний час на найближчу робочу дату показується.
@@ -46,9 +47,9 @@ systemctl restart podology
 База (лише якщо зіпсовано дані — втратяться записи після копії):
 ```bash
 systemctl stop podology
-ls -lt backups/ | head     # або шлях з BACKUP_DIR
+ls -lt /opt/podology-studio/backups/ | head     # шлях з BACKUP_DIR у podology-backup.service
 cp data/studio.db data/studio.db.broken
-cp backups/<файл>.db data/studio.db
+cp /opt/podology-studio/backups/<файл>.db data/studio.db
 rm -f data/studio.db-wal data/studio.db-shm
 chown podology:podology data/studio.db
 systemctl start podology
@@ -68,7 +69,7 @@ systemctl start podology
 1. Служба жива? `systemctl status podology`
 2. Що в журналі? `journalctl -u podology -n 100 --no-pager`
 3. Порт слухає? `ss -ltnp | grep 3000`
-4. Відповідає? `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/api/services` — має бути `200`.
+4. Відповідає? `curl -s http://127.0.0.1:3000/healthz` — має бути `{"ok":true,...}`. `503` — сервер живий, але база недоступна (кроки 5–6).
 5. Місце на диску? `df -h /opt` (SQLite не пише при повному диску).
 6. База ціла? `su -s /bin/bash podology -c "cd /opt/podology-studio/app && node -e \"const D=require('better-sqlite3');console.log(new D('data/studio.db').pragma('integrity_check'))\""` — має бути `ok`.
 7. Збій почався після оновлення → відкат коду (розділ 2).

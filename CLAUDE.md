@@ -18,6 +18,8 @@
 - `src/telegram.js` — бот: сповіщення в чат кабінету, клієнтам і майстрам; посилання `t.me/<бот>?start=<код>`.
 - `public/` — `index.html`+`app.js` (сайт), `account.js` (кабінет), `effects.js` (ефекти, вимикаються при «зменшити рух»), `admin.html`+`admin.js` (адмінка), `review.html` (форма відгуку), `styles.css` (усі стилі, теми через CSS-змінні).
 - `scripts/backup.js` + `deploy/podology-backup.*` — щоденна резервна копія бази й фото.
+- `src/security.js` — заголовки безпеки (CSP та інші) і `GET /healthz`. Новий зовнішній ресурс (шрифт, карта, скрипт) треба дозволити в CSP, інакше браузер його заблокує.
+- `scripts/healthcheck.js` + `deploy/podology-health.*` — сторож: кожні 2 хв перевіряє `/healthz`, пише в Telegram, коли сайт ліг і піднявся.
 
 ## Ролі й доступ
 - Суперадмін — Bearer-токен `ADMIN_TOKEN`. Майстер — логін і пароль, сесія в `master_sessions`.

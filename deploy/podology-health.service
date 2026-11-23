@@ -1,0 +1,12 @@
+[Unit]
+Description=Podology studio: перевірка, чи сайт живий
+
+[Service]
+Type=oneshot
+User=podology
+WorkingDirectory=/opt/podology-studio/app
+Environment=DB_PATH=/opt/podology-studio/app/data/studio.db
+Environment=HEALTH_URL=http://127.0.0.1:3000/healthz
+ExecStart=/usr/bin/node scripts/healthcheck.js
+# Невдала перевірка — це нормальний результат сторожа, не помилка служби
+SuccessExitStatus=1

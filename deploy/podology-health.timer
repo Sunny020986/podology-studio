@@ -1,0 +1,10 @@
+[Unit]
+Description=Podology studio: перевірка сайту кожні 2 хвилини
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=2min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

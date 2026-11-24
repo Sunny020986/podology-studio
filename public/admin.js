@@ -210,6 +210,7 @@
   const apptToolbar = () => `
       <div class="toolbar">
         <button class="btn btn-primary small" type="button" id="apptNew">+ Новий запис</button>
+        ${isSuper() ? '<button class="btn btn-ghost small" type="button" id="apptAbsence">Майстер не вийде</button>' : ''}
         <span class="seg" role="group" aria-label="Вигляд">
           <button class="btn ${apptView === 'table' ? 'btn-primary' : 'btn-ghost'} small" type="button" id="viewTable">Таблиця</button>
           <button class="btn ${apptView === 'day' ? 'btn-primary' : 'btn-ghost'} small" type="button" id="viewDay">День</button>
@@ -226,6 +227,7 @@
 
   let lastApptRows = [];
   async function renderAppointments() {
+    if (absence) return renderAbsence();
     if (apptForm) return renderApptForm();
     if (apptView !== 'table') return renderCalendar();
     if (apptWaitlist) return renderWaitlist();
@@ -251,6 +253,98 @@
         </tr>`).join('')
       : `<tr><td colspan="8" class="muted">${apptArchive ? 'В архіві поки немає записів.' : 'Поточних і майбутніх записів немає.'}</td></tr>`;
   }
+
+  // ----- «Майстер не вийде»: передати, перенести або скасувати його записи за раз (лише суперадмін) -----
+  let absence = null; // null | { step: 'form' | 'plan' | 'done', masterId, from, to, block, note, plan, result }
+  const ABS_WD = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
+  const absDay = (d) => ABS_WD[(new Date(d + 'T12:00:00').getDay() + 6) % 7] + ' ' + fmtDate(d);
+  const absPeriod = (a) => (a.from === a.to ? absDay(a.from) : absDay(a.from) + ' – ' + absDay(a.to));
+  const absValue = (d) => (d.type === 'master' ? 'master:' + d.master_id : d.type === 'time' ? `time:${d.date}|${d.time}|${d.master_id}` : d.type);
+  function absOptions(r) {
+    const sel = absValue(r.default);
+    const opt = (v, label) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(label)}</option>`;
+    return (r.same_time.length ? `<optgroup label="Той самий час, інший майстер">${r.same_time.map((m) => opt('master:' + m.id, 'Передати: ' + m.name)).join('')}</optgroup>` : '') +
+      (r.slots.length ? `<optgroup label="Перенести на інший час">${r.slots.map((s) => opt(`time:${s.date}|${s.time}|${s.master_id}`, s.label)).join('')}</optgroup>` : '') +
+      opt('cancel', 'Скасувати й повідомити клієнта') + opt('keep', 'Лишити як є (вирішу пізніше)');
+  }
+  async function renderAbsence() {
+    const a = absence;
+    const back = '<button class="btn btn-ghost small" type="button" id="absBack">← До записів</button>';
+    if (a.step === 'form') {
+      const list = masters.filter((m) => m.status !== 'deleted');
+      $('#view').innerHTML = back + `
+        <form class="abs-form" id="absForm">
+          <h3>Майстер не вийде на роботу</h3>
+          <p class="muted">Покажемо записи майстра на ці дні й запропонуємо, кому їх передати на той самий час або на який час перенести. Клієнтам із Telegram бот напише сам, решті — дамо список, кому подзвонити.</p>
+          <label class="step-label" for="absMaster">Майстер</label>
+          <select class="input" id="absMaster" required>${list.map((m) => `<option value="${m.id}" ${m.id === a.masterId ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
+          <div class="abs-dates">
+            <label class="step-label">З <input class="input" type="date" id="absFrom" min="${today()}" value="${a.from}" required></label>
+            <label class="step-label">По <input class="input" type="date" id="absTo" min="${today()}" value="${a.to}" required></label>
+          </div>
+          <label class="consent-check"><input type="checkbox" id="absBlock" ${a.block ? 'checked' : ''}> Закрити запис до майстра на ці дні</label>
+          <small class="muted">У «Розкладі» з'являться разові блокування на його робочі години, і клієнти не зможуть до нього записатися.</small>
+          <input class="input" id="absNote" maxlength="80" value="${esc(a.note)}" placeholder="Примітка в розкладі (необов'язково), наприклад «лікарняний»">
+          <div class="toolbar"><button class="btn btn-primary" type="submit">Показати записи</button></div>
+        </form>`;
+      return;
+    }
+    if (a.step === 'plan') {
+      const p = a.plan;
+      const withMaster = p.appointments.filter((r) => r.same_time.length).length;
+      const noTg = p.appointments.filter((r) => !r.telegram).length;
+      $('#view').innerHTML = `<button class="btn btn-ghost small" type="button" id="absEdit">← Змінити майстра чи дні</button>
+        <h3 style="margin:14px 0 4px">${esc(p.master.name)}: ${absPeriod(p)}</h3>
+        <p class="muted" style="margin:0 0 6px">${p.appointments.length ? `Записів: ${p.appointments.length}. Вільного майстра на той самий час знайдено для ${withMaster}. Без Telegram (треба подзвонити): ${noTg}.` : 'Активних записів на ці дні немає.'}</p>
+        ${a.block ? `<p class="muted" style="margin:0 0 12px">${p.work_days.length === 0 ? 'Робочих днів у майстра в цей період немає — закривати нічого.'
+          : p.work_days.length === 1 ? `Запис до майстра буде закрито: ${absDay(p.work_days[0].date)}, ${p.work_days[0].start_time}–${p.work_days[0].end_time}.`
+            : `Запис до майстра буде закрито на ${p.work_days.length} робочих днів: з ${absDay(p.work_days[0].date)} по ${absDay(p.work_days[p.work_days.length - 1].date)}.`}</p>` : ''}
+        ${p.appointments.length ? `<table class="abs-table">
+          <thead><tr><th>Коли</th><th>Послуга</th><th>Клієнт</th><th>Що зробити</th></tr></thead>
+          <tbody>${p.appointments.map((r) => `<tr data-abs-row="${r.id}">
+            <td>${absDay(r.date)}, ${r.start_time}–${r.end_time}${r.started ? ' <span class="badge-warn">уже почався</span>' : ''}</td>
+            <td>${esc(r.service)}</td>
+            <td>${esc(r.client_name)}<br><a href="tel:${esc(r.client_phone.replace(/[^\d+]/g, ''))}">${esc(r.client_phone)}</a><br><small class="${r.telegram ? 'abs-tg' : 'abs-call'}">${r.telegram ? 'Telegram є — бот напише сам' : 'Telegram немає — треба подзвонити'}</small></td>
+            <td><select class="input abs-action" aria-label="Що зробити із записом ${esc(r.client_name)}">${absOptions(r)}</select>${!r.same_time.length && !r.started ? '<small class="muted">Вільних майстрів на цей час немає.</small>' : ''}</td>
+          </tr>`).join('')}</tbody>
+        </table>` : ''}
+        <div class="toolbar" style="margin-top:14px"><button class="btn btn-primary" type="button" id="absApply">${p.appointments.length ? 'Застосувати' : (a.block ? 'Закрити запис на ці дні' : 'Готово')}</button></div>`;
+      return;
+    }
+    // step === 'done'
+    const r = a.result;
+    const c = r.counts;
+    const failed = r.results.filter((x) => !x.ok);
+    const what = (x) => (x.type === 'master' ? `тепер майстер ${x.new.master}, ${absDay(x.date)} о ${x.time} (час той самий)`
+      : x.type === 'time' ? `перенесено на ${absDay(x.new.date)} о ${x.new.time}, майстер ${x.new.master} (було ${absDay(x.date)} о ${x.time})`
+        : `скасовано запис ${absDay(x.date)} о ${x.time}`);
+    $('#view').innerHTML = `
+      <h3 style="margin:0 0 8px">Готово</h3>
+      <p>Передано іншим майстрам: <strong>${c.master}</strong> · перенесено: <strong>${c.time}</strong> · скасовано: <strong>${c.cancel}</strong> · без змін: <strong>${c.keep}</strong>${c.failed ? ` · не вдалося: <strong>${c.failed}</strong>` : ''}</p>
+      ${r.blocks_created ? `<p class="muted">Запис до майстра закрито на днів: ${r.blocks_created}.</p>` : ''}
+      ${failed.length ? `<div class="warn-box"><strong>Не вдалося:</strong><ul class="abs-list">${failed.map((x) => `<li>${x.date ? absDay(x.date) + ' ' + x.time + ', ' : ''}${esc(x.client_name || '')}: ${esc(x.error)}</li>`).join('')}</ul>Ці записи лишились як були — змініть їх вручну.</div>` : ''}
+      ${r.call_list.length ? `<h3 style="margin:18px 0 4px">Подзвоніть цим клієнтам</h3>
+        <p class="muted" style="margin:0 0 8px">У них немає Telegram, тож про зміну вони ще не знають.</p>
+        <ul class="abs-list call-list">${r.call_list.map((x) => `<li><a href="tel:${esc(x.client_phone.replace(/[^\d+]/g, ''))}">${esc(x.client_phone)}</a> ${esc(x.client_name)} — ${esc(x.service)}: ${esc(what(x))}</li>`).join('')}</ul>`
+        : (c.master + c.time + c.cancel ? '<p>Усім клієнтам, яких це стосується, бот написав у Telegram.</p>' : '')}
+      <div class="toolbar" style="margin-top:14px"><button class="btn btn-primary" type="button" id="absDone">До записів</button></div>`;
+  }
+  async function loadAbsencePlan() {
+    const a = absence;
+    a.plan = await api(`/api/admin/reassign?masterId=${a.masterId}&from=${a.from}&to=${a.to}`);
+    a.step = 'plan';
+    await renderAbsence();
+  }
+  $('#view').addEventListener('submit', async (e) => {
+    if (e.target.id !== 'absForm') return;
+    e.preventDefault();
+    Object.assign(absence, {
+      masterId: Number($('#absMaster').value), from: $('#absFrom').value, to: $('#absTo').value,
+      block: $('#absBlock').checked, note: $('#absNote').value.trim(),
+    });
+    if (absence.to < absence.from) return notify('Кінець має бути не раніше початку', true);
+    try { await loadAbsencePlan(); } catch (err) { notify(err.message, true); }
+  });
 
   // ----- Новий запис і перенесення (форма в «Записах») -----
   let apptView = 'table';   // 'table' | 'day' | 'week'
@@ -1542,6 +1636,34 @@ ${isSuper() ? `
 
   view.addEventListener('click', async (e) => {
     try {
+      if (e.target.id === 'apptAbsence') {
+        const first = masters.find((m) => m.status === 'active') || masters[0];
+        absence = { step: 'form', masterId: first ? first.id : null, from: today(), to: today(), block: true, note: '' };
+        return await renderAbsence();
+      }
+      if (e.target.id === 'absBack' || e.target.id === 'absDone') { absence = null; return await renderAppointments(); }
+      if (e.target.id === 'absEdit') { absence.step = 'form'; return await renderAbsence(); }
+      if (e.target.id === 'absApply') {
+        const a = absence;
+        const actions = [...document.querySelectorAll('[data-abs-row]')].map((row) => {
+          const v = row.querySelector('.abs-action').value;
+          const id = Number(row.dataset.absRow);
+          if (v.startsWith('master:')) return { id, type: 'master', master_id: Number(v.slice(7)) };
+          if (v.startsWith('time:')) { const [date, time, mid] = v.slice(5).split('|'); return { id, type: 'time', date, time, master_id: Number(mid) }; }
+          return { id, type: v };
+        });
+        const n = (t) => actions.filter((x) => x.type === t).length;
+        if (actions.length && !confirm(`Застосувати? Передати іншим майстрам: ${n('master')}, перенести: ${n('time')}, скасувати: ${n('cancel')}, лишити: ${n('keep')}.` +
+          (a.block ? ' Запис до майстра на ці дні буде закрито.' : '') + ' Клієнтам із Telegram бот напише сам.')) return;
+        e.target.disabled = true;
+        try {
+          a.result = await api('/api/admin/reassign', { method: 'POST', body: { masterId: a.masterId, from: a.from, to: a.to, block: a.block, note: a.note, actions } });
+          a.step = 'done';
+          notify('Готово');
+          return await renderAbsence();
+        } finally { e.target.disabled = false; }
+      }
+
       if (e.target.id === 'apptNew') {
         apptForm = { mode: 'new', preset: { date: apptView === 'table' ? today() : calDate, masterId: isSuper() ? apptMaster : '' } };
         return await renderAppointments();

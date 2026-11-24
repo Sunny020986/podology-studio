@@ -15,7 +15,7 @@ const { setupTips } = require('./tips');
 const { setupAdminAppointments } = require('./admin-appointments');
 const { activeMasters, masterOffers, checkPassword: checkMasterPassword, sha, setupMasterAdmin } = require('./masters');
 const { localBusinessJsonLd, setupSeo } = require('./seo');
-const { nowMin, freeSlots, masterFreeSlots, pickMaster, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
+const { nowMin, freeSlots, masterFreeSlots, masterFreeAt, workHours, pickMaster, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
 const { securityHeaders, setupHealth } = require('./security');
@@ -25,6 +25,7 @@ const { validateCourse, setupCourse } = require('./course');
 const { setupCalendar } = require('./calendar');
 const { setupMaterials } = require('./materials');
 const { setupCertificates } = require('./certificates');
+const { setupReassign } = require('./reassign');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 let materialsApply = null; // списання матеріалів при «Відбувся» (src/materials.js), задається нижче
 const DATA_DIR = path.dirname(DB_PATH);
@@ -450,6 +451,15 @@ setupClientPhotos({
 setupAdminAppointments({
   app, db, telegram, bookTx, masterFreeSlots, freeSlots, masterOffers, isValidDate, isTime,
   toMin, toHHMM, todayStr, addDays, masterParam, ownsAppt, notifyMasterOf, last9,
+});
+// «Майстер не вийде»: масова передача, перенесення чи скасування записів (лише суперадмін).
+// setStatusTx і waitlist оголошені нижче, тому — через обгортки (викликаються вже під час запитів)
+setupReassign({
+  app, db, telegram, masterFreeSlots, masterFreeAt, workHours, bufferMin, nowMin, weekdayOf,
+  toMin, toHHMM, todayStr, addDays, isValidDate, isTime, last9, notifyMasterOf,
+  setStatus: (id, status) => setStatusTx(id, status),
+  waitlistCheck: () => waitlist.checkWaitlist().catch(() => {}),
+  studioPhone: () => readStudio().phone,
 });
 
 // Відгуки: публічні маршрути і маршрути адмінки (останні вже під перевіркою доступу)

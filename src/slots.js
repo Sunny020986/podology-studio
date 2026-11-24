@@ -59,23 +59,31 @@ function bufferMin(db) {
   return Number.isInteger(n) && n > 0 ? n : 0;
 }
 
-// Вільний час одного майстра на дату: його робочі години мінус записи (з прибиранням), блокування й перерви
-function masterFreeSlots(db, dateStr, durationMin, masterId, excludeId = 0) {
-  const wd = weekdayOf(dateStr);
-  const hours = db.prepare('SELECT start_time, end_time FROM master_hours WHERE master_id = ? AND weekday = ?').get(masterId, wd);
-  if (!hours || !hours.start_time) return [];
+// Робочі години майстра на дату в хвилинах або null, якщо вихідний
+function workHours(db, dateStr, masterId) {
+  const hours = db.prepare('SELECT start_time, end_time FROM master_hours WHERE master_id = ? AND weekday = ?').get(masterId, weekdayOf(dateStr));
+  return hours && hours.start_time ? { start: toMin(hours.start_time), end: toMin(hours.end_time) } : null;
+}
 
-  const dayStart = toMin(hours.start_time);
-  const dayEnd = toMin(hours.end_time);
+// Зайняті проміжки майстра на дату, хв: записи (з прибиранням після них), разові блокування, перерви
+function busyIntervals(db, dateStr, masterId, excludeId = 0) {
   const buffer = bufferMin(db);
-
-  const busy = [
+  return [
     ...db.prepare("SELECT start_time AS s, end_time AS e FROM appointments WHERE master_id = ? AND date = ? AND status != 'cancelled' AND id != ?")
       .all(masterId, dateStr, excludeId)
       .map((r) => ({ s: r.s, e: toHHMM(toMin(r.e) + buffer) })), // після візиту лишається час на прибирання
     ...db.prepare('SELECT start_time AS s, end_time AS e FROM blocks WHERE master_id = ? AND date = ?').all(masterId, dateStr),
-    ...db.prepare('SELECT start_time AS s, end_time AS e FROM breaks WHERE master_id = ? AND weekday = ?').all(masterId, wd),
+    ...db.prepare('SELECT start_time AS s, end_time AS e FROM breaks WHERE master_id = ? AND weekday = ?').all(masterId, weekdayOf(dateStr)),
   ].map((r) => ({ s: toMin(r.s), e: toMin(r.e) }));
+}
+
+// Вільний час одного майстра на дату: його робочі години мінус записи (з прибиранням), блокування й перерви
+function masterFreeSlots(db, dateStr, durationMin, masterId, excludeId = 0) {
+  const hours = workHours(db, dateStr, masterId);
+  if (!hours) return [];
+  const dayStart = hours.start;
+  const dayEnd = hours.end;
+  const busy = busyIntervals(db, dateStr, masterId, excludeId);
 
   const earliest = dateStr === todayStr() ? nowMin() + MIN_LEAD_MIN : 0;
 
@@ -87,6 +95,20 @@ function masterFreeSlots(db, dateStr, durationMin, masterId, excludeId = 0) {
     slots.push(toHHMM(t));
   }
   return slots;
+}
+
+// Чи вільний майстер саме в цей час (без прив'язки до кроку 30 хв — у майстрів різний початок дня).
+// leadMin — за скільки хвилин від зараз найраніше можна поставити запис сьогодні:
+// для клієнтів MIN_LEAD_MIN, а для передачі запису іншому майстру на той самий час — 0 (клієнт прийде, як планував).
+function masterFreeAt(db, dateStr, timeHHMM, durationMin, masterId, excludeId = 0, leadMin = MIN_LEAD_MIN) {
+  const hours = workHours(db, dateStr, masterId);
+  if (!hours) return false;
+  const t = toMin(timeHHMM);
+  const end = t + durationMin;
+  if (t < hours.start || end > hours.end) return false;
+  const today = todayStr();
+  if (dateStr < today || (dateStr === today && t < nowMin() + leadMin)) return false;
+  return !busyIntervals(db, dateStr, masterId, excludeId).some((b) => t < b.e && end > b.s);
 }
 
 // Майстри, які можуть прийняти: конкретний (якщо активний і робить цю послугу) або всі такі
@@ -123,4 +145,4 @@ function addDays(dateStr, n) {
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
 
-module.exports = { nowMin, freeSlots, masterFreeSlots, pickMaster, candidateMasters, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays, STEP_MIN };
+module.exports = { nowMin, freeSlots, masterFreeSlots, masterFreeAt, workHours, busyIntervals, pickMaster, candidateMasters, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays, STEP_MIN };

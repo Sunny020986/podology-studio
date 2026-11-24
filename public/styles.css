@@ -831,3 +831,21 @@ tr.is-muted td { opacity: .6; }
 }
 @media (max-width: 700px) { .course-fields input { width: 100px; } }
 @media (max-width: 700px) { .card-table td .course-fields input[type="number"] { width: 100px; min-width: 100px; } }
+
+/* «Майстер не вийде» */
+.abs-form { display: grid; gap: 8px; max-width: 560px; margin-top: 12px; }
+.abs-form h3 { margin: 0; }
+.abs-form p { margin: 0 0 4px; }
+.abs-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.abs-dates label { display: grid; gap: 4px; margin: 0; }
+.abs-table td { vertical-align: top; }
+.abs-table .abs-action { min-width: 240px; max-width: 100%; }
+.abs-table small { display: block; margin-top: 4px; }
+.abs-tg { color: #22715F; }
+.abs-call { color: #A23B3B; font-weight: 600; }
+.abs-list { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 6px; line-height: 1.45; }
+.call-list a { font-weight: 600; white-space: nowrap; }
+@media (max-width: 700px) {
+  .abs-table .abs-action { min-width: 0; width: 100%; }
+  .abs-dates { grid-template-columns: 1fr; }
+}

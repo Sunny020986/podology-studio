@@ -23,7 +23,9 @@ const { setupClientPhotos } = require('./client-photos');
 const { setupPrivacy } = require('./privacy');
 const { validateCourse, setupCourse } = require('./course');
 const { setupCalendar } = require('./calendar');
+const { setupMaterials } = require('./materials');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+let materialsApply = null; // списання матеріалів при «Відбувся» (src/materials.js), задається нижче
 const DATA_DIR = path.dirname(DB_PATH);
 
 // Межі, які можна змінити змінними середовища (опис у README.md)
@@ -453,6 +455,7 @@ setupAdminAppointments({
 setupReviews({ app, db, telegram, todayStr, siteUrl, last9 });
 setupRepeatReminders({ db, telegram, todayStr, siteUrl, last9 });
 setupCalendar({ app, db, todayStr, addDays });
+materialsApply = setupMaterials({ app, db, notify: (t) => telegram.notifyMaster(t) }).applyVisit;
 setupCourse({
   app, db, telegram, todayStr, siteUrl, last9,
   canSeeClient: (req, key) => req.role === 'super' || listClients(undefined, undefined, req.masterId).some((c) => c.key === key),
@@ -542,6 +545,7 @@ const setStatusTx = db.transaction((id, status) => {
     }
   }
   db.prepare('UPDATE appointments SET status = ? WHERE id = ?').run(status, id);
+  if (materialsApply) materialsApply(id, status);
 });
 
 // «Відбувся» і «Не прийшов» можна поставити лише після часу початку запису

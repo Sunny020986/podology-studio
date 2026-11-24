@@ -168,6 +168,7 @@
     chat: renderChat,
     schedule: renderSchedule,
     services: renderServices,
+    materials: renderMaterials,
     studio: renderStudio,
     reviews: renderReviews,
     stats: renderStats,
@@ -986,6 +987,85 @@ ${isSuper() ? `
       </form>`;
   }
 
+  // ----- Матеріали (лише суперадмін) -----
+  const MOVE_REASON = { visit: 'візит', restock: 'прихід', writeoff: 'списання', init: 'початковий залишок' };
+  const fmtQty = (n) => Number(n).toLocaleString('uk-UA', { maximumFractionDigits: 3 });
+  let matService = null;
+  async function renderMaterials() {
+    const [list, moves, services] = await Promise.all([
+      api('/api/admin/materials'), api('/api/admin/materials/moves?limit=50'), api('/api/admin/services'),
+    ]);
+    const low = list.filter((m) => m.low);
+    if (!matService && services.length) matService = services[0].id;
+    $('#view').innerHTML = `
+      ${low.length ? `<div class="warn-box" style="margin:0 0 14px">⚠ Закінчуються: ${low.map((m) => esc(m.name) + ' (' + fmtQty(m.qty) + ' ' + esc(m.unit) + ')').join(', ')}</div>` : ''}
+      <h3 style="margin:0 0 8px">Залишки</h3>
+      <table>
+        <thead><tr><th>Назва</th><th>Одиниця</th><th>Залишок</th><th>Мінімум (попередження)</th><th>Використовується</th><th></th></tr></thead>
+        <tbody>${list.length ? list.map((m) => `<tr data-mat="${m.id}" class="${m.active ? '' : 'is-muted'}">
+          <td><input type="text" class="m-name" maxlength="80" value="${esc(m.name)}"></td>
+          <td><input type="text" class="m-unit" maxlength="12" value="${esc(m.unit)}" style="max-width:90px"></td>
+          <td><strong class="${m.low ? 'qty-low' : ''}">${fmtQty(m.qty)}</strong>${m.low ? ' <span class="badge-warn">закінчується</span>' : ''}</td>
+          <td><input type="number" class="m-min" min="0" step="any" value="${m.min_qty}" style="max-width:110px"></td>
+          <td><label><input type="checkbox" class="m-active" ${m.active ? 'checked' : ''}> так</label></td>
+          <td><span class="toolbar" style="margin:0;flex-wrap:wrap">
+            <button class="btn btn-primary small" type="button" data-mat-in="${m.id}">+ Прихід</button>
+            <button class="btn btn-ghost small" type="button" data-mat-out="${m.id}">− Списати</button>
+            <button class="btn btn-ghost small" type="button" data-mat-save="${m.id}">Зберегти</button></span></td>
+        </tr>`).join('') : '<tr><td colspan="6" class="muted">Матеріалів ще немає. Додайте перший нижче.</td></tr>'}</tbody>
+      </table>
+      <h3 style="margin:22px 0 8px">Новий матеріал</h3>
+      <form class="inline-form" id="matForm">
+        <input name="name" placeholder="Назва, наприклад «Скоба Фрезера»" required maxlength="80">
+        <input name="unit" placeholder="Одиниця (шт, мл, уп)" maxlength="12" value="шт" style="max-width:150px">
+        <input name="qty" type="number" min="0" step="any" placeholder="Є зараз" style="max-width:120px">
+        <input name="min_qty" type="number" min="0" step="any" placeholder="Мінімум" style="max-width:120px">
+        <button class="btn btn-primary small" type="submit">Додати</button>
+      </form>
+      <h3 style="margin:22px 0 4px">Витрата на послугу</h3>
+      <p class="muted" style="margin:0 0 8px">Скільки матеріалу йде на одну послугу. Списується автоматично, коли запис позначено «Відбувся».</p>
+      <div class="toolbar"><select id="matSvc" class="input" style="max-width:420px">${services.map((s) => `<option value="${s.id}" ${s.id === matService ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>
+      <div id="matSvcBox"><span class="muted">Завантажую…</span></div>
+      <h3 style="margin:22px 0 8px">Історія (останні 50)</h3>
+      <table>
+        <thead><tr><th>Коли</th><th>Матеріал</th><th>Зміна</th><th>Причина</th><th>Примітка</th></tr></thead>
+        <tbody>${moves.length ? moves.map((mv) => `<tr>
+          <td>${new Date(mv.created_at.replace(' ', 'T') + 'Z').toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv', dateStyle: 'short', timeStyle: 'short' })}</td>
+          <td>${esc(mv.name)}</td>
+          <td class="${mv.delta < 0 ? 'qty-out' : 'qty-in'}">${mv.delta > 0 ? '+' : ''}${fmtQty(mv.delta)} ${esc(mv.unit)}</td>
+          <td>${MOVE_REASON[mv.reason] || esc(mv.reason)}</td>
+          <td>${esc(mv.note || '—')}</td>
+        </tr>`).join('') : '<tr><td colspan="5" class="muted">Рухів ще не було.</td></tr>'}</tbody>
+      </table>`;
+    await loadServiceMaterials();
+  }
+  async function loadServiceMaterials() {
+    const box = $('#matSvcBox');
+    if (!box || !matService) { if (box) box.innerHTML = '<span class="muted">Немає послуг.</span>'; return; }
+    const rows = await api('/api/admin/services/' + matService + '/materials');
+    box.innerHTML = rows.length ? `<table>
+        <thead><tr><th>Матеріал</th><th>Витрата на 1 послугу</th></tr></thead>
+        <tbody>${rows.map((r) => `<tr><td>${esc(r.name)}</td><td><input type="number" class="sm-amount" data-material="${r.material_id}" min="0" step="any" value="${r.amount || ''}" placeholder="0" style="max-width:110px"> ${esc(r.unit)}</td></tr>`).join('')}</tbody>
+      </table>
+      <button class="btn btn-primary small" type="button" id="matSvcSave">Зберегти витрату</button>`
+      : '<span class="muted">Спершу додайте матеріали.</span>';
+  }
+  $('#view').addEventListener('change', (e) => {
+    if (e.target.id !== 'matSvc') return;
+    matService = Number(e.target.value);
+    loadServiceMaterials().catch((err) => notify(err.message, true));
+  });
+  $('#view').addEventListener('submit', async (e) => {
+    if (e.target.id !== 'matForm') return;
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      await api('/api/admin/materials', { method: 'POST', body: { name: f.get('name'), unit: f.get('unit'), qty: f.get('qty') || 0, min_qty: f.get('min_qty') || 0 } });
+      notify('Матеріал додано');
+      await renderMaterials();
+    } catch (err) { notify(err.message, true); }
+  });
+
   // ----- Майстри (лише суперадмін) -----
   const M_STATUS = { active: 'Працює', blocked: 'Заблоковано' };
   let editingMaster = null; // null — список, 'new' — новий майстер, число — редагування
@@ -1437,6 +1517,33 @@ ${isSuper() ? `
         await api('/api/admin/clients/' + e.target.dataset.restore + '/restore', { method: 'POST' });
         notify('Клієнта повернуто з архіву');
         return await loadClients();
+      }
+
+      if (e.target.dataset.matIn || e.target.dataset.matOut) {
+        const id = e.target.dataset.matIn || e.target.dataset.matOut;
+        const isIn = !!e.target.dataset.matIn;
+        const v = prompt(isIn ? 'Скільки надійшло?' : 'Скільки списати (брак, термін придатності, інше)?');
+        if (v === null) return;
+        const n = Number(String(v).replace(',', '.'));
+        if (!Number.isFinite(n) || n <= 0) return notify('Вкажіть додатне число', true);
+        const note = isIn ? '' : (prompt('Причина списання (необов\'язково)') || '');
+        await api('/api/admin/materials/' + id + '/move', { method: 'POST', body: { delta: isIn ? n : -n, note } });
+        notify(isIn ? 'Прихід записано' : 'Списано');
+        return await renderMaterials();
+      }
+      if (e.target.dataset.matSave) {
+        const row = e.target.closest('tr');
+        await api('/api/admin/materials/' + e.target.dataset.matSave, { method: 'PUT', body: {
+          name: row.querySelector('.m-name').value, unit: row.querySelector('.m-unit').value,
+          min_qty: row.querySelector('.m-min').value || 0, active: row.querySelector('.m-active').checked,
+        } });
+        notify('Збережено');
+        return await renderMaterials();
+      }
+      if (e.target.id === 'matSvcSave') {
+        const items = [...document.querySelectorAll('.sm-amount')].map((i) => ({ material_id: Number(i.dataset.material), amount: i.value || 0 }));
+        await api('/api/admin/services/' + matService + '/materials', { method: 'PUT', body: { items } });
+        return notify('Витрату збережено');
       }
 
       if (e.target.dataset.courseBook) {

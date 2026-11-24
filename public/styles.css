@@ -759,3 +759,9 @@ html, body { overflow-x: clip; }       /* страховка: нічого не 
 .cal-link input { font-size: 13px; }
 .cal-link .toolbar { margin: 0; flex-wrap: wrap; }
 .tg-strip .toolbar { margin: 0; }
+
+/* Матеріали */
+.qty-low { color: #A23B3B; }
+.qty-in { color: #2F7D6B; white-space: nowrap; }
+.qty-out { color: #A23B3B; white-space: nowrap; }
+tr.is-muted td { opacity: .6; }

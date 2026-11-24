@@ -1021,3 +1021,9 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; -webkit-us
 .fr-label .input { color: var(--ink); }
 .friend-card .btn { justify-self: start; }
 @media (max-width: 700px) { .friend-card .btn { justify-self: stretch; } }
+
+/* «Як записатися» на головному екрані: без рамки й фону, просто текст, як ліворуч; на комп'ютері притиснутий до правого краю */
+.hero .how { background: none; border: 0; box-shadow: none; padding: 0; backdrop-filter: none; }
+@media (min-width: 901px) {
+  .hero .how { justify-self: end; align-self: center; width: 320px; margin-right: -32px; }
+}

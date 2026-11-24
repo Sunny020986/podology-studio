@@ -381,7 +381,7 @@ app.use('/api/admin', requireAdmin);
 const MASTER_ROUTES = [
   /^GET \/me$/, /^POST \/logout$/,
   /^GET \/appointments$/, /^PATCH \/appointments\/\d+$/, /^PUT \/appointments\/\d+\/note$/, /^GET \/appointments\/\d+\/review-link$/,
-  /^GET \/clients$/, /^GET \/clients\/\d{9}$/, /^PUT \/clients\/\d{9}\/note$/,
+  /^GET \/clients$/, /^GET \/clients\/\d{9}$/, /^PUT \/clients\/\d{9}\/note$/, /^GET \/client-search$/,
   /^GET \/clients\/\d{9}\/course$/, /^GET \/clients\/\d{9}\/photos$/, /^POST \/clients\/\d{9}\/photos$/, /^GET \/clients\/\d{9}\/photo-consent$/, /^PUT \/clients\/\d{9}\/photo-consent$/, /^GET \/client-photos\/\d+\/file$/, /^DELETE \/client-photos\/\d+$/,
   /^GET \/schedule$/, /^PUT \/schedule\/\d$/, /^GET \/breaks$/, /^POST \/breaks$/, /^DELETE \/breaks\/\d+$/,
   /^GET \/blocks$/, /^POST \/blocks$/, /^DELETE \/blocks\/\d+$/, /^GET \/waitlist$/, /^DELETE \/waitlist\/\d+$/,
@@ -705,6 +705,50 @@ function listClients(q, mode, masterId = null) {
 
 app.get('/api/admin/clients', (req, res) => {
   res.json(listClients(req.query.q, req.query.archived === '1' ? 'archived' : 'active', scopeMaster(req)));
+});
+
+// Пошук клієнта для форми запису: ім'я (частина слова, без різниці великих літер) або телефон (від 3 цифр,
+// у будь-якому записі: +380 50…, 050…). Шукає і в архіві. Майстер — лише серед своїх клієнтів. До 10 результатів.
+const SEARCH_LIMIT = 10;
+const normName = (s) => String(s || '').toLowerCase().replace(/[’ʼ`´]/g, "'").replace(/\s+/g, ' ').trim();
+app.get('/api/admin/client-search', (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) return res.json([]);
+  const all = listClients(undefined, undefined, req.role === 'master' ? req.masterId : null);
+  let found;
+  if (/^[\d\s()+-]+$/.test(q)) {
+    const d = q.replace(/\D/g, '');
+    if (d.length < 3) return res.json([]);
+    // +380 50… і 050… — один номер: порівнюємо і повну форму, і національну (0 + останні 9 цифр)
+    const variants = [d];
+    if (d.startsWith('380')) variants.push(d.slice(2));
+    if (d.startsWith('0')) variants.push('38' + d);
+    found = all
+      .map((c) => {
+        const full = c.phone.replace(/\D/g, '');
+        const national = '0' + c.key;
+        const at = Math.min(...variants.flatMap((v) => [full.indexOf(v), national.indexOf(v)]).filter((i) => i >= 0));
+        return Number.isFinite(at) ? { c, rank: at === 0 ? 0 : 1 } : null;
+      })
+      .filter(Boolean);
+  } else {
+    const needle = normName(q);
+    const words = needle.split(' ');
+    found = all
+      .map((c) => {
+        const name = normName(c.name);
+        if (!words.every((w) => name.includes(w))) return null;
+        const rank = name.startsWith(needle) ? 0 : name.split(' ').some((part) => part.startsWith(words[0])) ? 1 : 2;
+        return { c, rank };
+      })
+      .filter(Boolean);
+  }
+  // точніші збіги вище; серед рівних — ті, хто приходив нещодавно
+  found.sort((a, b) => a.rank - b.rank || String(b.c.last_visit || b.c.next_visit || '').localeCompare(String(a.c.last_visit || a.c.next_visit || '')) || a.c.name.localeCompare(b.c.name, 'uk'));
+  res.json(found.slice(0, SEARCH_LIMIT).map(({ c }) => ({
+    key: c.key, name: c.name, phone: c.phone, visits: c.visits, last_visit: c.last_visit, next_visit: c.next_visit,
+    noshow_streak: c.noshow_streak, archived: c.archived, has_note: c.has_note,
+  })));
 });
 
 // Архів клієнтів: клієнт без змін довше за обраний термін переходить в архів. Будь-яка нова зміна повертає його в активні.

@@ -849,3 +849,13 @@ tr.is-muted td { opacity: .6; }
   .abs-table .abs-action { min-width: 0; width: 100%; }
   .abs-dates { grid-template-columns: 1fr; }
 }
+
+/* Форма запису: клієнт з бази */
+.suggest-item.is-active { background: var(--active-bg); }
+.suggest-item small { display: inline-block; margin-top: 2px; }
+.af-picked { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 8px; padding: 8px 12px; border-radius: 12px; background: #E3F5EF; border: 1px solid #BFE6D9; color: #1E5C4D; font-size: 14px; }
+.af-picked[hidden] { display: none; }
+.af-picked .btn { margin-left: auto; }
+.af-note { color: #7A4B12; }
+.af-hint { display: block; margin: -4px 0 8px; }
+.af-picked:not([hidden]) ~ .af-hint { display: none; } /* клієнта обрано з бази — підказка для нового не потрібна */

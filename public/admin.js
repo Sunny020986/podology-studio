@@ -387,13 +387,109 @@
       '<label class="step-label" for="afDate">Дата</label><input class="input" type="date" id="afDate" min="' + today() + '" value="' + date + '">' +
       '<div class="step-label">Вільний час</div><div class="slots-grid" id="afSlots"></div>' +
       (move ? '' :
-        '<label class="step-label" for="afName">Клієнт</label><input class="input" id="afName" maxlength="60" placeholder="Ім\'я" required value="' + esc(preset.name || '') + '">' +
-        '<input class="input" id="afPhone" type="tel" maxlength="30" placeholder="Телефон" required value="' + esc(preset.phone || '') + '">' +
+        '<div class="step-label">Клієнт</div>' +
+        '<div class="combo" id="afCombo"><input class="input" id="afFind" type="search" autocomplete="off" placeholder="Знайти в базі: ім\'я або телефон"' +
+        ' role="combobox" aria-expanded="false" aria-controls="afFindList" aria-autocomplete="list" aria-label="Знайти клієнта в базі">' +
+        '<ul class="suggest" id="afFindList" role="listbox" hidden></ul></div>' +
+        '<div class="af-picked" id="afPicked" hidden></div>' +
+        '<input class="input" id="afName" maxlength="60" placeholder="Ім\'я" aria-label="Ім\'я клієнта" required value="' + esc(preset.name || '') + '">' +
+        '<input class="input" id="afPhone" type="tel" maxlength="30" placeholder="Телефон" aria-label="Телефон клієнта" required value="' + esc(preset.phone || '') + '">' +
+        '<small class="muted af-hint">Новий клієнт — просто впишіть ім\'я й телефон.</small>' +
         '<textarea class="input" id="afComment" rows="2" maxlength="500" placeholder="Коментар (необов\'язково)"></textarea>') +
       '<div class="toolbar"><button class="btn btn-primary" type="submit">' + (move ? 'Перенести' : 'Записати') + '</button></div>' +
       '</form>';
     fillMasterOptions(masterId);
+    if (!move) setupClientFind();
     await loadFormSlots();
+  }
+
+  // Пошук клієнта з бази у формі запису: ім'я або телефон; вибір підставляє ім'я й телефон
+  function showPicked(c) {
+    const box = $('#afPicked');
+    if (!box) return;
+    box.hidden = false;
+    box.innerHTML = `<span>✓ З бази: <strong>${esc(c.name)}</strong>, ${esc(c.phone)}` +
+      (c.visits ? ` · візитів: ${c.visits}` : '') + '</span>' +
+      (c.next_visit ? `<span class="af-note">Уже записаний на ${fmtDate(c.next_visit)}.</span>` : '') +
+      (c.noshow_streak >= 2 ? `<span class="badge-warn">⚠ не прийшов ${c.noshow_streak} рази поспіль</span>` : '') +
+      '<button type="button" class="btn btn-ghost small" id="afUnpick">Інший клієнт</button>';
+  }
+  function setupClientFind() {
+    const input = $('#afFind');
+    const list = $('#afFindList');
+    if (!input) return;
+    let items = [];
+    let active = -1;
+    let timer = null;
+    let seq = 0;
+    const meta = (c) => [c.visits ? 'візитів: ' + c.visits : 'ще не був на прийомі', c.last_visit ? 'останній ' + fmtDate(c.last_visit) : '',
+      c.next_visit ? 'записаний на ' + fmtDate(c.next_visit) : ''].filter(Boolean).join(' · ');
+    const close = () => { list.hidden = true; active = -1; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); };
+    const render = () => {
+      list.innerHTML = items.length
+        ? items.map((c, i) => `<li role="option" id="afOpt${i}" aria-selected="${i === active}"><button type="button" tabindex="-1" class="suggest-item${i === active ? ' is-active' : ''}" data-pick="${i}">` +
+          `<strong>${esc(c.name)}</strong> <span class="muted">${esc(c.phone)}</span>` +
+          (c.archived ? ' <span class="cert-st cert-void">в архіві</span>' : '') +
+          (c.noshow_streak >= 2 ? ` <span class="badge-warn">⚠ неявок поспіль: ${c.noshow_streak}</span>` : '') +
+          `<br><small class="muted">${esc(meta(c))}</small></button></li>`).join('')
+        : '<li class="suggest-empty muted">Не знайдено. Новий клієнт — впишіть ім\'я й телефон нижче.</li>';
+      list.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+      if (active >= 0) input.setAttribute('aria-activedescendant', 'afOpt' + active); else input.removeAttribute('aria-activedescendant');
+      list.querySelector('.is-active')?.scrollIntoView({ block: 'nearest' });
+    };
+    const search = async () => {
+      const q = input.value.trim();
+      if (q.length < 2) { items = []; close(); return; }
+      const my = ++seq;
+      try {
+        const r = await api('/api/admin/client-search?q=' + encodeURIComponent(q));
+        if (my !== seq || document.activeElement !== input) return; // прийшла застаріла відповідь або поле вже покинули
+        items = r;
+        active = r.length ? 0 : -1;
+        render();
+      } catch (err) { notify(err.message, true); }
+    };
+    const pick = (c) => {
+      $('#afName').value = c.name;
+      $('#afPhone').value = c.phone;
+      input.value = '';
+      close();
+      showPicked(c);
+    };
+    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 200); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') e.preventDefault(); // Enter у пошуку не відправляє форму
+      if (e.key === 'Escape') return close();
+      if (list.hidden || !items.length) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); active = (active + 1) % items.length; render(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); active = (active - 1 + items.length) % items.length; render(); }
+      else if (e.key === 'Enter' && active >= 0) pick(items[active]);
+    });
+    input.addEventListener('blur', () => setTimeout(close, 150));
+    list.addEventListener('mousedown', (e) => e.preventDefault()); // поле не втрачає фокус до вибору
+    list.addEventListener('click', (e) => { const b = e.target.closest('[data-pick]'); if (b) pick(items[Number(b.dataset.pick)]); });
+    $('#afPicked').addEventListener('click', (e) => {
+      if (e.target.id !== 'afUnpick') return;
+      $('#afName').value = '';
+      $('#afPhone').value = '';
+      $('#afPicked').hidden = true;
+      input.focus();
+    });
+    // Вписали повний телефон знайомого клієнта, а ім'я порожнє — підставляємо ім'я з бази
+    let phoneTimer = null;
+    $('#afPhone').addEventListener('input', () => {
+      $('#afPicked').hidden = true;
+      clearTimeout(phoneTimer);
+      phoneTimer = setTimeout(async () => {
+        const d = $('#afPhone').value.replace(/\D/g, '');
+        if (d.length < 9 || $('#afName').value.trim()) return;
+        const r = await api('/api/admin/client-search?q=' + encodeURIComponent(d)).catch(() => []);
+        const exact = r.filter((c) => c.key === d.slice(-9));
+        if (exact.length === 1 && !$('#afName').value.trim()) { $('#afName').value = exact[0].name; showPicked(exact[0]); }
+      }, 300);
+    });
+    $('#afName').addEventListener('input', () => { $('#afPicked').hidden = true; });
   }
 
   function fillMasterOptions(selected) {

@@ -33,7 +33,7 @@ after(() => srv && srv.stop());
 
 test('новому клієнтові: ціна, знижка 10% і сума до сплати; на непозначену послугу знижки немає', async () => {
   const q = (await quote(svcDisc, '+380671110001')).body;
-  assert.deepEqual(q, { eligible: true, pct: 10, full: 1235, discount: 123, final: 1112 }); // 1235 × 0,9 = 1111,5 → 1112 (округлення до більшого)
+  assert.deepEqual(q, { eligible: true, kind: 'first', pct: 10, full: 1235, discount: 123, final: 1112, friend: { available: true, left: 5 } }); // 1235 × 0,9 = 1111,5 → 1112 (округлення до більшого)
   const plain = (await quote(svcPlain, '+380671110001')).body;
   assert.equal(plain.eligible, false);
   assert.equal(plain.final, 500);
@@ -47,7 +47,7 @@ test('новому клієнтові: ціна, знижка 10% і сума д
 test('запис: ціна зі знижкою у відповіді й у базі; другий запис того ж номера — вже за повною ціною', async () => {
   const r = await bookReq(svcDisc, '+380671110002');
   assert.equal(r.status, 201, r.text);
-  assert.deepEqual(r.body.price, { full: 1235, pct: 10, discount: 123, final: 1112, note: '' });
+  assert.deepEqual(r.body.price, { full: 1235, pct: 10, kind: 'first', discount: 123, final: 1112, note: '' });
   assert.deepEqual(row(r.body.id), { price_uah: 1112, price_full_uah: 1235, discount_pct: 10, status: 'new' });
 
   // Той самий номер в іншому записі: пропозиції вже немає (формат номера не важливий)
@@ -69,7 +69,7 @@ test('скасований запис не робить клієнта «ста�
 test('послуга без числової ціни: знижка обіцяна, сума — ні; ціна текстом у відповіді', async () => {
   const r = await bookReq(svcNote, '+380671110004');
   assert.equal(r.status, 201, r.text);
-  assert.deepEqual(r.body.price, { full: null, pct: 10, discount: 0, final: null, note: 'від 1380 грн' });
+  assert.deepEqual(r.body.price, { full: null, pct: 10, kind: 'first', discount: 0, final: null, note: 'від 1380 грн' });
 });
 
 test('відсоток 0 вимикає знижку; некоректний відсоток відхиляється', async () => {
@@ -92,5 +92,30 @@ test('кабінет клієнта показує ціну зі знижкою'
   assert.equal(reg.status, 201, reg.text);
   const cookie = (reg.headers.getSetCookie?.() || []).map((c) => c.split(';')[0]).join('; ');
   const list = (await srv.req('GET', '/api/account/appointments', { headers: { Cookie: cookie } })).body;
-  assert.deepEqual(list[0].price, { full: 1235, pct: 10, final: 1112 });
+  assert.deepEqual(list[0].price, { full: 1235, pct: 10, kind: 'first', final: 1112 });
+});
+
+test('адмін ставить знижку на запис: ціна перераховується, 0 прибирає; майстрові й без входу — ні', async () => {
+  const phone = '+380671110099';
+  const r = await bookReq(svcPlain, phone, 'Знижка Від Адміна'); // послуга без знижки на перший візит, 500 грн
+  assert.equal(r.status, 201, r.text);
+  const id = r.body.id;
+  const set = (pct, token = srv.ADMIN) => srv.req('PATCH', `/api/admin/appointments/${id}/discount`, { token, body: { pct } });
+  const ok = await set(15);
+  assert.equal(ok.status, 200, ok.text);
+  assert.deepEqual(ok.body, { full: 500, pct: 15, final: 425 });
+  const db = new Database(path.join(srv.dir, 'studio.db'), { readonly: true });
+  try { assert.equal(db.prepare('SELECT discount_kind FROM appointments WHERE id = ?').get(id).discount_kind, 'manual'); } finally { db.close(); }
+  const list = (await srv.req('GET', '/api/admin/appointments?from=2020-01-01&to=2099-12-31', { token: srv.ADMIN })).body;
+  const a = list.find((x) => x.id === id);
+  assert.deepEqual({ p: a.price_uah, f: a.price_full_uah, d: a.discount_pct, k: a.discount_kind }, { p: 425, f: 500, d: 15, k: 'manual' });
+  assert.equal((await set(91)).status, 400);
+  assert.equal((await set('abc')).status, 400);
+  assert.equal((await set(10, M.token)).status, 403, 'майстрові — ні');
+  assert.equal((await srv.req('PATCH', `/api/admin/appointments/${id}/discount`, { body: { pct: 5 } })).status, 401);
+  assert.deepEqual((await set(0)).body, { full: 500, pct: 0, final: 500 });
+  const audit = (await srv.req('GET', '/api/admin/audit?limit=50', { token: srv.ADMIN })).body.rows;
+  assert.ok(audit.some((x) => x.action === 'Записи: знижка 15%'));
+  assert.equal((await srv.req('PATCH', `/api/admin/appointments/${id}`, { token: srv.ADMIN, body: { status: 'cancelled' } })).status, 200);
+  assert.equal((await set(5)).status, 409, 'скасований запис — ні');
 });

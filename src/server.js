@@ -29,8 +29,8 @@ const { setupReassign } = require('./reassign');
 const { setupHolidays } = require('./holidays');
 const { setupClientErase } = require('./client-erase');
 const { setupReminderButtons } = require('./reminder-buttons');
-const { setupFirstDiscount, quote: firstQuote, hasVisits } = require('./first-discount');
-const { setupFriendInvite } = require('./friend-invite');
+const { setupFirstDiscount, quote: firstQuote, hasVisits, discountPct } = require('./first-discount');
+const { setupFriendInvite, useReward } = require('./friend-invite');
 const { adminBySession: adminSessionLookup, setupAdminUsers } = require('./admin-users');
 const { setupAudit } = require('./audit');
 const { setupChatTemplates } = require('./chat-templates');
@@ -348,15 +348,17 @@ const bookTx = db.transaction(({ service, date, time, name, phone, comment, mast
   const end = toHHMM(toMin(time) + service.duration_min);
   const remindCode = 'r' + crypto.randomBytes(9).toString('base64url');
   const info = db
-    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code, client_comment, master_id, status, price_uah, price_full_uah, discount_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(service.id, date, time, end, name, phone, remindCode, comment ?? '', master, status, q.final ?? service.price_uah ?? null, service.price_uah ?? null, q.eligible ? q.pct : 0); // ціна на момент запису — для звіту
+    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code, client_comment, master_id, status, price_uah, price_full_uah, discount_pct, discount_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(service.id, date, time, end, name, phone, remindCode, comment ?? '', master, status, q.final ?? service.price_uah ?? null, service.price_uah ?? null, q.eligible ? q.pct : 0, q.kind); // ціна на момент запису — для звіту
+  if (q.kind === 'friend') useReward(db, q.inviteId, info.lastInsertRowid); // знижку за друга використано
   return { id: info.lastInsertRowid, remindCode, masterId: master, price: q };
 });
 
 // Рядок про знижку для сповіщень персоналу
 function priceLine(q) {
   if (!q.eligible) return '';
-  return q.full ? `\n🎁 Перший візит: знижка ${q.pct}% (${q.full} − ${q.discount} = ${q.final} грн)` : `\n🎁 Перший візит: знижка ${q.pct}% (суму рахує майстер)`;
+  const what = q.kind === 'friend' ? 'Знижка за друга' : 'Перший візит: знижка';
+  return q.full ? `\n🎁 ${what} ${q.pct}% (${q.full} − ${q.discount} = ${q.final} грн)` : `\n🎁 ${what} ${q.pct}% (суму рахує майстер)`;
 }
 
 // Особисте сповіщення майстру в його Telegram, якщо він підключив бота в адмінці
@@ -372,8 +374,9 @@ function readChangeHours() {
   const n = Number(row?.value);
   return CHANGE_HOUR_OPTIONS.includes(n) ? n : DEFAULT_CHANGE_HOURS;
 }
-setupFirstDiscount({ app, db, makeLimiter });
-const friendInvites = setupFriendInvite({ app, db, last9, publicBook, hasVisits, accountFromRequest: (req) => accounts.accountFromRequest(req), readStudio });
+setupFirstDiscount({ app, db, makeLimiter, friendState: (key) => friendInvites.state(key) });
+const friendInvites = setupFriendInvite({ app, db, publicBook, hasVisits, accountFromRequest: (req) => accounts.accountFromRequest(req), readStudio,
+  notifyStaff: (t) => telegram.notifyMaster(t), discountPct });
 const accounts = setupAccounts({
   app, db, telegram, freeSlots, todayStr, isBookableDate, isTime,
   horizonDays: HORIZON_DAYS, makeLimiter, notifyMaster: (t) => telegram.notifyMaster(t), changeHours: readChangeHours, notifyMasterOf,
@@ -383,7 +386,8 @@ const accounts = setupAccounts({
 
 // Запис клієнта з сайту. Повертає { status, body }. commentPrefix — службова позначка для персоналу (запис друга);
 // ownerCheck(cleanPhone) — додаткова перевірка перед записом (повертає текст помилки або null).
-function publicBook(body, ip, { commentPrefix = '', ownerCheck = null } = {}) {
+// defer — масив: сповіщення (Telegram, адмінка) не надсилаються одразу, а додаються туди, щоб надіслати після транзакції.
+function publicBook(body, ip, { commentPrefix = '', ownerCheck = null, defer = null } = {}) {
   const { serviceId, date, time, name, phone, comment, masterId } = body || {};
   const fail = (status, error) => ({ status, body: { error } });
   const service = db.prepare('SELECT * FROM services WHERE id = ? AND active = 1').get(Number(serviceId));
@@ -410,11 +414,14 @@ function publicBook(body, ip, { commentPrefix = '', ownerCheck = null } = {}) {
     const masterName = db.prepare('SELECT name FROM masters WHERE id = ?').get(assigned)?.name || '';
     const streak = noShowStreaks().get(last9(cleanPhone)) || 0;
     const warn = streak >= 2 ? `\n⚠️ Цей клієнт не прийшов ${streak} рази поспіль` : '';
-    notifyMasterOf(assigned, `🗓 Новий запис до вас\n${service.name}\n${date.split('-').reverse().join('.')} о ${time}\n${cleanName}, ${cleanPhone}${cleanComment ? '\nКоментар: ' + cleanComment : ''}${priceLine(price)}${warn}`);
-    bookingLimiter.hit(ip);
-    telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, master: masterName, warn: priceLine(price) + warn });
-    liveAppt('new', { id: Number(id), master_id: assigned, date, start_time: time, client_name: cleanName, service: service.name, master: masterName });
-    return { status: 201, body: { id: Number(id), date, time, service: service.name, master: masterName, remindLink: telegram.remindLink(remindCode), price: { full: price.full, pct: price.pct, discount: price.discount, final: price.final, note: service.price_note || '' } }, remindCode, phone: cleanPhone, name: cleanName };
+    const notify = () => {
+      notifyMasterOf(assigned, `🗓 Новий запис до вас\n${service.name}\n${date.split('-').reverse().join('.')} о ${time}\n${cleanName}, ${cleanPhone}${cleanComment ? '\nКоментар: ' + cleanComment : ''}${priceLine(price)}${warn}`);
+      bookingLimiter.hit(ip);
+      telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, master: masterName, warn: priceLine(price) + warn });
+      liveAppt('new', { id: Number(id), master_id: assigned, date, start_time: time, client_name: cleanName, service: service.name, master: masterName });
+    };
+    if (defer) defer.push(notify); else notify();
+    return { status: 201, body: { id: Number(id), date, time, service: service.name, master: masterName, remindLink: telegram.remindLink(remindCode), price: { full: price.full, pct: price.pct, kind: price.kind, discount: price.discount, final: price.final, note: service.price_note || '' } }, remindCode, phone: cleanPhone, name: cleanName };
   } catch (e) {
     if (e.status) return fail(e.status, e.message);
     console.error(e);
@@ -422,13 +429,38 @@ function publicBook(body, ip, { commentPrefix = '', ownerCheck = null } = {}) {
   }
 }
 
+// Запис з сайту. friends (необов'язково, до 5) — «Приведи друга»: [{ mode: 'book' | 'lead', name, phone, serviceId, date, time }].
+// Дані друзів перевіряються ДО запису клієнта: якщо з кимось щось не так, не записується ніхто, клієнт виправляє форму.
+// Якщо друга не вдалося записати вже після (наприклад, час щойно зайняли), клієнт записаний, у friends[i].ok = false.
 app.post('/api/appointments', (req, res) => {
-  const r = publicBook(req.body, req.ip);
-  if (r.status === 201) {
-    const offer = friendInvites.offerFor(r.remindCode, r.phone);
-    if (offer) r.body.friendInvite = offer;
+  const list = friendInvites.asList(req.body?.friends ?? req.body?.friend);
+  if (!list.length) { const r = publicBook(req.body, req.ip); return res.status(r.status).json(r.body); }
+  const ref = { phone: String(req.body?.phone ?? '').trim(), name: String(req.body?.name ?? '').trim() };
+  const bad = friendInvites.checkMany(ref, list);
+  if (bad) return res.status(bad.status).json({ error: bad.error, friendError: true });
+  // Клієнт і всі друзі — однією транзакцією: не вийшло з кимось (наприклад, час друга перетинається з вашим) — не записується ніхто
+  const effects = [];
+  let r = null, friends = null;
+  try {
+    db.transaction(() => {
+      r = publicBook(req.body, req.ip, { defer: effects });
+      if (r.status !== 201) throw Object.assign(new Error('abort'), { abort: true });
+      friends = friendInvites.inviteMany({ phone: r.phone, name: r.name }, list, req.ip, effects);
+      const i = friends.findIndex((f) => !f.ok);
+      if (i >= 0) throw Object.assign(new Error('friend'), { friend: true, index: i, msg: friends[i].error });
+    })();
+  } catch (e) {
+    if (e.abort) return res.status(r.status).json(r.body);
+    if (e.friend) {
+      const who = list.length > 1 ? `Друг ${e.index + 1}: ` : '';
+      return res.status(409).json({ error: `${who}${e.msg}. Нікого не записано: виправте й спробуйте ще раз`, friendError: true });
+    }
+    console.error(e);
+    return res.status(500).json({ error: 'Помилка сервера' });
   }
-  res.status(r.status).json(r.body);
+  effects.forEach((fn) => fn());
+  r.body.friends = friends;
+  res.status(201).json(r.body);
 });
 
 // ---------- Вхід майстра в адмінку ----------
@@ -478,6 +510,7 @@ setupAdminUsers({
   app, db, sha, crypto, hashPassword: hashStaffPassword, checkPassword: checkMasterPassword, loginLimiter, audit,
   onRevoke: () => { for (const s of staffSockets) staffStillValid(s); }, // закрити канали заблокованих
 });
+friendInvites.registerAdmin(); // «Друзі клієнтів» — після перевірки входу
 
 // Який майстер у запиті: майстер — завжди він сам; суперадмін — обраний через masterId (або всі, якщо не обрано)
 const scopeMaster = (req) => {
@@ -633,6 +666,28 @@ app.delete('/api/admin/telegram', tgRoute(() => { telegram.clear(); return teleg
 app.post('/api/admin/telegram/detect', tgRoute(async (req) => ({ chats: await telegram.detect(req.body?.token) })));
 app.post('/api/admin/telegram/test', tgRoute(async () => { await telegram.test(); return { ok: true }; }));
 
+// Знижка від адміністратора на конкретний запис (лише суперадмін: маршруту немає в MASTER_ROUTES).
+// pct від 0 до 90; 0 — прибрати знижку. Ціна до сплати рахується від повної ціни запису (або поточної ціни послуги).
+// Якщо на цей запис була взята знижка за друга, вона повертається клієнтові.
+app.patch('/api/admin/appointments/:id/discount', (req, res) => {
+  const id = Number(req.params.id);
+  const a = db.prepare(`SELECT a.*, s.price_uah AS svc_price, s.name AS service FROM appointments a JOIN services s ON s.id = a.service_id WHERE a.id = ?`).get(id);
+  if (!a) return res.status(404).json({ error: 'Запис не знайдено' });
+  if (a.status === 'cancelled') return res.status(409).json({ error: 'Запис скасовано' });
+  const pct = Number(req.body?.pct);
+  if (!Number.isInteger(pct) || pct < 0 || pct > 90) return res.status(400).json({ error: 'Знижка: ціле число від 0 до 90 %' });
+  const full = a.price_full_uah || a.svc_price || a.price_uah;
+  if (!(full > 0)) return res.status(400).json({ error: 'У запису немає ціни: спершу вкажіть ціну послуги у вкладці «Послуги»' });
+  const final = Math.round(full * (100 - pct) / 100);
+  db.transaction(() => {
+    if (a.discount_kind === 'friend') db.prepare('UPDATE friend_invites SET reward_appt_id = NULL WHERE reward_appt_id = ?').run(id);
+    db.prepare('UPDATE appointments SET price_full_uah = ?, discount_pct = ?, discount_kind = ?, price_uah = ? WHERE id = ?')
+      .run(full, pct, pct ? 'manual' : null, final, id);
+  })();
+  liveAppt('changed', { id, master_id: a.master_id, date: a.date, start_time: a.start_time, client_name: a.client_name, service: a.service });
+  res.json({ full, pct, final });
+});
+
 app.get('/api/admin/appointments', (req, res) => {
   const from = isValidDate(req.query.from) ? req.query.from : todayStr();
   const to = isValidDate(req.query.to) ? req.query.to : from;
@@ -640,7 +695,8 @@ app.get('/api/admin/appointments', (req, res) => {
   res.json(
     db
       .prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.client_name, a.client_phone, a.status, a.client_comment,
-                       a.master_id, a.service_id, a.client_confirmed_at, a.client_declined_at, m.name AS master, s.name AS service
+                       a.master_id, a.service_id, a.client_confirmed_at, a.client_declined_at, m.name AS master, s.name AS service,
+                       a.price_uah, a.price_full_uah, a.discount_pct, a.discount_kind, s.price_note
                 FROM appointments a JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id
                 WHERE a.date BETWEEN ? AND ? AND (? IS NULL OR a.master_id = ?) ORDER BY a.date, a.start_time`)
       .all(from, to, scopeMaster(req), scopeMaster(req))

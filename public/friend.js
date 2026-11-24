@@ -1,6 +1,8 @@
-// «Приведи друга»: картка з формою запису друга. Працює в двох місцях:
-//   після запису на сайті (mount(box, { code }) — код запису доводить, що це той самий клієнт),
-//   у кабінеті клієнта (mount(box, {}) — за входом у кабінет).
+// «Приведи друга» на сайті.
+//   FriendInvite.list(holder, opts) — поля для 1–5 друзів (без <form>, тож працює всередині форми запису).
+//     Для кожного друга: «записати зараз» (послуга, дата, час) або «лише контакт — ми передзвонимо».
+//     Повертає { data(), error() }: data() — масив друзів для сервера, error() — текст помилки або null.
+//   FriendInvite.mount(box) — картка в кабінеті клієнта: стан запрошень, знижка за друзів, запрошення.
 window.FriendInvite = (() => {
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (d) => d.split('-').reverse().join('.');
@@ -8,61 +10,51 @@ window.FriendInvite = (() => {
   const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); return ymd(new Date(y, m - 1, d + n)); };
   const getJson = async (url) => { const r = await fetch(url); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Помилка'); return j; };
+  let uid = 0;
 
-  async function mount(box, { code } = {}) {
-    const api = code ? '/api/friend-invite' : '/api/account/friend-invite';
-    let st, cfg;
-    try {
-      [st, cfg] = await Promise.all([getJson(code ? `${api}?code=${encodeURIComponent(code)}` : api), getJson('/api/settings')]);
-    } catch { box.innerHTML = ''; return; }
-    if (!st.enabled) { box.innerHTML = ''; return; }
-    const promo = String(cfg.studio?.promo_friend || '').split('\n').map((x) => x.trim()).filter(Boolean);
-    const head = `<div class="fr-title">🤝 ${esc(promo[0] || 'Приведи друга')}</div>${promo[1] ? `<div class="fr-text">${esc(promo.slice(1).join(' '))}</div>` : ''}`;
-    if (!st.available) {
-      box.innerHTML = `<div class="friend-card">${head}<p class="fr-note">Друга вже записано. Нового друга можна буде записати, коли він прийде на візит.</p></div>`;
-      return;
-    }
-    box.innerHTML = `<div class="friend-card">${head}<button class="btn btn-primary" type="button" data-fr-open>Записати друга</button><div data-fr-form></div></div>`;
-    box.querySelector('[data-fr-open]').addEventListener('click', (e) => { e.target.hidden = true; openForm(box, { api, code, maxDate: cfg.maxDate }); });
-  }
+  // Заголовок і опис акції з налаштувань кабінету (перший рядок — заголовок)
+  const promo = (text) => {
+    const lines = String(text || '').split('\n').map((x) => x.trim()).filter(Boolean);
+    return { title: lines[0] || 'Приведи друга', text: lines.slice(1).join(' ') };
+  };
 
-  async function openForm(box, { api, code, maxDate }) {
-    const holder = box.querySelector('[data-fr-form]');
-    const services = await getJson('/api/services').catch(() => []);
-    holder.innerHTML = `<form class="fr-form" novalidate>
-      <input class="input" name="name" placeholder="Ім'я друга" maxlength="60" autocomplete="off">
-      <input class="input" name="phone" placeholder="Телефон друга, наприклад +380501234567" maxlength="30" autocomplete="off" inputmode="tel">
-      <label class="fr-label">Послуга<select class="input" name="serviceId">${services.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>
-      <label class="fr-label">Дата<input class="input" type="date" name="date" min="${ymd(new Date())}" ${maxDate ? `max="${maxDate}"` : ''}></label>
-      <label class="fr-label">Час<select class="input" name="time"><option value="">Оберіть дату</option></select></label>
-      <div class="hint" data-fr-hint></div>
-      <textarea class="input" name="comment" rows="2" maxlength="450" placeholder="Коментар (необов'язково)"></textarea>
-      <p class="consent-note">Запишіть друга лише за його згодою: ви передаєте нам його ім'я й телефон. Запис працює для нових клієнтів. Ми зв'яжемось з другом так само, як із будь-яким клієнтом: <a href="/privacy" target="_blank" rel="noopener">обробка даних</a>.</p>
-      <button class="btn btn-primary" type="submit" data-fr-submit disabled>Записати друга</button>
-      <div class="msg" data-fr-msg role="status"></div>
-    </form>`;
-    const f = holder.querySelector('form');
-    const q = (n) => f.elements[n];
-    const hint = holder.querySelector('[data-fr-hint]');
-    const msg = holder.querySelector('[data-fr-msg]');
-    const submit = holder.querySelector('[data-fr-submit]');
-    let off = new Set(), reqId = 0;
+  // Поля одного друга
+  function friendBlock(n, { services, maxDate, defaults }) {
+    const id = 'fr' + (++uid);
+    const el = document.createElement('fieldset');
+    el.className = 'fr-one';
+    el.innerHTML = `<legend>Друг ${n}</legend>
+      <button class="fr-del" type="button" aria-label="Прибрати друга ${n}" title="Прибрати">×</button>
+      <div class="fr-modes" role="radiogroup" aria-label="Як записати друга">
+        <label><input type="radio" name="${id}-mode" value="book" checked> Записати зараз</label>
+        <label><input type="radio" name="${id}-mode" value="lead"> Лише контакт: ми передзвонимо</label>
+      </div>
+      <input class="input" data-f="name" placeholder="Ім'я друга" maxlength="60" autocomplete="off">
+      <input class="input" data-f="phone" placeholder="Телефон друга, наприклад +380501234567" maxlength="30" autocomplete="off" inputmode="tel">
+      <div class="fr-book">
+        <label class="fr-label">Послуга<select class="input" data-f="serviceId">${services.map((s) => `<option value="${s.id}" ${s.id == defaults.serviceId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
+        <div class="fr-row">
+          <label class="fr-label">Дата<input class="input" type="date" data-f="date" min="${ymd(new Date())}" ${maxDate ? `max="${maxDate}"` : ''}></label>
+          <label class="fr-label">Час<select class="input" data-f="time"><option value="">…</option></select></label>
+        </div>
+        <div class="hint" data-f="hint"></div>
+      </div>`;
+    const q = (f) => el.querySelector(`[data-f="${f}"]`);
+    const mode = () => el.querySelector(`input[name="${id}-mode"]:checked`).value;
+    let reqId = 0;
 
     async function loadSlots(date, note = '') {
-      const id = ++reqId;
+      const my = ++reqId;
       q('time').innerHTML = '<option value="">…</option>';
-      submit.disabled = true;
       try {
-        const sid = q('serviceId').value;
-        const d = await getJson(`/api/slots?serviceId=${sid}&date=${date}`);
-        if (id !== reqId) return;
+        const d = await getJson(`/api/slots?serviceId=${q('serviceId').value}&date=${date}`);
+        if (my !== reqId) return;
         q('time').innerHTML = d.slots.length ? '<option value="">Оберіть час</option>' + d.slots.map((t) => `<option>${t}</option>`).join('') : '<option value="">Немає вільного часу</option>';
-        hint.textContent = d.slots.length ? note : 'На цю дату вільного часу немає. Оберіть іншу дату.';
-      } catch (e) { hint.textContent = e.message; }
+        q('hint').textContent = d.slots.length ? note : 'На цю дату вільного часу немає. Оберіть іншу дату.';
+      } catch (e) { q('hint').textContent = e.message; }
     }
     async function pickDate(date) {
-      const sid = q('serviceId').value;
-      off = new Set((await getJson(`/api/days-off?serviceId=${sid}`).catch(() => ({ off: [] }))).off);
+      const off = new Set((await getJson(`/api/days-off?serviceId=${q('serviceId').value}`).catch(() => ({ off: [] }))).off);
       let note = '';
       if (off.has(date)) {
         const was = date;
@@ -73,36 +65,106 @@ window.FriendInvite = (() => {
       await loadSlots(date, note);
     }
     async function start() {
-      try {
-        const d = await getJson(`/api/next-slot?serviceId=${q('serviceId').value}`);
-        await pickDate(d.date || ymd(new Date()));
-      } catch { await pickDate(ymd(new Date())); }
+      const want = defaults.date && defaults.date >= ymd(new Date()) ? defaults.date : null;
+      if (want) return pickDate(want);
+      try { const d = await getJson(`/api/next-slot?serviceId=${q('serviceId').value}`); await pickDate(d.date || ymd(new Date())); } catch { await pickDate(ymd(new Date())); }
     }
-    q('serviceId').addEventListener('change', start);
+    q('serviceId').addEventListener('change', () => pickDate(q('date').value || ymd(new Date())));
     q('date').addEventListener('change', () => q('date').value && pickDate(q('date').value));
-    q('time').addEventListener('change', () => { submit.disabled = !q('time').value; });
+    el.querySelectorAll(`input[name="${id}-mode"]`).forEach((r) => r.addEventListener('change', () => { el.querySelector('.fr-book').hidden = mode() !== 'book'; }));
     start();
 
-    f.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      if (submit.disabled) return;
-      msg.className = 'msg'; msg.textContent = '';
-      submit.disabled = true;
-      try {
-        const r = await fetch(api, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-          code, serviceId: Number(q('serviceId').value), date: q('date').value, time: q('time').value,
-          name: q('name').value, phone: q('phone').value, comment: q('comment').value,
-        }) });
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok) { msg.className = 'msg error'; msg.textContent = data.error || 'Помилка, спробуйте ще раз'; submit.disabled = false; if (r.status === 409) loadSlots(q('date').value); return; }
-        const p = data.price;
-        const price = p && p.full ? (p.pct ? ` Ціна: ${p.full} грн − знижка ${p.pct}% (${p.discount} грн) = ${p.final} грн.` : ` Ціна: ${p.full} грн.`)
-          : p && p.pct ? ` Знижка ${p.pct}% на перший візит: точну суму назве майстер.` : p && p.note ? ` Ціна: ${p.note}.` : '';
-        holder.innerHTML = `<p class="msg ok">Друга записано: ${esc(data.service)}, ${fmt(data.date)} о ${esc(data.time)}.${esc(price)} Нового друга можна буде записати, коли цей друг прийде на візит.</p>`;
-        document.dispatchEvent(new CustomEvent('friend:booked'));
-      } catch { msg.className = 'msg error'; msg.textContent = 'Немає зв\'язку із сервером. Спробуйте ще раз.'; submit.disabled = false; }
+    return {
+      el,
+      setNumber(k) { el.querySelector('legend').textContent = 'Друг ' + k; el.querySelector('.fr-del').setAttribute('aria-label', 'Прибрати друга ' + k); },
+      data() {
+        const d = { mode: mode(), name: q('name').value.trim(), phone: q('phone').value.trim() };
+        if (d.mode === 'book') Object.assign(d, { serviceId: Number(q('serviceId').value), date: q('date').value, time: q('time').value });
+        return d;
+      },
+      error() {
+        const d = this.data();
+        if (d.name.length < 2) return "вкажіть ім'я";
+        if (d.phone.replace(/\D/g, '').length < 9) return 'вкажіть телефон';
+        if (d.mode === 'book' && !d.time) return 'оберіть час';
+        return null;
+      },
+    };
+  }
+
+  // Список друзів з кнопкою «+ Ще друг» (не більше max)
+  function list(holder, { services, maxDate, max = 5, defaults = {} }) {
+    const items = [];
+    holder.innerHTML = `<div class="fr-items"></div>
+      <button class="btn btn-ghost small fr-more" type="button">+ Ще друг</button>
+      <p class="consent-note">Вказуйте дані друзів лише за їхньою згодою: ви передаєте нам їхні імена й телефони. Запрошення діє для нових клієнтів. Ми зв'яжемось із другом так само, як із будь-яким клієнтом: <a href="/privacy" target="_blank" rel="noopener">обробка даних</a>.</p>`;
+    const box = holder.querySelector('.fr-items');
+    const more = holder.querySelector('.fr-more');
+    const renumber = () => { items.forEach((it, i) => it.setNumber(i + 1)); more.hidden = items.length >= max; items.forEach((it) => { it.el.querySelector('.fr-del').hidden = items.length < 2; }); };
+    const add = () => {
+      if (items.length >= max) return;
+      const it = friendBlock(items.length + 1, { services, maxDate, defaults });
+      it.el.querySelector('.fr-del').addEventListener('click', () => { items.splice(items.indexOf(it), 1); it.el.remove(); renumber(); });
+      items.push(it);
+      box.appendChild(it.el);
+      renumber();
+    };
+    more.addEventListener('click', add);
+    add();
+    return {
+      data: () => items.map((it) => it.data()),
+      error() {
+        for (let i = 0; i < items.length; i++) { const e = items[i].error(); if (e) return `Друг ${i + 1}: ${e}`; }
+        return null;
+      },
+    };
+  }
+
+  // Рядок про результат для кожного друга (після запису)
+  function resultText(f) {
+    if (!f.ok) return `${f.name || 'Друг'}: не вдалося — ${f.error}`;
+    if (f.mode === 'lead') return `Контакт друга ${f.name} передали адміністратору: ми йому зателефонуємо.`;
+    const p = f.price;
+    const what = p && p.kind === 'friend' ? 'знижка за друга' : 'знижка на перший візит';
+    const price = p && p.full ? (p.pct ? ` Ціна: ${p.full} грн − ${what} ${p.pct}% (${p.discount} грн) = ${p.final} грн.` : ` Ціна: ${p.full} грн.`) : '';
+    return `Друга записано: ${f.service}, ${fmt(f.date)} о ${f.time}.${price}`;
+  }
+
+  // Картка в кабінеті клієнта
+  async function mount(box) {
+    let st, cfg, services;
+    try {
+      [st, cfg, services] = await Promise.all([getJson('/api/account/friend-invite'), getJson('/api/settings'), getJson('/api/services')]);
+    } catch { box.innerHTML = ''; return; }
+    const pr = promo(cfg.studio?.promo_friend);
+    const reward = st.rewards > 0 ? `<p class="fr-reward">🎁 За друзів, які прийшли, у вас знижка ${st.pct}% на наступний запис${st.rewards > 1 ? ` (знижок: ${st.rewards})` : ''}.</p>` : '';
+    if (!st.enabled) { box.innerHTML = reward ? `<div class="friend-card">${reward}</div>` : ''; return; }
+    const head = `<div class="fr-title">🤝 ${esc(pr.title)}</div>${pr.text ? `<div class="fr-text">${esc(pr.text)}</div>` : ''}`;
+    if (!st.available) {
+      box.innerHTML = `<div class="friend-card">${head}${reward}<p class="fr-note">Запрошених друзів, які ще не прийшли: ${st.open} з ${st.max}. Нових можна буде запросити, коли хтось із них прийде на візит.</p></div>`;
+      return;
+    }
+    box.innerHTML = `<div class="friend-card">${head}${reward}<button class="btn btn-primary" type="button" data-fr-open>Запросити друзів</button><div data-fr-body></div></div>`;
+    box.querySelector('[data-fr-open]').addEventListener('click', (e) => {
+      e.target.hidden = true;
+      const body = box.querySelector('[data-fr-body]');
+      body.innerHTML = '<div data-fr-list></div><button class="btn btn-primary" type="button" data-fr-send>Запросити</button><div class="msg" data-fr-msg role="status"></div>';
+      const lst = list(body.querySelector('[data-fr-list]'), { services, maxDate: cfg.maxDate, max: st.left || 1 });
+      const msg = body.querySelector('[data-fr-msg]');
+      body.querySelector('[data-fr-send]').addEventListener('click', async (ev) => {
+        const err = lst.error();
+        msg.className = 'msg';
+        if (err) { msg.className = 'msg error'; msg.textContent = err; return; }
+        ev.target.disabled = true;
+        try {
+          const r = await fetch('/api/account/friend-invite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ friends: lst.data() }) });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(data.error || 'Помилка, спробуйте ще раз');
+          body.innerHTML = `<p class="msg ok">${data.friends.map((f) => esc(resultText(f))).join('<br>')}</p>`;
+        } catch (e2) { msg.className = 'msg error'; msg.textContent = e2.message; ev.target.disabled = false; }
+      });
     });
   }
 
-  return { mount };
+  return { list, mount, promo, resultText };
 })();

@@ -286,10 +286,6 @@ textarea.input { resize: vertical; min-height: 96px; }
 .services-more { display: block; margin: 20px auto 0; }
 
 /* ----- Акції, про майстра, питання, контакти ----- */
-.promo-pill { display: inline-flex; align-self: flex-start; width: fit-content; margin-bottom: 14px; padding: 7px 14px; border-radius: 999px;
-  background: var(--accent); color: var(--accent-ink, #fff); font-size: 14px; font-weight: 600; text-decoration: none;
-  box-shadow: 0 4px 14px rgba(142, 216, 198, 0.45); transition: transform 0.2s ease; }
-@media (hover: hover) { .promo-pill:hover { transform: translateY(-1px); } }
 .about-text, .faq-answer { color: var(--muted); line-height: 1.6; white-space: pre-line; }
 .about { max-width: 860px; }
 .about-name { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
@@ -1030,3 +1026,21 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; -webkit-us
 @media (min-width: 901px) {
   .hero { min-height: calc(100svh - 72px); align-content: center; background-position: center, center 70%; }
 }
+
+/* «Приведи друга» у формі запису й у кабінеті: до 5 друзів */
+.friend-inline { margin: 6px 0 4px; padding: 12px 14px; border: 1px dashed var(--accent); border-radius: 14px; display: grid; gap: 10px; }
+.fr-toggle { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+.fr-toggle input { margin-top: 4px; width: 18px; height: 18px; flex: none; }
+.fr-toggle > span { display: grid; gap: 2px; }
+.fr-one { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 12px; margin: 0 0 10px; display: grid; gap: 8px; position: relative; min-width: 0; }
+.fr-one legend { font-weight: 600; font-size: 14px; padding: 0 4px; }
+.fr-del { position: absolute; top: 2px; right: 6px; border: 0; background: transparent; font-size: 20px; line-height: 1; min-width: 32px; min-height: 32px; color: var(--muted); cursor: pointer; border-radius: 8px; }
+.fr-del:hover { background: rgba(0,0,0,0.06); color: var(--ink); }
+.fr-modes { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px; }
+.fr-modes label { display: inline-flex; gap: 6px; align-items: center; }
+.fr-book { display: grid; gap: 8px; }
+.fr-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.fr-one .input { width: 100%; min-width: 0; margin: 0; }
+.fr-reward { margin: 0; font-weight: 600; color: var(--ok); }
+.fr-more { justify-self: start; }
+@media (max-width: 480px) { .fr-row { grid-template-columns: minmax(0, 1fr); } }

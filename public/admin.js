@@ -41,6 +41,12 @@
     .filter(([k]) => started(a) || !AFTER_START.includes(k) || k === a.status)
     .map(([k, v]) => `<option value="${k}" ${k === a.status ? 'selected' : ''}>${v}</option>`).join('');
   // Позначка, якщо клієнт не прийшов 2 і більше разів поспіль
+  // Ціна запису: до сплати й знижка (перший візит, за друга, від адміністратора)
+  const DISC_KIND = { first: 'перший візит', friend: 'за друга', manual: 'від адміна' };
+  const priceCell = (r) => {
+    if (!(r.price_uah > 0)) return esc(r.price_note || '—');
+    return r.discount_pct ? `<b>${r.price_uah} грн</b> <span class="muted">(${r.price_full_uah} − ${r.discount_pct}%, ${DISC_KIND[r.discount_kind] || 'знижка'})</span>` : `${r.price_uah} грн`;
+  };
   const noShowBadge = (n) => (n >= 2 ? ` <span class="badge-warn" title="Клієнт не прийшов ${n} рази поспіль">⚠ неявок поспіль: ${n}</span>` : '');
   // Відповідь клієнта кнопками під нагадуванням у Telegram
   const clientMarks = (a) => (a.client_declined_at
@@ -206,6 +212,7 @@
   // Вкладка показує поточні й майбутні записи. Минулі не видаляються: вони в архіві
   let apptArchive = false;
   let apptWaitlist = false; // показати список очікування замість записів
+  let apptFriends = false;  // показати «Друзі клієнтів» (лише суперадмін)
   const shiftDay = (s, n) => {
     const d = new Date(s + 'T12:00:00');
     d.setDate(d.getDate() + n);
@@ -224,6 +231,26 @@
         : '<tr><td colspan="8" class="muted">У черзі нікого немає.</td></tr>') + '</tbody></table>';
     updateCloseDayCount();
   }
+  // «Друзі клієнтів»: кого привели клієнти, кому передзвонити, чи прийшов друг і чи нараховано знижку тому, хто привів
+  const FR_REWARD = { none: '—', available: 'є, ще не використана', used: 'використана' };
+  async function renderFriendInvites() {
+    const list = await api('/api/admin/friend-invites');
+    const how = (f) => (f.kind === 'lead' ? '<b>Передзвонити й записати</b>' : f.appt_date ? `Записано на ${fmtDate(f.appt_date)} ${esc(f.appt_time || '')}` + (f.appt_status === 'cancelled' ? ' (скасовано)' : f.appt_status === 'no_show' ? ' (не прийшов)' : '') : 'Запис видалено');
+    const status = (f) => (f.removed ? 'Прибрано' : f.came ? '✓ Прийшов' : 'Ще не прийшов');
+    $('#view').innerHTML = apptToolbar() +
+      '<p class="muted">Друзі, яких клієнти додали під час запису чи в кабінеті. Поки друг не прийшов (візит «Відбувся»), клієнт не може запросити нового на його місце. Коли друг прийшов, клієнт, який його привів, отримує знижку на наступний запис (відсоток — як на перший візит). «Прибрати» — якщо друг відмовився: місце звільняється, без знижки.</p>' +
+      '<table><thead><tr><th>Коли</th><th>Хто привів</th><th>Друг</th><th>Телефон</th><th>Запис</th><th>Статус</th><th>Знижка тому, хто привів</th><th></th></tr></thead><tbody>' +
+      (list.length ? list.map((f) => '<tr><td>' + esc(new Date(String(f.created_at).replace(' ', 'T') + 'Z').toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' })) + '</td><td>' + esc(f.referrer) + '</td><td>' + esc(f.friend) + '</td>' +
+        '<td><a href="tel:' + esc(f.phone.replace(/[^\d+]/g, '')) + '">' + esc(f.phone) + '</a></td><td>' + how(f) + '</td><td>' + status(f) + '</td>' +
+        '<td>' + (FR_REWARD[f.reward] || '—') + (f.reward === 'used' && f.reward_date ? ' (' + fmtDate(f.reward_date) + ')' : '') + '</td><td>' +
+        (!f.removed && !f.came && f.kind === 'lead' ? '<button class="btn btn-primary small" type="button" data-fr-book="' + f.id + '">Записати</button> ' : '') +
+        (!f.removed && !f.came ? '<button class="btn btn-ghost small danger" type="button" data-fr-del="' + f.id + '">Прибрати</button>' : '') +
+        '</td></tr>').join('')
+        : '<tr><td colspan="8" class="muted">Клієнти ще нікого не запрошували.</td></tr>') + '</tbody></table>';
+    lastFriendInvites = list;
+    updateCloseDayCount();
+  }
+  let lastFriendInvites = [];
   const apptToolbar = () => `
       <div class="toolbar">
         <button class="btn btn-primary small" type="button" id="apptNew">+ Новий запис</button>
@@ -237,10 +264,11 @@
         ${apptView !== 'table' ? masterSelect('apptMaster', apptMaster, apptView === 'week' ? '' : 'Усі майстри') : ''}
       </div>
       ${apptView !== 'table' ? '' : `<div class="toolbar">
-        <button class="btn ${!apptArchive && !apptWaitlist ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptUpcoming">Поточні і майбутні</button>
-        <button class="btn ${apptArchive && !apptWaitlist ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptArchiveBtn">Архів</button>
+        <button class="btn ${!apptArchive && !apptWaitlist && !apptFriends ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptUpcoming">Поточні і майбутні</button>
+        <button class="btn ${apptArchive && !apptWaitlist && !apptFriends ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptArchiveBtn">Архів</button>
         <button class="btn ${apptWaitlist ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptWaitBtn">Черга очікування</button>
-        ${apptWaitlist ? '' : masterSelect('apptMaster', apptMaster, 'Усі майстри')}
+        ${isSuper() ? `<button class="btn ${apptFriends ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptFriendsBtn">Друзі клієнтів</button>` : ''}
+        ${apptWaitlist || apptFriends ? '' : masterSelect('apptMaster', apptMaster, 'Усі майстри')}
       </div>`}`;
 
   let lastApptRows = [];
@@ -250,10 +278,11 @@
     if (apptForm) return renderApptForm();
     if (apptView !== 'table') return renderCalendar();
     if (apptWaitlist) return renderWaitlist();
+    if (apptFriends) return renderFriendInvites();
     const [from, to] = apptArchive ? ['2000-01-01', shiftDay(today(), -1)] : [today(), '2999-12-31'];
     $('#view').innerHTML = `${apptToolbar()}
       <table>
-        <thead><tr><th>Дата</th><th>Час</th><th>Послуга</th>${isSuper() ? '<th>Майстер</th>' : ''}<th>Клієнт</th><th>Телефон</th><th>Коментар клієнта</th><th>Статус</th></tr></thead>
+        <thead><tr><th>Дата</th><th>Час</th><th>Послуга</th>${isSuper() ? '<th>Майстер</th>' : ''}<th>Клієнт</th><th>Телефон</th><th>Коментар клієнта</th><th>Ціна</th><th>Статус</th></tr></thead>
         <tbody id="apptRows"></tbody>
       </table>`;
     let rows = await api(`/api/admin/appointments?from=${from}&to=${to}` + (isSuper() && apptMaster ? '&masterId=' + apptMaster : ''));
@@ -269,9 +298,10 @@
           <td>${esc(r.client_name)}${noShowBadge(r.noshow_streak)}${r.status === 'new' || r.status === 'confirmed' ? clientMarks(r) : ''}</td>
           <td>${esc(r.client_phone)}</td>
           <td>${esc(r.client_comment || '—')}</td>
+          <td>${priceCell(r)}${isSuper() && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-disc-appt="${r.id}" title="Змінити знижку для цього запису">Знижка</button>` : ''}</td>
           <td><select data-appt="${r.id}">${statusOptions(r)}</select>${apptArchive && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-review-link="${r.id}" title="Скопіювати посилання на форму відгуку">Відгук</button>` : ''}${!apptArchive && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-move-appt="${r.id}">Перенести</button>` : ''}</td>
         </tr>`).join('')
-      : `<tr><td colspan="8" class="muted">${apptArchive ? 'В архіві поки немає записів.' : 'Поточних і майбутніх записів немає.'}</td></tr>`;
+      : `<tr><td colspan="9" class="muted">${apptArchive ? 'В архіві поки немає записів.' : 'Поточних і майбутніх записів немає.'}</td></tr>`;
   }
 
   // Кількість незакритих минулих записів на кнопці «Закрити день»
@@ -1466,7 +1496,7 @@
       <button class="btn btn-ghost small" type="button" data-live-close aria-label="Закрити">✕</button></span>`;
     el.querySelector('[data-live-open]').addEventListener('click', () => {
       el.remove();
-      closeDay = null; absence = null; apptForm = null; apptWaitlist = false; apptArchive = false;
+      closeDay = null; absence = null; apptForm = null; apptWaitlist = false; apptFriends = false; apptArchive = false;
       if (apptView !== 'table') calDate = m.date;
       show('appointments');
     });
@@ -2229,18 +2259,18 @@ ${isSuper() ? `
         ${field('site_url', 'Адреса сайту, наприклад https://podology.example.ua', 200, 'Потрібна для посилань у Telegram: відгуки, повторний візит, список очікування')}
         ${field('review_url', 'Посилання «Залишити відгук у Google»', 300, 'Google Профіль компанії → «Попросити відгуки» → скопіювати посилання. Порожнє поле ховає кнопку.')}
         <h3 class="studio-group">Акції</h3>
-        <p class="muted">Блок «Акції» з головної сторінки прибрано. Перший рядок «Знижки на перший візит» показується плашкою зверху сторінки, а текст «Приведи друга» — у картці після запису. «Подарункові сертифікати» і «Для лікарів і салонів» на сайті зараз не показуються.</p>
+        <p class="muted">Блок «Акції» і плашку зі знижкою з головної сторінки прибрано. Знижку клієнт бачить лише під час запису, у розрахунку ціни. Текст «Приведи друга» показується у формі запису й у кабінеті клієнта. Тексти «Знижка на перший візит», «Подарункові сертифікати» і «Для лікарів і салонів» на сайті зараз не показуються.</p>
         <label class="studio-field">
           <span>Відсоток знижки на перший візит (0 — без знижки)</span>
           <input name="first_discount_pct" type="number" min="0" max="90" step="1" value="${esc(s.first_discount_pct)}" style="max-width:120px">
-          <small class="muted">Рахується сама: клієнт бачить ціну, знижку й суму до сплати, але лише якщо в нього ще не було записів, і лише на послуги з позначкою «Знижка на перший візит» у вкладці «Послуги». Текст акції нижче змінюйте разом із відсотком.</small>
+          <small class="muted">Рахується сама: клієнт бачить ціну, знижку й суму до сплати, але лише якщо в нього ще не було записів, і лише на послуги з позначкою «Знижка на перший візит» у вкладці «Послуги». Той самий відсоток — знижка за друга: клієнт отримує її на один наступний запис (будь-яка послуга), коли друг, якого він привів, прийшов на візит.</small>
         </label>
         ${area('promo_first', 'Знижка на перший візит', 400, 3, PROMO_HINT + ' Заголовок також показується плашкою на початку сторінки.')}
         ${area('promo_friend', '«Приведи друга»', 400, 3, PROMO_HINT)}
         <label class="studio-field">
           <span>Скільки друзів клієнт може записати одночасно</span>
-          <input name="friend_max_open" type="number" min="1" max="5" step="1" value="${esc(s.friend_max_open || '1')}" style="max-width:120px">
-          <small class="muted">За замовчуванням 1: після запису друга клієнт може запросити наступного, коли цей друг прийде на візит (або запис скасують). Порожній текст акції вище вимикає «Приведи друга» на сайті.</small>
+          <input name="friend_max_open" type="number" min="1" max="5" step="1" value="${esc(s.friend_max_open || '5')}" style="max-width:120px">
+          <small class="muted">За замовчуванням 5: за один запис клієнт може додати до 5 друзів. Поки друг не прийшов (навіть якщо його запис скасували чи він не прийшов), його місце зайняте; кожен друг, який прийшов, звільняє одне місце. Порожній текст акції вище вимикає «Приведи друга» на сайті.</small>
         </label>
         ${area('promo_gift', 'Подарункові сертифікати', 400, 3, PROMO_HINT)}
         ${area('partners', 'Для лікарів і салонів (співпраця)', 600, 3, PROMO_HINT)}
@@ -2477,9 +2507,33 @@ ${isSuper() ? `
         document.querySelectorAll('[data-af-time]').forEach((b) => b.classList.toggle('selected', b === e.target));
         return;
       }
-      if (e.target.id === 'apptUpcoming' || e.target.id === 'apptArchiveBtn' || e.target.id === 'apptWaitBtn') {
+      if (e.target.id === 'apptUpcoming' || e.target.id === 'apptArchiveBtn' || e.target.id === 'apptWaitBtn' || e.target.id === 'apptFriendsBtn') {
         apptWaitlist = e.target.id === 'apptWaitBtn';
+        apptFriends = e.target.id === 'apptFriendsBtn';
         apptArchive = e.target.id === 'apptArchiveBtn';
+        return await renderAppointments();
+      }
+      if (e.target.dataset.discAppt) {
+        const r = lastApptRows.find((x) => String(x.id) === e.target.dataset.discAppt);
+        const cur = r?.discount_pct || 0;
+        const v = prompt(`Знижка для запису «${r ? r.client_name + ', ' + r.service : ''}», % (від 0 до 90; 0 — без знижки).${r?.discount_kind === 'friend' ? ' Зараз тут знижка за друга: якщо змінити, вона повернеться клієнтові на наступний запис.' : ''}`, String(cur));
+        if (v === null) return;
+        const res = await api(`/api/admin/appointments/${e.target.dataset.discAppt}/discount`, { method: 'PATCH', body: { pct: Number(String(v).replace(/[%\s]/g, '')) } });
+        notify(res.pct ? `Знижка ${res.pct}%: до сплати ${res.final} грн замість ${res.full}` : `Знижку прибрано: ${res.final} грн`);
+        return await renderAppointments();
+      }
+      if (e.target.dataset.frDel) {
+        if (!confirm('Прибрати це запрошення? Клієнт зможе запросити іншого друга, знижки за цього не буде.')) return;
+        await api('/api/admin/friend-invites/' + e.target.dataset.frDel, { method: 'DELETE' });
+        notify('Запрошення прибрано');
+        return await renderFriendInvites();
+      }
+      if (e.target.dataset.frBook) {
+        const f = lastFriendInvites.find((x) => String(x.id) === e.target.dataset.frBook);
+        if (!f) return;
+        apptFriends = false;
+        apptView = 'table';
+        apptForm = { mode: 'new', preset: { name: f.friend, phone: f.phone, date: today() } };
         return await renderAppointments();
       }
       if (e.target.dataset.delWait) {

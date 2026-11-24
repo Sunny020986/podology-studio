@@ -40,9 +40,7 @@
   function renderContent(S) {
     if (S.promo_first === undefined) return; // запасні дані з config.js: блоків ще немає
 
-    const first = splitBlock(S.promo_first);
-    $('#promoPill').hidden = !first.title;
-    $('#promoPill').textContent = first.title ? `🎁 ${first.title}` : '';
+    state.promoFriend = S.promo_friend || '';
 
     // Лічильники: показуються лише заповнені числа з адмінки
     const plural = (n, one, few, many) => (n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many);
@@ -293,12 +291,13 @@
   // Знижку пропонуємо лише тому, хто ще не мав у нас записів: сервер перевіряє за номером телефону.
   const quoteState = { key: '', data: null };
   const phoneDigits = () => $('#phoneInput').value.replace(/\D/g, '');
+  const discName = (q) => (q.kind === 'friend' ? 'Знижка за друга' : 'Знижка на перший візит');
   const calcHtml = (q) => q.pct && q.full
     ? `<div class="price-calc"><div class="pc-row"><span>Ціна за прайсом</span><span>${q.full} грн</span></div>
-       <div class="pc-row pc-disc"><span>Знижка на перший візит ${q.pct}%</span><span>− ${q.discount} грн</span></div>
+       <div class="pc-row pc-disc"><span>${discName(q)} ${q.pct}%</span><span>− ${q.discount} грн</span></div>
        <div class="pc-row pc-total"><span>До сплати</span><span>${q.final} грн</span></div></div>`
     : q.pct
-      ? `<div class="price-calc"><div class="pc-row pc-disc"><span>Знижка на перший візит ${q.pct}%</span><span></span></div><div class="muted">Точну суму з урахуванням знижки назве майстер.</div></div>`
+      ? `<div class="price-calc"><div class="pc-row pc-disc"><span>${discName(q)} ${q.pct}%</span><span></span></div><div class="muted">Точну суму з урахуванням знижки назве майстер.</div></div>`
       : '';
   function renderPrice() {
     const box = $('#priceBox');
@@ -306,16 +305,39 @@
     const s = state.services.find((x) => x.id == state.serviceId);
     if (!s) { box.innerHTML = ''; return; }
     const q = quoteState.key === `${s.id}|${phoneDigits()}` ? quoteState.data : null;
+    renderFriendInline(q);
     if (q && q.eligible) { box.innerHTML = calcHtml(q); return; }
     box.innerHTML = s.price_uah > 0 || s.price_note
       ? `<div class="price-calc"><div class="pc-row pc-total"><span>Ціна</span><span>${esc(priceText(s))}</span></div></div>` : '';
   }
+  // «Приведи друга» прямо у формі: показуємо лише номеру, який ще може запросити друзів (сервер каже, скільки)
+  let friendList = null;
+  function renderFriendInline(q) {
+    const box = $('#friendInline');
+    if (!box) return;
+    const ok = !!(q && q.friend && q.friend.available && window.FriendInvite);
+    if (!ok) { box.hidden = true; $('#frOn').checked = false; $('#frList').hidden = true; $('#frList').innerHTML = ''; friendList = null; return; }
+    if (box.hidden) {
+      const pr = window.FriendInvite.promo(state.promoFriend);
+      $('#frTitle').textContent = '🤝 ' + pr.title;
+      $('#frText').textContent = pr.text;
+      box.dataset.left = q.friend.left || 1;
+      box.hidden = false;
+    }
+  }
+  $('#frOn')?.addEventListener('change', (e) => {
+    const on = e.target.checked;
+    $('#frList').hidden = !on;
+    if (on && !friendList) {
+      friendList = window.FriendInvite.list($('#frList'), { services: state.services, maxDate: state.maxDate, max: Number($('#friendInline').dataset.left) || 1, defaults: { serviceId: state.serviceId, date: state.date } });
+    }
+  });
   let quoteTimer = null;
   function refreshQuote() {
     const s = state.services.find((x) => x.id == state.serviceId);
     const d = phoneDigits();
     clearTimeout(quoteTimer);
-    if (!s || d.length < 9 || !s.first_discount) { quoteState.key = ''; renderPrice(); return; }
+    if (!s || d.length < 9) { quoteState.key = ''; renderPrice(); return; }
     const key = `${s.id}|${d}`;
     if (quoteState.key === key) { renderPrice(); return; }
     quoteTimer = setTimeout(async () => {
@@ -434,6 +456,11 @@
       comment: $('#commentInput').value,
       masterId: state.masterId ? Number(state.masterId) : undefined,
     };
+    if (friendList && $('#frOn').checked && !$('#friendInline').hidden) {
+      const err = friendList.error();
+      if (err) { msg.className = 'msg error'; msg.textContent = err; return; }
+      body.friends = friendList.data();
+    }
     // Кнопка вимкнена, поки сервер не відповів: повторне натискання не надішле другий запит
     const btn = $('#submitBtn');
     if (btn.disabled) return;
@@ -467,16 +494,15 @@
     const pr = data.price;
     if (pr && pr.full) {
       msg.textContent += pr.pct
-        ? ` Ціна: ${pr.full} грн − знижка ${pr.pct}% (${pr.discount} грн) = ${pr.final} грн.`
+        ? ` Ціна: ${pr.full} грн − ${pr.kind === 'friend' ? 'знижка за друга' : 'знижка на перший візит'} ${pr.pct}% (${pr.discount} грн) = ${pr.final} грн.`
         : ` Ціна: ${pr.full} грн.`;
     } else if (pr && pr.pct) {
-      msg.textContent += ` Знижка ${pr.pct}% на перший візит: точну суму назве майстер.`;
+      msg.textContent += ` ${pr.kind === 'friend' ? 'Знижка за друга' : 'Знижка на перший візит'} ${pr.pct}%: точну суму назве майстер.`;
     } else if (pr && pr.note) {
       msg.textContent += ` Ціна: ${pr.note}.`;
     }
-    // «Приведи друга»: пропозиція лише тому, хто ще може запросити друга
-    if (data.friendInvite?.available && window.FriendInvite) window.FriendInvite.mount($('#friendBox'), { code: data.friendInvite.code });
-    else $('#friendBox').innerHTML = '';
+    // «Приведи друга»: що вийшло з кожним другом
+    if (data.friends && window.FriendInvite) msg.textContent += ' ' + data.friends.map((f) => window.FriendInvite.resultText(f)).join(' ');
     if (data.remindLink) {
       $('#remindBtn').href = data.remindLink;
       $('#remindBtn').hidden = false;

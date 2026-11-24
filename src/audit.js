@@ -75,6 +75,8 @@ function setupAudit({ app, db, last9 }) {
       return key ? client(key) : {};
     }],
     ['PUT', /^\/archive-months$/, 'Клієнти: строк архіву'],
+    ['PATCH', /^\/appointments\/(\d+)\/discount$/, (b) => (Number(b.pct) ? `Записи: знижка ${Number(b.pct)}%` : 'Записи: знижку прибрано'), (m) => appt(m[1])],
+    ['DELETE', /^\/friend-invites\/(\d+)$/, 'Друзі клієнтів: запрошення прибрано', (m) => named('friend_invites', m[1], 'friend_name')],
     ['DELETE', /^\/conversations\/([^/]+)\/messages\/\d+$/, 'Чат: повідомлення видалено', (m) => ({ target: 'діалог ' + m[1].slice(0, 6) })],
     ['DELETE', /^\/conversations\/(.+)$/, 'Чат: діалог видалено', (m) => ({ target: 'діалог ' + m[1].slice(0, 6) })],
     ['POST', /^\/chat-templates$/, 'Чат: шаблон додано', (m, b) => ({ target: b.title })],

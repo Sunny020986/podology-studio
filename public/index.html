@@ -29,7 +29,6 @@
 <main>
   <section class="hero">
     <div class="hero-text">
-      <a class="promo-pill" id="promoPill" href="#booking" hidden></a>
       <div class="eyebrow" id="tagline"></div>
       <h1>Запишіться до подолога онлайн</h1>
       <p>Оберіть послугу, зручну дату і вільний час. Якщо маєте питання, напишіть оператору в чаті.</p>
@@ -116,6 +115,10 @@
         <input class="input" id="phoneInput" name="phone" placeholder="Телефон, наприклад +380501234567" autocomplete="tel" maxlength="30">
         <textarea class="input" id="commentInput" name="comment" rows="2" maxlength="500" placeholder="Коментар (необов'язково): побажання, що турбує, як зручніше дзвонити"></textarea>
 
+        <div class="friend-inline" id="friendInline" hidden>
+          <label class="fr-toggle"><input type="checkbox" id="frOn"> <span><b id="frTitle">🤝 Приведи друга</b><span class="fr-text" id="frText"></span></span></label>
+          <div id="frList" hidden></div>
+        </div>
         <div class="summary" id="summary"></div>
         <div id="priceBox" aria-live="polite"></div>
         <button class="btn btn-primary btn-block" type="submit" id="submitBtn" disabled>Записатися</button>
@@ -123,7 +126,6 @@
         <div class="msg" id="bookingMsg" role="status"></div>
         <a class="btn btn-ghost btn-block remind-btn" id="remindBtn" target="_blank" rel="noopener" hidden>🔔 Нагадати в Telegram за добу</a>
       </form>
-      <div id="friendBox"></div>
     </div>
   </section>
 

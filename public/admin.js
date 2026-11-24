@@ -694,7 +694,7 @@
         '<button class="btn btn-ghost small" type="button" data-cal-shift="1" aria-label="Вперед">›</button>' +
         '<input type="date" id="calDate" value="' + calDate + '"><b class="cal-title">' + title + '</b>' +
         '<button class="btn btn-ghost small" type="button" id="calPrint">Друк</button>' +
-        '<span class="muted cal-hint">Клік по вільному місцю — новий запис, по запису — перенесення.</span>' +
+        '<span class="muted cal-hint">Клік по вільному місцю — новий запис, по запису — перенесення. Запис можна перетягнути: мишкою або утримавши пальцем.</span>' +
       '</div>' +
       (cols.length && cols[0].master
         ? '<div class="cal-wrap"><div class="cal-grid" style="grid-template-columns: 56px repeat(' + cols.length + ', minmax(150px, 1fr))">' +
@@ -704,6 +704,149 @@
     window.__calMasters = data.masters;
     calPrintData = { week, from, to, masters: data.masters, appointments: data.appointments };
     updateCloseDayCount();
+  }
+
+  // ----- Перетягування записів у календарі (день і тиждень) -----
+  // Мишка: затиснути й тягнути. Телефон: утримати палець пів секунди, потім тягнути (поки тягнеш, сторінка не прокручується).
+  // Час прив'язується до 15 хв, в іншій колонці — інший майстер (день) або інший день (тиждень).
+  // Перед збереженням — підтвердження; що час вільний, остаточно перевіряє сервер.
+  const DRAG_SNAP = 15;
+  const LONG_PRESS_MS = 450;
+  let calDrag = null;
+  let calClickBlock = false; // після перетягування клік не має відкривати форму
+
+  const nowMinutes = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
+  document.addEventListener('pointerdown', (e) => {
+    const el = e.target.closest && e.target.closest('#view .cal-appt');
+    if (!el || e.button > 0 || calDrag) return;
+    const a = (window.__calAppts || []).find((x) => String(x.id) === el.dataset.calAppt);
+    if (!a || !['new', 'confirmed'].includes(a.status) || a.date < today()) return;
+    calDrag = {
+      el, a, pointerId: e.pointerId, touch: e.pointerType !== 'mouse', active: false, timer: null, raf: 0,
+      x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, body: el.parentElement,
+      dur: toMin(a.end_time) - toMin(a.start_time),
+    };
+    if (calDrag.touch) calDrag.timer = setTimeout(() => { if (calDrag && !calDrag.active) dragStart(); }, LONG_PRESS_MS);
+    window.addEventListener('pointermove', dragMove);
+    window.addEventListener('pointerup', dragEnd);
+    window.addEventListener('pointercancel', dragCancel);
+  });
+  // Поки запис тягнуть пальцем, браузер не прокручує сторінку і не показує меню
+  document.addEventListener('touchmove', (e) => { if (calDrag && calDrag.active) e.preventDefault(); }, { passive: false });
+  document.addEventListener('contextmenu', (e) => { if (calDrag) e.preventDefault(); });
+  document.addEventListener('click', (e) => {
+    if (!calClickBlock) return;
+    calClickBlock = false;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+
+  function dragMove(e) {
+    const d = calDrag;
+    if (!d || e.pointerId !== d.pointerId) return;
+    d.x = e.clientX;
+    d.y = e.clientY;
+    if (!d.active) {
+      const moved = Math.hypot(d.x - d.x0, d.y - d.y0);
+      if (d.touch) { if (moved > 10) dragCancel(); return; } // палець рушив до утримання — це прокрутка
+      if (moved < 5) return;
+      dragStart();
+    }
+    dragPlace();
+  }
+  function dragStart() {
+    const d = calDrag;
+    clearTimeout(d.timer);
+    d.active = true;
+    d.grab = d.y - d.el.getBoundingClientRect().top; // за яке місце тримають запис
+    d.el.classList.add('dragging');
+    d.label = document.createElement('div');
+    d.label.className = 'drag-time';
+    d.el.appendChild(d.label);
+    document.body.classList.add('cal-dragging');
+    if (d.touch && navigator.vibrate) navigator.vibrate(30);
+    dragPlace();
+    d.raf = requestAnimationFrame(dragAutoScroll);
+  }
+  function dragPlace() {
+    const d = calDrag;
+    const bodies = [...document.querySelectorAll('#view .cal-body')];
+    const body = bodies.find((b) => { const r = b.getBoundingClientRect(); return d.x >= r.left && d.x < r.right; }) || d.body;
+    const rect = body.getBoundingClientRect();
+    const bStart = Number(body.dataset.calStart);
+    const bEnd = bStart + Math.round(body.offsetHeight / PPM);
+    let m = Math.round((bStart + (d.y - d.grab - rect.top) / PPM) / DRAG_SNAP) * DRAG_SNAP;
+    m = Math.max(bStart, Math.min(bEnd - d.dur, m));
+    if (body !== d.body) { body.appendChild(d.el); d.body = body; }
+    d.el.style.top = (m - bStart) * PPM + 'px';
+    d.date = body.dataset.calDate;
+    d.master = Number(body.dataset.calMaster);
+    d.time = toHHMM(m);
+    d.label.textContent = d.time + '–' + toHHMM(m + d.dur);
+    // Червона рамка: перетин з іншим записом цього майстра або минулий час (остаточно вирішує сервер)
+    const clash = (window.__calAppts || []).some((x) => x.id !== d.a.id && x.master_id === d.master && x.date === d.date &&
+      x.status !== 'cancelled' && toMin(x.start_time) < m + d.dur && toMin(x.end_time) > m);
+    d.past = d.date < today() || (d.date === today() && m < nowMinutes());
+    d.el.classList.toggle('conflict', clash || d.past);
+  }
+  // Біля краю екрана сторінка (і календар убік) прокручуються самі
+  function dragAutoScroll() {
+    const d = calDrag;
+    if (!d || !d.active) return;
+    const edge = 50;
+    const step = 10;
+    const dy = d.y < edge ? -step : d.y > window.innerHeight - edge ? step : 0;
+    if (dy) window.scrollBy(0, dy);
+    let dx = 0;
+    const wrap = $('#view .cal-wrap');
+    if (wrap && wrap.scrollWidth > wrap.clientWidth) {
+      const r = wrap.getBoundingClientRect();
+      dx = d.x < r.left + 40 ? -step : d.x > r.right - 40 ? step : 0;
+      if (dx) wrap.scrollLeft += dx;
+    }
+    if (dy || dx) dragPlace();
+    d.raf = requestAnimationFrame(dragAutoScroll);
+  }
+  function dragCleanup() {
+    const d = calDrag;
+    if (!d) return null;
+    clearTimeout(d.timer);
+    cancelAnimationFrame(d.raf);
+    window.removeEventListener('pointermove', dragMove);
+    window.removeEventListener('pointerup', dragEnd);
+    window.removeEventListener('pointercancel', dragCancel);
+    document.body.classList.remove('cal-dragging');
+    if (d.label) d.label.remove();
+    d.el.classList.remove('dragging', 'conflict');
+    calDrag = null;
+    return d;
+  }
+  function dragCancel(e) {
+    if (e && calDrag && e.pointerId !== calDrag.pointerId) return;
+    const d = dragCleanup();
+    if (d && d.active) renderAppointments().catch(() => {}); // повернути запис на місце
+  }
+  async function dragEnd(e) {
+    if (!calDrag || e.pointerId !== calDrag.pointerId) return;
+    const d = dragCleanup();
+    if (!d.active) return; // звичайний клік — відкриється форма перенесення
+    calClickBlock = true;
+    setTimeout(() => { calClickBlock = false; }, 400);
+    const a = d.a;
+    if (d.date === a.date && d.time === a.start_time && d.master === a.master_id) return renderAppointments();
+    if (d.past) { notify('Цей час уже минув', true); return renderAppointments(); }
+    const mName = (id) => (window.__calMasters || []).find((m) => m.id === id)?.name || '';
+    const msg = 'Перенести запис?\n' + a.client_name + ' · ' + a.service + '\n' +
+      fmtDate(a.date) + ' ' + a.start_time + ' → ' + fmtDate(d.date) + ' ' + d.time +
+      (d.master !== a.master_id ? '\nМайстер: ' + mName(a.master_id) + ' → ' + mName(d.master) : '');
+    if (!confirm(msg)) return renderAppointments();
+    try {
+      await api('/api/admin/appointments/' + a.id + '/move', { method: 'PATCH', body: { date: d.date, time: d.time, masterId: isSuper() ? d.master : undefined } });
+      notify('Запис перенесено: ' + fmtDate(d.date) + ' о ' + d.time);
+    } catch (err) {
+      notify(err.message, true);
+    }
+    renderAppointments().catch((err) => notify(err.message, true));
   }
 
   // Рядок Telegram для майстра під вкладками
@@ -1332,7 +1475,7 @@
       const tab = document.querySelector('[data-tab].active')?.dataset.tab;
       const el = document.activeElement;
       const typing = el && $('#view').contains(el) && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
-      if (tab !== 'appointments' || apptForm || absence || closeDay || typing) return updateCloseDayCount();
+      if (tab !== 'appointments' || apptForm || absence || closeDay || typing || calDrag) return updateCloseDayCount();
       const wrap = $('.cal-wrap');
       const pos = { x: window.scrollX, y: window.scrollY, l: wrap ? wrap.scrollLeft : 0, t: wrap ? wrap.scrollTop : 0 };
       renderAppointments().then(() => {

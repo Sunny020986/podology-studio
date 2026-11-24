@@ -3,8 +3,9 @@
 // Майстер працює лише зі своїми записами; суперадмін — з усіма й може змінити майстра.
 function setupAdminAppointments(ctx) {
   const {
-    app, db, telegram, bookTx, masterFreeSlots, freeSlots, masterOffers, isValidDate, isTime,
+    app, db, telegram, bookTx, masterFreeAt, nowMin, freeSlots, masterOffers, isValidDate, isTime,
     toMin, toHHMM, todayStr, addDays, masterParam, ownsAppt, notifyMasterOf, last9, live = () => {},
+    clientChat = (a) => a.tg_chat_id,
   } = ctx;
   const ADMIN_HORIZON_DAYS = 365; // адмін може записати на рік уперед
   const fmt = (d) => d.split('-').reverse().join('.');
@@ -52,10 +53,12 @@ function setupAdminAppointments(ctx) {
     }
   });
 
-  // Перенесення: інший день, час або (для суперадміна) інший майстер
+  // Перенесення: інший день, час або (для суперадміна) інший майстер.
+  // Будь-який час із кроком 5 хв (у календарі запис перетягують із кроком 15 хв), не раніше ніж зараз:
+  // персонал може посунути запис і за кілька хвилин до початку (клієнт запізнюється).
   const moveTx = db.transaction((a, date, time, masterId) => {
-    if (!masterFreeSlots(db, date, a.duration_min, masterId, a.id).includes(time)) {
-      throw Object.assign(new Error('Цей час уже зайнятий, оберіть інший'), { status: 409 });
+    if (!masterFreeAt(db, date, time, a.duration_min, masterId, a.id, 0)) {
+      throw Object.assign(new Error('Цей час недоступний: зайнятий іншим записом, перерва, блокування або поза робочими годинами майстра'), { status: 409 });
     }
     db.prepare('UPDATE appointments SET date = ?, start_time = ?, end_time = ?, master_id = ?, reminded = 0, client_confirmed_at = NULL, client_declined_at = NULL WHERE id = ?')
       .run(date, time, toHHMM(toMin(time) + a.duration_min), masterId, a.id);
@@ -68,7 +71,8 @@ function setupAdminAppointments(ctx) {
     if (a.status === 'cancelled') return res.status(400).json({ error: 'Запис скасовано. Спершу поверніть йому статус' });
     const { date, time } = req.body || {};
     if (!inRange(date)) return res.status(400).json({ error: 'Оберіть дату від сьогодні' });
-    if (!isTime(time)) return res.status(400).json({ error: 'Оберіть час' });
+    if (!isTime(time) || toMin(time) % 5) return res.status(400).json({ error: 'Оберіть час' });
+    if (date === todayStr() && toMin(time) < nowMin()) return res.status(400).json({ error: 'Цей час уже минув' });
     const target = req.role === 'master' ? a.master_id : (masterParam(req.body?.masterId) || a.master_id);
     if (target !== a.master_id && !masterOffers(db, target, a.service_id)) {
       return res.status(400).json({ error: 'Цей майстер не виконує цю послугу або заблокований' });
@@ -81,8 +85,9 @@ function setupAdminAppointments(ctx) {
     }
     const newName = masterName(target);
     const text = `${a.service}\n${fmt(date)} о ${time}${target !== a.master_id ? '\nмайстер: ' + newName : ''}`;
-    if (a.tg_chat_id) {
-      telegram.sendToClient(a.tg_chat_id, `🔁 Ваш запис перенесено: ${a.service}, ${fmt(date)} о ${time}` +
+    const chat = clientChat(a);
+    if (chat) {
+      telegram.sendToClient(chat, `🔁 Ваш запис перенесено: ${a.service}, ${fmt(date)} о ${time}` +
         (target !== a.master_id ? `, майстер ${newName}` : '') + '. Якщо час не підходить, напишіть нам.');
     }
     telegram.notifyMaster(`🔁 Запис перенесено в адмінці\n${text}\n${a.client_name}, ${a.client_phone}`);

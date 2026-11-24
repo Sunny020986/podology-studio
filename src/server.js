@@ -468,9 +468,10 @@ setupClientPhotos({
   canSeeClient: (req, key) => req.role === 'super' || listClients(undefined, undefined, req.masterId).some((c) => c.key === key),
 });
 setupAdminAppointments({
-  app, db, telegram, bookTx, masterFreeSlots, freeSlots, masterOffers, isValidDate, isTime,
+  app, db, telegram, bookTx, masterFreeSlots, masterFreeAt, nowMin, freeSlots, masterOffers, isValidDate, isTime,
   toMin, toHHMM, todayStr, addDays, masterParam, ownsAppt, notifyMasterOf, last9,
   live: (kind, a, masters) => liveAppt(kind, a, masters),
+  clientChat: (a) => reminders.chatFor(a), // оголошено нижче; викликається лише під час запиту
 });
 // «Майстер не вийде»: масова передача, перенесення чи скасування записів (лише суперадмін).
 // setStatusTx і waitlist оголошені нижче, тому — через обгортки (викликаються вже під час запитів)

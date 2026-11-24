@@ -1760,6 +1760,39 @@ ${isSuper() ? `
       (s.topServices.length ? '<div class="top-services">' + s.topServices.map((t) =>
         '<div class="top-row"><span class="top-name">' + esc(t.name) + '</span><span class="top-bar"><span style="width:' + Math.round((t.count / maxTop) * 100) + '%"></span></span><span class="top-count">' + t.count + '</span></div>').join('') + '</div>'
         : '<p class="muted">У цьому місяці записів немає.</p>');
+    await renderMastersReport(s.month);
+  }
+
+  // Звіт по майстрах за місяць (у «Статистиці»): для розрахунку з майстрами, з вивантаженням у CSV
+  async function renderMastersReport(month) {
+    const r = await api('/api/admin/reports/masters?month=' + month);
+    const money = (n) => n ? n.toLocaleString('uk-UA') + ' грн' : '—';
+    const row = (x, bold) => `<tr${bold ? ' class="rep-total"' : ''}><td>${esc(x.master)}</td><td>${x.visits}</td><td>${money(x.revenue)}</td><td>${money(x.avg)}</td><td>${x.no_shows}</td><td>${x.cancelled}</td><td>${x.unmarked}</td></tr>`;
+    $('#view').insertAdjacentHTML('beforeend', `
+      <h3 style="margin:28px 0 4px">Звіт по майстрах</h3>
+      <p class="muted" style="margin:0 0 8px">Візит — запис «Відбувся» або минулий, ще не позначений. Сума — за ціною на момент запису.</p>
+      ${r.total.unmarked ? `<div class="warn-box" style="margin:0 0 10px">Не позначено записів: ${r.total.unmarked}. Позначте їх у «Записи» → «Закрити день», щоб звіт був точним.</div>` : ''}
+      ${r.rows.length ? `<table class="rep-table">
+        <thead><tr><th>Майстер</th><th>Візитів</th><th>Сума</th><th>Середній чек</th><th>Не прийшли</th><th>Скасовано</th><th>Не позначено</th></tr></thead>
+        <tbody>${r.rows.map((x) => row(x)).join('')}${r.rows.length > 1 ? row({ master: 'Усього', ...r.total }, true) : ''}</tbody>
+      </table>` : '<p class="muted">У цьому місяці записів немає.</p>'}
+      ${r.total.price_now ? `<p class="muted">За поточною ціною послуги пораховано візитів: ${r.total.price_now} (записи, створені до того, як сайт почав запам'ятовувати ціну).</p>` : ''}
+      <div class="toolbar" style="margin-top:10px;flex-wrap:wrap">
+        <button class="btn btn-ghost small" type="button" data-csv="masters">Вивантажити звіт (CSV)</button>
+        <button class="btn btn-ghost small" type="button" data-csv="appointments">Вивантажити всі записи місяця (CSV)</button>
+      </div>`);
+  }
+  async function downloadCsv(url, filename) {
+    const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+    if (!r.ok) throw new Error('Не вдалося вивантажити файл');
+    const href = URL.createObjectURL(await r.blob());
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(href);
   }
 
   // ----- Відгуки -----
@@ -1901,6 +1934,12 @@ ${isSuper() ? `
   view.addEventListener('click', async (e) => {
     try {
       if (e.target.id === 'calPrint') return await printSchedule();
+      if (e.target.dataset.csv) {
+        const kind = e.target.dataset.csv;
+        const q = 'month=' + statsMonth + (kind === 'appointments' && statsMaster ? '&masterId=' + statsMaster : '');
+        await downloadCsv(`/api/admin/reports/${kind}.csv?${q}`, `${kind === 'masters' ? 'zvit-maystry' : 'zapysy'}-${statsMonth}.csv`);
+        return notify('Файл завантажено');
+      }
       if (e.target.id === 'tplBtn') return tplMenuOpen($('#tplMenu').hidden);
       if (e.target.closest('[data-tpl-use]')) {
         const t = chatTemplates.find((x) => x.id === Number(e.target.closest('[data-tpl-use]').dataset.tplUse));

@@ -29,6 +29,7 @@ const { setupReassign } = require('./reassign');
 const { setupHolidays } = require('./holidays');
 const { setupClientErase } = require('./client-erase');
 const { setupChatTemplates } = require('./chat-templates');
+const { setupReports } = require('./reports');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 let materialsApply = null; // списання матеріалів при «Відбувся» (src/materials.js), задається нижче
 const DATA_DIR = path.dirname(DB_PATH);
@@ -296,8 +297,8 @@ const bookTx = db.transaction(({ service, date, time, name, phone, comment, mast
   const end = toHHMM(toMin(time) + service.duration_min);
   const remindCode = 'r' + crypto.randomBytes(9).toString('base64url');
   const info = db
-    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code, client_comment, master_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(service.id, date, time, end, name, phone, remindCode, comment ?? '', master, status);
+    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code, client_comment, master_id, status, price_uah) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(service.id, date, time, end, name, phone, remindCode, comment ?? '', master, status, service.price_uah ?? null); // ціна на момент запису — для звіту
   return { id: info.lastInsertRowid, remindCode, masterId: master };
 });
 
@@ -473,6 +474,7 @@ setupCalendar({ app, db, todayStr, addDays });
 setupCertificates({ app, db, todayStr, isValidDate });
 setupHolidays({ app, db, todayStr, isValidDate, addDays });
 setupChatTemplates({ app, db, readStudio });
+setupReports({ app, db, todayStr, hasStarted: (a) => hasStarted(a) });
 setupClientErase({
   app, db, dataDir: DATA_DIR, todayStr, last9, notifyMasterOf,
   waitlistCheck: () => waitlist.checkWaitlist().catch(() => {}),

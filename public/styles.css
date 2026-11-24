@@ -901,3 +901,7 @@ tr.is-muted td { opacity: .6; }
 .tpl-list li { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
 .tpl-list li > div { flex: 1 1 260px; min-width: 0; }
 .tpl-form { display: grid; gap: 8px; margin-top: 10px; max-width: 640px; }
+
+/* Звіт по майстрах */
+.rep-table td:not(:first-child), .rep-table th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.rep-total td { font-weight: 700; border-top: 2px solid var(--line); }

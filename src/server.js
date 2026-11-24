@@ -19,6 +19,7 @@ const { freeSlots, masterFreeSlots, pickMaster, bufferMin, isValidDate, isBookab
 
 const PORT = Number(process.env.PORT) || 3000;
 const { securityHeaders, setupHealth } = require('./security');
+const { setupClientPhotos } = require('./client-photos');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const DATA_DIR = path.dirname(DB_PATH);
 
@@ -366,6 +367,7 @@ const MASTER_ROUTES = [
   /^GET \/me$/, /^POST \/logout$/,
   /^GET \/appointments$/, /^PATCH \/appointments\/\d+$/, /^PUT \/appointments\/\d+\/note$/, /^GET \/appointments\/\d+\/review-link$/,
   /^GET \/clients$/, /^GET \/clients\/\d{9}$/, /^PUT \/clients\/\d{9}\/note$/,
+  /^GET \/clients\/\d{9}\/photos$/, /^POST \/clients\/\d{9}\/photos$/, /^GET \/client-photos\/\d+\/file$/, /^DELETE \/client-photos\/\d+$/,
   /^GET \/schedule$/, /^PUT \/schedule\/\d$/, /^GET \/breaks$/, /^POST \/breaks$/, /^DELETE \/breaks\/\d+$/,
   /^GET \/blocks$/, /^POST \/blocks$/, /^DELETE \/blocks\/\d+$/, /^GET \/waitlist$/, /^DELETE \/waitlist\/\d+$/,
   /^POST \/appointments$/, /^PATCH \/appointments\/\d+\/move$/, /^GET \/slots$/, /^GET \/calendar$/,
@@ -425,6 +427,11 @@ app.post('/api/admin/logout', (req, res) => {
   res.json({ ok: true });
 });
 setupMasterAdmin({ app, db, todayStr, dataDir: DATA_DIR, express });
+// Фото стану стоп: майстер бачить лише клієнтів, яких веде (та сама перевірка, що для нотаток про клієнта)
+setupClientPhotos({
+  app, db, dataDir: DATA_DIR,
+  canSeeClient: (req, key) => req.role === 'super' || listClients(undefined, undefined, req.masterId).some((c) => c.key === key),
+});
 setupAdminAppointments({
   app, db, telegram, bookTx, masterFreeSlots, freeSlots, masterOffers, isValidDate, isTime,
   toMin, toHHMM, todayStr, addDays, masterParam, ownsAppt, notifyMasterOf, last9,

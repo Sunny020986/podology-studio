@@ -509,6 +509,15 @@
       <textarea id="clientNote" class="input" rows="4" maxlength="5000" placeholder="Особливості, рекомендації, домовленості">${esc(c.note)}</textarea>
       <button class="btn btn-primary small" type="button" id="saveClientNote">Зберегти нотатку</button>
 
+      <h3 style="margin:28px 0 4px">Фото стану стоп</h3>
+      <p class="muted" style="margin:0 0 10px">Бачать лише адміністратор і майстер, який веде клієнта. Фото стискається в браузері, а разом із ним прибираються метадані, зокрема місце зйомки.</p>
+      <div class="toolbar">
+        <input type="date" id="cpDate" value="${today()}" aria-label="Дата фото" style="max-width:170px">
+        <input type="text" id="cpNote" maxlength="300" placeholder="Примітка, наприклад: після 2-ї процедури" aria-label="Примітка до фото" style="flex:1;min-width:200px">
+        <label class="btn btn-primary small">Додати фото<input type="file" id="cpFile" accept="image/jpeg,image/png,image/webp,image/*" hidden></label>
+      </div>
+      <div id="cpList" class="photo-grid"><span class="muted">Завантажую…</span></div>
+
       <h3 style="margin:28px 0 8px">Історія записів</h3>
       <table>
         <thead><tr><th>Дата</th><th>Час</th><th>Послуга</th><th>Статус</th><th style="width:38%">Нотатка до візиту</th><th></th></tr></thead>
@@ -521,7 +530,56 @@
           <td><button class="btn btn-ghost small" type="button" data-save-visit-note="${a.id}">Зберегти</button></td>
         </tr>`).join('')}</tbody>
       </table>`;
+    loadClientPhotos(key).catch((err) => { $('#cpList').innerHTML = '<span class="muted">' + esc(err.message) + '</span>'; });
   }
+
+  // Фото стану стоп: список і самі зображення (з токеном, тому через fetch, а не просте посилання)
+  async function loadClientPhotos(key) {
+    const box = $('#cpList');
+    const list = await api('/api/admin/clients/' + key + '/photos');
+    if (!list.length) { box.innerHTML = '<span class="muted">Фото ще немає. Додайте перше, щоб бачити динаміку лікування.</span>'; return; }
+    box.innerHTML = list.map((p) => `<figure class="photo-card">
+        <button type="button" class="photo-open" data-open-photo="${p.id}" aria-label="Відкрити фото ${fmtDate(p.taken_on)}"><img data-photo-img="${p.id}" alt="Фото стопи ${fmtDate(p.taken_on)}" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></button>
+        <figcaption><strong>${fmtDate(p.taken_on)}</strong>${p.note ? '<br>' + esc(p.note) : ''}<br><span class="muted">${esc(p.master || 'Суперадмін')}</span></figcaption>
+        ${p.can_delete ? `<button class="btn btn-ghost small danger" type="button" data-del-photo="${p.id}">Видалити</button>` : ''}
+      </figure>`).join('');
+    await Promise.all(list.map(async (p) => {
+      try {
+        const r = await fetch('/api/admin/client-photos/' + p.id + '/file', { headers: { Authorization: 'Bearer ' + token } });
+        if (!r.ok) throw new Error();
+        const img = box.querySelector('[data-photo-img="' + p.id + '"]');
+        if (img) img.src = URL.createObjectURL(await r.blob());
+      } catch { /* картка лишиться з порожнім місцем, список працює */ }
+    }));
+  }
+
+  // Завантаження: фото стискається в JPEG 1600 пікселів (це прибирає метадані), далі йде на сервер
+  $('#view').addEventListener('change', async (e) => {
+    if (e.target.id !== 'cpFile' || !e.target.files[0] || !currentClient) return;
+    const input = e.target;
+    const date = $('#cpDate').value;
+    const note = $('#cpNote').value.trim();
+    try {
+      if (!date) throw new Error('Вкажіть дату фото');
+      notify('Завантажую фото…');
+      const blob = await shrinkPhoto(input.files[0], 1600);
+      if (!blob) throw new Error('Не вдалося обробити фото. Спробуйте JPEG або PNG');
+      const r = await fetch('/api/admin/clients/' + currentClient + '/photos?date=' + encodeURIComponent(date) + '&note=' + encodeURIComponent(note), {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/jpeg', Authorization: 'Bearer ' + token },
+        body: blob,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'Не вдалося зберегти фото');
+      $('#cpNote').value = '';
+      notify('Фото збережено');
+      await loadClientPhotos(currentClient);
+    } catch (err) {
+      notify(err.message, true);
+    } finally {
+      input.value = '';
+    }
+  });
 
   async function downloadClientsCsv() {
     const r = await fetch('/api/admin/clients.csv', { headers: { Authorization: 'Bearer ' + token } });
@@ -1215,6 +1273,19 @@ ${isSuper() ? `
         await api('/api/admin/clients/' + e.target.dataset.restore + '/restore', { method: 'POST' });
         notify('Клієнта повернуто з архіву');
         return await loadClients();
+      }
+
+      if (e.target.dataset.delPhoto) {
+        if (!confirm('Видалити фото? Його не можна буде відновити.')) return;
+        await api('/api/admin/client-photos/' + e.target.dataset.delPhoto, { method: 'DELETE' });
+        notify('Фото видалено');
+        return await loadClientPhotos(currentClient);
+      }
+
+      if (e.target.closest('[data-open-photo]')) {
+        const img = e.target.closest('[data-open-photo]').querySelector('img');
+        if (img && img.src.startsWith('blob:')) window.open(img.src, '_blank', 'noopener');
+        return;
       }
 
       if (e.target.id === 'saveClientNote') {

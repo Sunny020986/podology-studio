@@ -44,6 +44,13 @@ async function main() {
     console.log(`Фото скопійовано: ${path.join(BACKUP_DIR, 'uploads')}`);
   }
 
+  // Фото стану стоп (медичні дані) лежать у data/private: без них історія лікування неповна
+  const priv = path.join(path.dirname(DB_PATH), 'private');
+  if (fs.existsSync(priv)) {
+    fs.cpSync(priv, path.join(BACKUP_DIR, 'private'), { recursive: true });
+    console.log(`Приватні фото скопійовано: ${path.join(BACKUP_DIR, 'private')}`);
+  }
+
   const cutoff = Date.now() - KEEP_DAYS * 24 * 60 * 60 * 1000;
   for (const f of fs.readdirSync(BACKUP_DIR)) {
     const full = path.join(BACKUP_DIR, f);
@@ -58,6 +65,9 @@ async function main() {
       execFileSync('scp', ['-q', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', dest, REMOTE], { stdio: 'inherit' });
       if (fs.existsSync(uploads)) {
         execFileSync('scp', ['-q', '-r', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', path.join(BACKUP_DIR, 'uploads'), REMOTE], { stdio: 'inherit' });
+      }
+      if (fs.existsSync(priv)) {
+        execFileSync('scp', ['-q', '-r', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', path.join(BACKUP_DIR, 'private'), REMOTE], { stdio: 'inherit' });
       }
     } catch (e) {
       if (e.code === 'ENOENT') throw new Error('Немає програми scp. Встановіть: apt install -y openssh-client');

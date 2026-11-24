@@ -207,10 +207,12 @@
         '<td>' + (w.telegram ? 'так' : '—') + '</td><td>' + (WAIT_STATUS[w.status] || esc(w.status)) + '</td>' +
         '<td><button class="btn btn-ghost small danger" type="button" data-del-wait="' + w.id + '">Прибрати</button></td></tr>').join('')
         : '<tr><td colspan="8" class="muted">У черзі нікого немає.</td></tr>') + '</tbody></table>';
+    updateCloseDayCount();
   }
   const apptToolbar = () => `
       <div class="toolbar">
         <button class="btn btn-primary small" type="button" id="apptNew">+ Новий запис</button>
+        <button class="btn btn-ghost small" type="button" id="apptCloseDay">Закрити день <span class="count-badge" id="closeDayCount" hidden></span></button>
         ${isSuper() ? '<button class="btn btn-ghost small" type="button" id="apptAbsence">Майстер не вийде</button>' : ''}
         <span class="seg" role="group" aria-label="Вигляд">
           <button class="btn ${apptView === 'table' ? 'btn-primary' : 'btn-ghost'} small" type="button" id="viewTable">Таблиця</button>
@@ -228,6 +230,7 @@
 
   let lastApptRows = [];
   async function renderAppointments() {
+    if (closeDay) return renderCloseDay();
     if (absence) return renderAbsence();
     if (apptForm) return renderApptForm();
     if (apptView !== 'table') return renderCalendar();
@@ -241,6 +244,7 @@
     let rows = await api(`/api/admin/appointments?from=${from}&to=${to}` + (isSuper() && apptMaster ? '&masterId=' + apptMaster : ''));
     if (apptArchive) rows = rows.slice().reverse(); // в архіві найновіші зверху
     lastApptRows = rows;
+    updateCloseDayCount();
     $('#apptRows').innerHTML = rows.length
       ? rows.map((r) => `<tr>
           <td>${fmtDate(r.date)}</td>
@@ -253,6 +257,41 @@
           <td><select data-appt="${r.id}">${statusOptions(r)}</select>${apptArchive && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-review-link="${r.id}" title="Скопіювати посилання на форму відгуку">Відгук</button>` : ''}${!apptArchive && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-move-appt="${r.id}">Перенести</button>` : ''}</td>
         </tr>`).join('')
       : `<tr><td colspan="8" class="muted">${apptArchive ? 'В архіві поки немає записів.' : 'Поточних і майбутніх записів немає.'}</td></tr>`;
+  }
+
+  // Кількість незакритих минулих записів на кнопці «Закрити день»
+  async function updateCloseDayCount() {
+    try {
+      const { count } = await api('/api/admin/close-day/count' + (isSuper() && apptMaster ? '?masterId=' + apptMaster : ''));
+      const b = $('#closeDayCount');
+      if (b) { b.textContent = count; b.hidden = !count; }
+    } catch { /* лічильник необов'язковий */ }
+  }
+
+  // ----- «Закрити день»: позначити минулі записи «Відбувся» / «Не прийшов» / «Скасовано» за раз -----
+  let closeDay = null; // null | { rows }
+  const CLOSE_OPTS = [['done', 'Відбувся'], ['no_show', 'Не прийшов'], ['cancelled', 'Скасовано'], ['keep', 'Лишити як є']];
+  async function renderCloseDay() {
+    closeDay.rows = await api('/api/admin/close-day' + (isSuper() && apptMaster ? '?masterId=' + apptMaster : ''));
+    const rows = closeDay.rows;
+    $('#view').innerHTML = `<button class="btn btn-ghost small" type="button" id="cdBack">← До записів</button>
+      <h3 style="margin:14px 0 4px">Закрити день</h3>
+      <p class="muted" style="margin:0 0 10px">Записи, які вже минули, але не позначені (за останні 60 днів). «Відбувся» списує матеріали й рахується у статистиці, «Не прийшов» — неявка. Клієнтам нічого не надсилається.</p>
+      ${rows.length ? `<div class="toolbar"><span class="muted">Позначити всі:</span>
+          <button class="btn btn-ghost small" type="button" data-cd-all="done">Відбувся</button>
+          <button class="btn btn-ghost small" type="button" data-cd-all="no_show">Не прийшов</button></div>
+        <table class="cd-table">
+          <thead><tr><th>Коли</th><th>Послуга</th>${isSuper() ? '<th>Майстер</th>' : ''}<th>Клієнт</th><th>Статус</th></tr></thead>
+          <tbody>${rows.map((r) => `<tr data-cd-row="${r.id}">
+            <td>${fmtDate(r.date)}, ${r.start_time}–${r.end_time}</td>
+            <td>${esc(r.service)}</td>
+            ${isSuper() ? `<td>${esc(r.master || '—')}</td>` : ''}
+            <td>${esc(r.client_name)}<br><small class="muted">${esc(r.client_phone)}</small></td>
+            <td><select class="input cd-status" aria-label="Статус запису ${esc(r.client_name)}">${CLOSE_OPTS.map(([v, l]) => `<option value="${v}" ${v === 'done' ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
+          </tr>`).join('')}</tbody>
+        </table>
+        <div class="toolbar" style="margin-top:12px"><button class="btn btn-primary" type="button" id="cdSave">Зберегти</button></div>`
+      : '<p>Усі минулі записи вже позначені.</p>'}`;
   }
 
   // ----- «Майстер не вийде»: передати, перенести або скасувати його записи за раз (лише суперадмін) -----
@@ -626,6 +665,7 @@
         : '<p class="muted">Немає активних майстрів для показу.</p>');
     window.__calAppts = data.appointments; // для відкриття форми перенесення
     window.__calMasters = data.masters;
+    updateCloseDayCount();
   }
 
   // Рядок Telegram для майстра під вкладками
@@ -1737,6 +1777,26 @@ ${isSuper() ? `
 
   view.addEventListener('click', async (e) => {
     try {
+      if (e.target.closest('#apptCloseDay')) { closeDay = {}; return await renderCloseDay(); }
+      if (e.target.id === 'cdBack') { closeDay = null; return await renderAppointments(); }
+      if (e.target.dataset.cdAll) {
+        document.querySelectorAll('.cd-status').forEach((s) => { s.value = e.target.dataset.cdAll; });
+        return;
+      }
+      if (e.target.id === 'cdSave') {
+        const items = [...document.querySelectorAll('[data-cd-row]')]
+          .map((row) => ({ id: Number(row.dataset.cdRow), status: row.querySelector('.cd-status').value }))
+          .filter((x) => x.status !== 'keep');
+        if (!items.length) return notify('Нічого не обрано');
+        e.target.disabled = true;
+        try {
+          const r = await api('/api/admin/close-day', { method: 'POST', body: { items } });
+          const c = r.counts;
+          notify(`Збережено: відбулось ${c.done}, не прийшли ${c.no_show}, скасовано ${c.cancelled}` + (c.failed ? `, не вдалося ${c.failed}` : ''), c.failed > 0);
+          return await renderCloseDay();
+        } finally { e.target.disabled = false; }
+      }
+
       if (e.target.id === 'apptAbsence') {
         const first = masters.find((m) => m.status === 'active') || masters[0];
         absence = { step: 'form', masterId: first ? first.id : null, from: today(), to: today(), block: true, note: '' };

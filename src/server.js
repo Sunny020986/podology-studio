@@ -380,6 +380,7 @@ app.use('/api/admin', requireAdmin);
 // Майстрові доступні лише його записи, клієнти, графік, блокування й черга. Решта — тільки суперадміну.
 const MASTER_ROUTES = [
   /^GET \/me$/, /^POST \/logout$/,
+  /^GET \/close-day$/, /^GET \/close-day\/count$/, /^POST \/close-day$/,
   /^GET \/appointments$/, /^PATCH \/appointments\/\d+$/, /^PUT \/appointments\/\d+\/note$/, /^GET \/appointments\/\d+\/review-link$/,
   /^GET \/clients$/, /^GET \/clients\/\d{9}$/, /^PUT \/clients\/\d{9}\/note$/, /^GET \/client-search$/,
   /^GET \/clients\/\d{9}\/course$/, /^GET \/clients\/\d{9}\/photos$/, /^POST \/clients\/\d{9}\/photos$/, /^GET \/clients\/\d{9}\/photo-consent$/, /^PUT \/clients\/\d{9}\/photo-consent$/, /^GET \/client-photos\/\d+\/file$/, /^DELETE \/client-photos\/\d+$/,
@@ -584,6 +585,51 @@ app.patch('/api/admin/appointments/:id', (req, res) => {
     if (e.status) return res.status(e.status).json({ error: e.message });
     throw e;
   }
+});
+
+// «Закрити день»: записи, що вже почались, але досі «Нова» чи «Підтверджено» (за останні CLOSE_DAYS днів).
+// Позначаються за раз: «Відбувся» (списує матеріали, рахується у статистиці), «Не прийшов» або «Скасовано».
+// Клієнтам нічого не надсилається — це минулі записи. Майстер бачить і закриває лише свої.
+const CLOSE_DAYS = 60;
+function unclosedAppts(req) {
+  const today = todayStr();
+  const mid = scopeMaster(req);
+  return db.prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.status, a.client_name, a.client_phone, a.master_id,
+                            m.name AS master, s.name AS service
+                     FROM appointments a JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id
+                     WHERE a.status IN ('new', 'confirmed') AND a.date BETWEEN date(?, '-${CLOSE_DAYS} day') AND ?
+                       AND (? IS NULL OR a.master_id = ?)
+                     ORDER BY a.date, a.start_time`)
+    .all(today, today, mid, mid)
+    .filter(hasStarted);
+}
+app.get('/api/admin/close-day/count', (req, res) => res.json({ count: unclosedAppts(req).length }));
+app.get('/api/admin/close-day', (req, res) => res.json(unclosedAppts(req)));
+app.post('/api/admin/close-day', (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : null;
+  if (!items) return res.status(400).json({ error: 'Немає списку записів' });
+  if (items.length > 500) return res.status(400).json({ error: 'Забагато записів за раз' });
+  const results = items.map((it) => {
+    const id = Number(it?.id);
+    const status = it?.status;
+    if (!['done', 'no_show', 'cancelled'].includes(status)) return { id, ok: false, error: 'Некоректний статус' };
+    const a = db.prepare('SELECT id, date, start_time, status FROM appointments WHERE id = ?').get(id);
+    if (!a || !ownsAppt(req, id)) return { id, ok: false, error: 'Запис не знайдено' };
+    if (!['new', 'confirmed'].includes(a.status)) return { id, ok: false, error: 'Запис уже позначено' };
+    if (!hasStarted(a)) return { id, ok: false, error: 'Запис ще не почався' };
+    try {
+      setStatusTx(id, status);
+      return { id, ok: true, status };
+    } catch (e) {
+      return { id, ok: false, error: e.message };
+    }
+  });
+  const ok = results.filter((r) => r.ok);
+  res.json({
+    results,
+    counts: { done: ok.filter((r) => r.status === 'done').length, no_show: ok.filter((r) => r.status === 'no_show').length,
+      cancelled: ok.filter((r) => r.status === 'cancelled').length, failed: results.length - ok.length },
+  });
 });
 
 // ---------- Нагадування клієнтам у Telegram ----------

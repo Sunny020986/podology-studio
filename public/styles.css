@@ -862,3 +862,9 @@ tr.is-muted td { opacity: .6; }
 
 /* Картка клієнта: дії під іменем */
 .client-actions { margin: 10px 0 0; flex-wrap: wrap; }
+
+/* «Закрити день» */
+.count-badge { display: inline-block; min-width: 20px; padding: 0 6px; margin-left: 4px; border-radius: 999px; background: #E3A0A0; color: #fff; font-size: 12px; line-height: 20px; text-align: center; }
+.count-badge[hidden] { display: none; }
+.cd-table .cd-status { min-width: 150px; }
+@media (max-width: 700px) { .cd-table .cd-status { min-width: 0; width: 100%; } }

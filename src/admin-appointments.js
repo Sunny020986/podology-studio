@@ -57,7 +57,7 @@ function setupAdminAppointments(ctx) {
     if (!masterFreeSlots(db, date, a.duration_min, masterId, a.id).includes(time)) {
       throw Object.assign(new Error('Цей час уже зайнятий, оберіть інший'), { status: 409 });
     }
-    db.prepare('UPDATE appointments SET date = ?, start_time = ?, end_time = ?, master_id = ?, reminded = 0 WHERE id = ?')
+    db.prepare('UPDATE appointments SET date = ?, start_time = ?, end_time = ?, master_id = ?, reminded = 0, client_confirmed_at = NULL, client_declined_at = NULL WHERE id = ?')
       .run(date, time, toHHMM(toMin(time) + a.duration_min), masterId, a.id);
   });
   app.patch('/api/admin/appointments/:id/move', (req, res) => {
@@ -114,7 +114,8 @@ function setupAdminAppointments(ctx) {
       breaks: db.prepare(`SELECT master_id, weekday, start_time, end_time, note FROM breaks WHERE master_id IN ${inList}`).all(...ids),
       blocks: db.prepare(`SELECT master_id, date, start_time, end_time, note FROM blocks WHERE master_id IN ${inList} AND date BETWEEN ? AND ?`).all(...ids, from, to),
       holidays: db.prepare('SELECT date, note FROM studio_holidays WHERE date BETWEEN ? AND ?').all(from, to),
-      appointments: db.prepare(`SELECT a.id, a.master_id, a.date, a.start_time, a.end_time, a.status, a.client_name, a.client_phone, a.client_comment, a.service_id, s.name AS service
+      appointments: db.prepare(`SELECT a.id, a.master_id, a.date, a.start_time, a.end_time, a.status, a.client_name, a.client_phone, a.client_comment, a.service_id,
+          a.client_confirmed_at, a.client_declined_at, s.name AS service
         FROM appointments a JOIN services s ON s.id = a.service_id
         WHERE a.master_id IN ${inList} AND a.date BETWEEN ? AND ? AND a.status != 'cancelled' ORDER BY a.date, a.start_time`).all(...ids, from, to),
     });

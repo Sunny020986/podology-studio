@@ -175,7 +175,7 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
     const toMinutes = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
     const endMin = toMinutes(time) + a.duration_min;
     const end = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
-    db.prepare('UPDATE appointments SET date = ?, start_time = ?, end_time = ?, reminded = 0 WHERE id = ?').run(date, time, end, a.id);
+    db.prepare('UPDATE appointments SET date = ?, start_time = ?, end_time = ?, reminded = 0, client_confirmed_at = NULL, client_declined_at = NULL WHERE id = ?').run(date, time, end, a.id);
     live('moved', { ...a, date, start_time: time, client_name: req.account.name }); // адмінка наживо
     notifyMaster(`🔁 Клієнт переніс запис\n${a.service}\n${date.split('-').reverse().join('.')} о ${time}\n${req.account.name}, ${req.account.phone}`);
     notifyMasterOf(a.master_id, `🔁 Клієнт переніс запис до вас\n${a.service}\n${date.split('-').reverse().join('.')} о ${time}\n${req.account.name}, ${req.account.phone}`);

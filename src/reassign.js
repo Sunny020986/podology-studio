@@ -195,7 +195,7 @@ function setupReassign(ctx) {
       if (!m) throw new Error('Цей майстер не виконує цю послугу або заблокований');
       db.transaction(() => {
         if (!masterFreeAt(db, date, time, dur, mid, a.id)) throw new Error(`Час ${dayLabel(date)} о ${time} у майстра ${m.name} уже зайнятий`);
-        db.prepare('UPDATE appointments SET date = ?, start_time = ?, end_time = ?, master_id = ?, reminded = 0 WHERE id = ?')
+        db.prepare('UPDATE appointments SET date = ?, start_time = ?, end_time = ?, master_id = ?, reminded = 0, client_confirmed_at = NULL, client_declined_at = NULL WHERE id = ?')
           .run(date, time, toHHMM(toMin(time) + dur), mid, a.id);
       })();
       if (chat) {

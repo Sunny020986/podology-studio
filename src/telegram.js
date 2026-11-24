@@ -72,6 +72,7 @@ function createTelegram(db) {
   let poll = null; // { token, stop }
   let botUsername = '';
   let startHandler = () => null; // (код зі /start, чат) → текст відповіді або null
+  let callbackHandler = () => null; // (дані кнопки, чат) → { answer, text?, buttons? } або null
 
   function remember(chat) {
     const name = chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(' ') || chat.username || String(chat.id);
@@ -80,7 +81,28 @@ function createTelegram(db) {
     while (recentChats.size > 50) recentChats.delete(recentChats.keys().next().value);
   }
 
+  // Натиснута кнопка під повідомленням бота: відповідь (спливаючий текст) і, якщо треба, новий текст і кнопки
+  async function handleCallback(token, q) {
+    const chatId = String(q.message?.chat?.id ?? q.from?.id ?? '');
+    let r = null;
+    try {
+      r = await callbackHandler(String(q.data || ''), chatId);
+    } catch (e) {
+      console.error('Telegram (кнопка):', e.message);
+      r = { answer: 'Не вдалося. Спробуйте ще раз або подзвоніть нам' };
+    }
+    r = r || { answer: 'Ця кнопка вже не діє' };
+    await call(token, 'answerCallbackQuery', { callback_query_id: q.id, text: r.answer || '' }).catch(() => {});
+    if (r.text && q.message) {
+      await call(token, 'editMessageText', {
+        chat_id: chatId, message_id: q.message.message_id, text: r.text, disable_web_page_preview: true,
+        reply_markup: { inline_keyboard: r.buttons || [] },
+      }).catch(() => {}); // «message is not modified» та інше — не страшно
+    }
+  }
+
   async function handleUpdate(token, u) {
+    if (u.callback_query) return handleCallback(token, u.callback_query);
     const m = u.message;
     if (!m?.chat || m.chat.type !== 'private') return;
     remember(m.chat);
@@ -112,7 +134,7 @@ function createTelegram(db) {
       while (!state.stopped) {
         try {
           const updates = await call(token, 'getUpdates',
-            { offset, timeout: POLL_TIMEOUT_S, allowed_updates: ['message'] }, (POLL_TIMEOUT_S + 10) * 1000);
+            { offset, timeout: POLL_TIMEOUT_S, allowed_updates: ['message', 'callback_query'] }, (POLL_TIMEOUT_S + 10) * 1000);
           for (const u of updates) {
             offset = u.update_id + 1;
             await handleUpdate(token, u);
@@ -156,11 +178,14 @@ function createTelegram(db) {
     return [...chats.values()];
   }
 
-  async function send(text, toChat) {
+  // buttons — рядки кнопок під повідомленням: [[{ text, callback_data }]]
+  async function send(text, toChat, buttons) {
     const token = get('tg_token');
     const chatId = toChat || get('tg_chat_id');
     if (!token || !chatId) return false;
-    await call(token, 'sendMessage', { chat_id: chatId, text, disable_web_page_preview: true });
+    const body = { chat_id: chatId, text, disable_web_page_preview: true };
+    if (buttons) body.reply_markup = { inline_keyboard: buttons };
+    await call(token, 'sendMessage', body);
     return true;
   }
 
@@ -191,8 +216,8 @@ function createTelegram(db) {
     fire(`💬 Нове питання в чаті (діалог ${conversationId.slice(0, 6)})\n\n${preview}\n\nВідповісти: адмінка → вкладка «Чат»`);
   }
 
-  // Повідомлення клієнту (нагадування, скасування). Повертає true, якщо надіслано.
-  const sendToClient = (chatId, text) => send(text, chatId).catch((e) => {
+  // Повідомлення клієнту (нагадування, скасування), за потреби з кнопками. Повертає true, якщо надіслано.
+  const sendToClient = (chatId, text, buttons) => send(text, chatId, buttons).catch((e) => {
     console.error('Telegram (клієнт):', explain(e));
     return false;
   });
@@ -201,12 +226,13 @@ function createTelegram(db) {
   const remindLink = (code) => (botUsername && status().configured ? `https://t.me/${botUsername}?start=${code}` : null);
 
   const onStart = (fn) => { startHandler = fn; };
+  const onCallback = (fn) => { callbackHandler = fn; };
 
   startPolling();
 
   return {
     status, save, clear, detect, test, newAppointment, newChatMessage,
-    sendToClient, remindLink, onStart, fmtDate, notifyMaster: (text) => fire(text),
+    sendToClient, remindLink, onStart, onCallback, fmtDate, notifyMaster: (text) => fire(text),
   };
 }
 

@@ -926,3 +926,7 @@ tr.is-muted td { opacity: .6; }
   .admin-top { gap: 8px; flex-wrap: wrap; }
   .admin-top h2 { min-width: 0; overflow-wrap: anywhere; }
 }
+
+/* Відповідь клієнта кнопками в Telegram */
+.badge-ok { display: inline-block; margin-left: 6px; padding: 2px 8px; border-radius: 999px; background: #E3F4EC; color: #1F6B4A; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.cal-appt.declined { border-style: dashed; border-color: #D98080; border-left-color: #D98080; }

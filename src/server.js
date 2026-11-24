@@ -28,6 +28,7 @@ const { setupCertificates } = require('./certificates');
 const { setupReassign } = require('./reassign');
 const { setupHolidays } = require('./holidays');
 const { setupClientErase } = require('./client-erase');
+const { setupReminderButtons } = require('./reminder-buttons');
 const { setupChatTemplates } = require('./chat-templates');
 const { setupReports } = require('./reports');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -564,7 +565,7 @@ app.get('/api/admin/appointments', (req, res) => {
   res.json(
     db
       .prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.client_name, a.client_phone, a.status, a.client_comment,
-                       a.master_id, a.service_id, m.name AS master, s.name AS service
+                       a.master_id, a.service_id, a.client_confirmed_at, a.client_declined_at, m.name AS master, s.name AS service
                 FROM appointments a JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id
                 WHERE a.date BETWEEN ? AND ? AND (? IS NULL OR a.master_id = ?) ORDER BY a.date, a.start_time`)
       .all(from, to, scopeMaster(req), scopeMaster(req))
@@ -671,6 +672,15 @@ const studioLine = () => {
   return [[s.city, s.address].filter(Boolean).join(', '), s.phone].filter(Boolean).join(' · ');
 };
 
+// Кнопки «Буду» / «Скасувати» під нагадуванням (src/reminder-buttons.js)
+const reminders = setupReminderButtons({
+  db, telegram, changeHours: readChangeHours, todayStr, last9, notifyMasterOf,
+  setStatus: (id, status) => setStatusTx(id, status),
+  live: (kind, a) => liveAppt(kind, a),
+  waitlistCheck: () => waitlist.checkWaitlist().catch(() => {}),
+  readStudio: () => readStudio(),
+});
+
 // Клієнт натиснув «Start» за посиланням із сайту: прив'язуємо його чат до запису
 telegram.onStart((code, chatId) => {
   if (code.startsWith('acc_')) return accounts.linkTelegram(code.slice(4), chatId);
@@ -689,26 +699,30 @@ telegram.onStart((code, chatId) => {
     (studioLine() ? `\n${studioLine()}` : '');
 });
 
+// Нагадування за добу: чат, прив'язаний до запису, або чат кабінету клієнта з тим самим телефоном
 async function sendDueReminders() {
   const rows = db.prepare(`SELECT a.*, s.name AS service FROM appointments a JOIN services s ON s.id = a.service_id
-    WHERE a.tg_chat_id IS NOT NULL AND a.reminded = 0 AND a.status NOT IN ('cancelled', 'no_show') AND a.date BETWEEN ? AND date(?, '+2 day')`)
+    WHERE a.reminded = 0 AND a.status IN ('new', 'confirmed') AND a.date BETWEEN ? AND date(?, '+2 day')`)
     .all(todayStr(), todayStr());
   for (const a of rows) {
     const left = msUntil(a.date, a.start_time);
     if (left <= 0 || left > REMIND_BEFORE_MS) continue;
+    const chat = reminders.chatFor(a);
+    if (!chat) continue;
     db.prepare('UPDATE appointments SET reminded = 1 WHERE id = ?').run(a.id); // спершу позначка: двічі не нагадаємо
-    await telegram.sendToClient(a.tg_chat_id,
-      `🔔 Нагадування: ${a.date === todayStr() ? 'сьогодні' : 'завтра'}, ${telegram.fmtDate(a.date)} о ${a.start_time}, у вас ${a.service}.\n` +
-      (studioLine() ? `${studioLine()}\n` : '') + 'Якщо плани змінилися, будь ласка, повідомте нам заздалегідь.');
+    const r = reminders.reminder(a);
+    await telegram.sendToClient(chat, r.text, r.buttons);
   }
 }
-setInterval(() => sendDueReminders().catch((e) => console.error('Нагадування:', e.message)), 5 * 60 * 1000).unref();
-setTimeout(() => sendDueReminders().catch(() => {}), 15000).unref();
+// Перевірка щоп'ять хвилин; REMINDER_* — лише для автотестів
+setInterval(() => sendDueReminders().catch((e) => console.error('Нагадування:', e.message)), Number(process.env.REMINDER_INTERVAL_MS) || 5 * 60 * 1000).unref();
+setTimeout(() => sendDueReminders().catch(() => {}), Number(process.env.REMINDER_DELAY_MS) || 15000).unref();
 
 function notifyClientCancelled(id) {
   const a = apptForClient('a.id = ?', id);
-  if (!a?.tg_chat_id || msUntil(a.date, a.start_time) <= 0) return;
-  telegram.sendToClient(a.tg_chat_id,
+  const chat = a && reminders.chatFor(a);
+  if (!chat || msUntil(a.date, a.start_time) <= 0) return;
+  telegram.sendToClient(chat,
     `Ваш запис ${a.service}, ${telegram.fmtDate(a.date)} о ${a.start_time}, скасовано.` +
     (readStudio().phone ? ` Щоб обрати інший час, запишіться на сайті або подзвоніть: ${readStudio().phone}.` : ' Щоб обрати інший час, запишіться на сайті.'));
 }

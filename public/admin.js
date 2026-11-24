@@ -42,6 +42,10 @@
     .map(([k, v]) => `<option value="${k}" ${k === a.status ? 'selected' : ''}>${v}</option>`).join('');
   // Позначка, якщо клієнт не прийшов 2 і більше разів поспіль
   const noShowBadge = (n) => (n >= 2 ? ` <span class="badge-warn" title="Клієнт не прийшов ${n} рази поспіль">⚠ неявок поспіль: ${n}</span>` : '');
+  // Відповідь клієнта кнопками під нагадуванням у Telegram
+  const clientMarks = (a) => (a.client_declined_at
+    ? ' <span class="badge-warn" title="Клієнт натиснув у Telegram, що не прийде. Запис не скасовано: скасуйте його, щоб звільнити час">⚠ попередив, що не прийде</span>'
+    : a.client_confirmed_at ? ' <span class="badge-ok" title="Клієнт підтвердив візит кнопкою в Telegram">✓ підтвердив візит</span>' : '');
   const DAYS_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
   const DAYS = ['Понеділок', 'Вівторок', 'Середа', 'Четвер', "П'ятниця", 'Субота', 'Неділя'];
 
@@ -251,7 +255,7 @@
           <td>${r.start_time}–${r.end_time}</td>
           <td>${esc(r.service)}</td>
           ${isSuper() ? `<td>${esc(r.master || '—')}</td>` : ''}
-          <td>${esc(r.client_name)}${noShowBadge(r.noshow_streak)}</td>
+          <td>${esc(r.client_name)}${noShowBadge(r.noshow_streak)}${r.status === 'new' || r.status === 'confirmed' ? clientMarks(r) : ''}</td>
           <td>${esc(r.client_phone)}</td>
           <td>${esc(r.client_comment || '—')}</td>
           <td><select data-appt="${r.id}">${statusOptions(r)}</select>${apptArchive && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-review-link="${r.id}" title="Скопіювати посилання на форму відгуку">Відгук</button>` : ''}${!apptArchive && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-move-appt="${r.id}">Перенести</button>` : ''}</td>
@@ -666,9 +670,12 @@
       }
       for (const a of data.appointments.filter((x) => x.master_id === c.master.id && x.date === c.date)) {
         const hgt = Math.max(22, y(a.end_time) - y(a.start_time));
-        inner += '<button type="button" class="cal-appt st-' + a.status + '" data-cal-appt="' + a.id + '" style="top:' + y(a.start_time) + 'px;height:' + hgt + 'px" title="' +
-          esc(a.start_time + '–' + a.end_time + ' ' + a.client_name + ', ' + a.client_phone + ' · ' + a.service) + '">' +
-          '<b>' + a.start_time + '</b> ' + esc(a.client_name) + '<span>' + esc(a.service) + '</span></button>';
+        const active = a.status === 'new' || a.status === 'confirmed';
+        const mark = !active ? '' : a.client_declined_at ? 'declined' : a.client_confirmed_at ? 'sure' : '';
+        inner += '<button type="button" class="cal-appt st-' + a.status + (mark ? ' ' + mark : '') + '" data-cal-appt="' + a.id + '" style="top:' + y(a.start_time) + 'px;height:' + hgt + 'px" title="' +
+          esc(a.start_time + '–' + a.end_time + ' ' + a.client_name + ', ' + a.client_phone + ' · ' + a.service +
+            (mark === 'declined' ? ' · клієнт попередив, що не прийде' : mark === 'sure' ? ' · клієнт підтвердив візит у Telegram' : '')) + '">' +
+          '<b>' + a.start_time + '</b> ' + (mark === 'declined' ? '⚠ ' : mark === 'sure' ? '✓ ' : '') + esc(a.client_name) + '<span>' + esc(a.service) + '</span></button>';
       }
       const head = week
         ? DAY_NAMES[wd] + ' ' + c.date.slice(8, 10) + '.' + c.date.slice(5, 7)
@@ -1241,7 +1248,9 @@
     cancelled: (m) => `❌ Клієнт скасував запис: ${m.client_name}, ${fmtDate(m.date)} о ${m.start_time}`,
     moved: (m) => `🔁 Клієнт переніс запис: ${m.client_name}, тепер ${fmtDate(m.date)} о ${m.start_time}`,
     confirmed: (m) => `✅ Клієнт підтвердив візит: ${m.client_name}, ${fmtDate(m.date)} о ${m.start_time}`,
+    declined: (m) => `⚠️ Клієнт попередив, що не прийде: ${m.client_name}, ${fmtDate(m.date)} о ${m.start_time}. Запис не скасовано`,
   };
+  const LIVE_SAD = ['cancelled', 'declined'];
 
   function audio() {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
@@ -1290,7 +1299,7 @@
   function liveToast(m) {
     const box = $('#liveToasts');
     const el = document.createElement('div');
-    el.className = 'live-toast' + (m.kind === 'cancelled' ? ' cancel' : '');
+    el.className = 'live-toast' + (LIVE_SAD.includes(m.kind) ? ' cancel' : '');
     el.innerHTML = `<span class="live-text">${esc(LIVE_TEXT[m.kind](m))}</span>
       <span class="live-actions"><button class="btn btn-primary small" type="button" data-live-open>Відкрити</button>
       <button class="btn btn-ghost small" type="button" data-live-close aria-label="Закрити">✕</button></span>`;
@@ -1309,7 +1318,7 @@
   function liveAppt(m) {
     if (LIVE_TEXT[m.kind]) {
       liveToast(m);
-      if (m.kind !== 'confirmed') beep(m.kind === 'cancelled');
+      if (m.kind !== 'confirmed') beep(LIVE_SAD.includes(m.kind));
       if (document.hidden) { unseen += 1; document.title = `(${unseen}) ${baseTitle}`; }
     }
     liveRefresh();

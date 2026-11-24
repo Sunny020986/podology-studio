@@ -13,7 +13,7 @@ const { setupWaitlist } = require('./waitlist');
 const { setupStats } = require('./stats');
 const { setupTips } = require('./tips');
 const { setupAdminAppointments } = require('./admin-appointments');
-const { activeMasters, masterOffers, checkPassword: checkMasterPassword, sha, setupMasterAdmin } = require('./masters');
+const { activeMasters, masterOffers, checkPassword: checkMasterPassword, hashPassword: hashStaffPassword, sha, setupMasterAdmin } = require('./masters');
 const { localBusinessJsonLd, setupSeo } = require('./seo');
 const { nowMin, freeSlots, masterFreeSlots, masterFreeAt, workHours, pickMaster, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
@@ -29,6 +29,8 @@ const { setupReassign } = require('./reassign');
 const { setupHolidays } = require('./holidays');
 const { setupClientErase } = require('./client-erase');
 const { setupReminderButtons } = require('./reminder-buttons');
+const { adminBySession: adminSessionLookup, setupAdminUsers } = require('./admin-users');
+const { setupAudit } = require('./audit');
 const { setupChatTemplates } = require('./chat-templates');
 const { setupReports } = require('./reports');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -106,11 +108,17 @@ function masterBySession(token) {
   return (token && db.prepare(`SELECT m.id, m.name FROM master_sessions ss JOIN masters m ON m.id = ss.master_id
     WHERE ss.token_hash = ? AND ss.expires_at > ? AND m.status = 'active'`).get(sha(token), Date.now())) || null;
 }
-// Хто відкрив канал адмінки: адміністратор (чат і всі записи) чи майстер (лише події своїх записів)
+// Адміністратор з окремим входом (src/admin-users.js) за токеном сесії (або null)
+const adminBySession = (token) => adminSessionLookup(db, sha, token);
+const OWNER = { kind: 'owner', id: null, name: 'Власник' };
+
+// Хто відкрив канал адмінки: власник чи адміністратор (чат і всі записи) або майстер (лише події своїх записів)
 function wsStaff(token) {
-  if (tokenOk(token)) return { role: 'admin', masterId: null };
+  if (tokenOk(token)) return { role: 'admin', masterId: null, adminId: null, actor: OWNER };
+  const a = adminBySession(token);
+  if (a) return { role: 'admin', masterId: null, adminId: a.id, actor: { kind: 'admin', id: a.id, name: a.name } };
   const m = masterBySession(token);
-  return m ? { role: 'master', masterId: m.id } : null;
+  return m ? { role: 'master', masterId: m.id, adminId: null, actor: { kind: 'master', id: m.id, name: m.name } } : null;
 }
 
 // Після LOGIN_MAX_FAILS невдалих спроб адреса блокується до кінця вікна, навіть із правильним токеном:
@@ -121,8 +129,20 @@ const requireAdmin = (req, res, next) => {
   }
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : '';
+  // Власник: ключ ADMIN_TOKEN. Лише він керує доступом і бачить журнал дій (req.owner)
   if (tokenOk(token)) {
     req.role = 'super';
+    req.owner = true;
+    req.actor = OWNER;
+    return next();
+  }
+  // Адміністратор з окремим входом: права суперадміна, але дії підписані його ім'ям
+  const adm = adminBySession(token);
+  if (adm) {
+    req.role = 'super';
+    req.adminId = adm.id;
+    req.adminName = adm.name;
+    req.actor = { kind: 'admin', id: adm.id, name: adm.name };
     return next();
   }
   // Майстер: токен сесії після входу за логіном і паролем; заблокований майстер одразу втрачає доступ
@@ -131,6 +151,7 @@ const requireAdmin = (req, res, next) => {
     req.role = 'master';
     req.masterId = s.id;
     req.masterName = s.name;
+    req.actor = { kind: 'master', id: s.id, name: s.name };
     return next();
   }
   loginLimiter.hit(req.ip);
@@ -383,12 +404,14 @@ app.post('/api/master-login', (req, res) => {
   const m = db.prepare("SELECT * FROM masters WHERE login = ? AND status != 'deleted'").get(String(req.body?.login ?? '').trim());
   if (!m || !checkMasterPassword(String(req.body?.password ?? ''), m.pass_hash)) {
     loginLimiter.hit(req.ip);
+    audit.log({ kind: 'unknown', name: String(req.body?.login ?? '').trim().slice(0, 30) || '—' }, 'Вхід: невдала спроба (майстер)', { ip: req.ip });
     return res.status(401).json({ error: 'Невірний логін або пароль' });
   }
   if (m.status === 'blocked') return res.status(403).json({ error: 'Доступ заблоковано. Зверніться до адміністратора' });
   const token = crypto.randomBytes(32).toString('base64url');
   db.prepare('INSERT INTO master_sessions (token_hash, master_id, expires_at) VALUES (?, ?, ?)')
     .run(sha(token), m.id, Date.now() + MASTER_SESSION_DAYS * 86400 * 1000);
+  audit.log({ kind: 'master', id: m.id, name: m.name }, 'Вхід в адмінку', { ip: req.ip });
   res.json({ token, name: m.name });
 });
 
@@ -412,6 +435,13 @@ app.use('/api/admin', (req, res, next) => {
   if (req.role === 'super' || MASTER_ROUTES.some((rx) => rx.test(`${req.method} ${req.path}`))) return next();
   res.status(403).json({ error: 'Недостатньо прав: це доступно лише адміністратору' });
 });
+// Журнал дій (src/audit.js): має стояти тут — після перевірки ролей і до всіх маршрутів /api/admin
+const audit = setupAudit({ app, db, last9 });
+// Окремі входи адміністраторів (src/admin-users.js); керує ними лише власник
+setupAdminUsers({
+  app, db, sha, crypto, hashPassword: hashStaffPassword, checkPassword: checkMasterPassword, loginLimiter, audit,
+  onRevoke: () => { for (const s of staffSockets) staffStillValid(s); }, // закрити канали заблокованих
+});
 
 // Який майстер у запиті: майстер — завжди він сам; суперадмін — обраний через masterId (або всі, якщо не обрано)
 const scopeMaster = (req) => {
@@ -431,7 +461,7 @@ function scheduleMaster(req, res) {
 }
 
 app.get('/api/admin/me', (req, res) => res.json(req.role === 'super'
-  ? { role: 'super' }
+  ? { role: 'super', owner: !!req.owner, admin: req.adminId ? { id: req.adminId, name: req.adminName } : null }
   : { role: 'master', master: { id: req.masterId, name: req.masterName },
       telegram: !!db.prepare('SELECT tg_chat_id FROM masters WHERE id = ?').get(req.masterId)?.tg_chat_id }));
 
@@ -458,7 +488,9 @@ function linkMasterTelegram(code, chatId) {
   return '✅ Готово! Тепер ваші нові записи, скасування й перенесення надходитимуть сюди.';
 }
 app.post('/api/admin/logout', (req, res) => {
-  if (req.role === 'master') db.prepare('DELETE FROM master_sessions WHERE token_hash = ?').run(sha((req.headers.authorization || '').slice(7)));
+  const tokenHash = sha((req.headers.authorization || '').slice(7));
+  if (req.role === 'master') db.prepare('DELETE FROM master_sessions WHERE token_hash = ?').run(tokenHash);
+  if (req.adminId) db.prepare('DELETE FROM admin_sessions WHERE token_hash = ?').run(tokenHash);
   res.json({ ok: true });
 });
 setupMasterAdmin({ app, db, todayStr, dataDir: DATA_DIR, express });
@@ -1149,7 +1181,19 @@ const admins = new Set();
 const send = (ws, obj) => {
   if (ws.readyState === 1) ws.send(JSON.stringify(obj));
 };
-const notifyAdmins = (obj) => admins.forEach((a) => send(a, obj));
+// Доступ відкритого каналу перевіряється знову перед кожною подією: сесія могла закінчитися,
+// а майстра чи адміністратора — заблокувати. Тоді канал закривається. Власник (ADMIN_TOKEN) — без перевірки.
+function staffStillValid(s) {
+  if (s.meta.role === 'admin' && !s.meta.adminId) return true;
+  const ok = s.meta.role === 'master' ? masterBySession(s.meta.token) : adminBySession(s.meta.token);
+  if (!ok) {
+    admins.delete(s);
+    staffSockets.delete(s);
+    s.close(4003, 'forbidden');
+  }
+  return !!ok;
+}
+const notifyAdmins = (obj) => admins.forEach((a) => { if (staffStillValid(a)) send(a, obj); });
 
 // Події записів наживо для адмінки: новий запис з сайту, скасування чи перенесення клієнтом, зміни персоналу.
 // Адміністратор отримує всі; майстер — лише ті, що стосуються його записів (masters — кого стосується подія).
@@ -1158,11 +1202,8 @@ const staffSockets = new Set();
 function liveAppt(kind, a, masters = [a.master_id]) {
   const payload = { type: 'appt', kind, id: a.id, date: a.date, start_time: a.start_time, client_name: a.client_name, service: a.service, master: a.master || '' };
   for (const s of staffSockets) {
-    if (s.meta.role === 'master') {
-      // Сесія закінчилась або майстра заблокували — канал закривається, події більше не йдуть
-      if (!masterBySession(s.meta.token)) { staffSockets.delete(s); s.close(4003, 'forbidden'); continue; }
-      if (!masters.map(Number).includes(s.meta.masterId)) continue;
-    }
+    if (!staffStillValid(s)) continue;
+    if (s.meta.role === 'master' && !masters.map(Number).includes(s.meta.masterId)) continue;
     send(s, payload);
   }
 }
@@ -1178,6 +1219,8 @@ wss.on('connection', (ws, req) => {
   const adminParam = url.searchParams.get('admin');
   let role = 'client';
   let masterId = null;
+  let adminId = null;
+  let actor = null;
   if (adminParam !== null) {
     // Адміністратор (чат і всі записи) або майстер (лише події своїх записів, без чату).
     // Ті самі обмеження спроб, що й для входу через сторінку
@@ -1187,10 +1230,9 @@ wss.on('connection', (ws, req) => {
       if (!loginLimiter.blocked(ip)) loginLimiter.hit(ip);
       return ws.close(4003, 'forbidden');
     }
-    role = who.role;
-    masterId = who.masterId;
+    ({ role, masterId, adminId, actor } = who);
   }
-  ws.meta = { role, masterId, token: role === 'client' ? null : adminParam, conversationId: null, hits: [] };
+  ws.meta = { role, masterId, adminId, actor, ip: wsIp(req), token: role === 'client' ? null : adminParam, conversationId: null, hits: [] };
 
   if (role === 'admin') {
     admins.add(ws);
@@ -1206,7 +1248,7 @@ wss.on('connection', (ws, req) => {
       return;
     }
     try {
-      if (ws.meta.role === 'admin') handleAdmin(ws, msg);
+      if (ws.meta.role === 'admin') { if (staffStillValid(ws)) handleAdmin(ws, msg); }
       else if (ws.meta.role === 'client') handleClient(ws, msg); // майстер у цьому каналі лише слухає події записів
     } catch (e) {
       console.error(e);
@@ -1285,6 +1327,8 @@ function handleAdmin(ws, msg) {
     const message = saveMessage(convId, 'operator', body);
     (clients.get(convId) || new Set()).forEach((c) => send(c, { type: 'message', message }));
     notifyAdmins({ type: 'message', conversationId: convId, message });
+    // У журнал — лише хто й коли відповів, без тексту
+    if (ws.meta.actor) audit.log(ws.meta.actor, 'Чат: відповідь клієнту', { target: 'діалог ' + convId.slice(0, 6), ip: ws.meta.ip });
   }
 }
 

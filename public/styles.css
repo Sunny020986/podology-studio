@@ -940,3 +940,14 @@ tr.is-muted td { opacity: .6; }
 body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; -webkit-user-select: none; user-select: none; }
 /* Шкала часу лишається зліва, коли календар гортають убік (на телефоні й у тижні) */
 .cal-axis-col { position: sticky; left: 0; z-index: 3; background: var(--card); }
+
+/* Доступ: форма нового адміністратора і фільтр журналу */
+.au-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 8px; align-items: center; margin: 8px 0 0; }
+.au-form .input { margin: 0; }
+.au-filter label { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 700px) {
+  .au-form { grid-template-columns: minmax(0, 1fr); }
+  .au-filter label { flex: 1 1 140px; }
+  .au-filter label input { flex: 1; min-width: 0; }
+  .au-filter select { flex: 1 1 100%; min-width: 0; }
+}

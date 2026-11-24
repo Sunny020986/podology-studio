@@ -15,7 +15,8 @@
   <div class="panel">
     <h2>Вхід в адмінку</h2>
     <div class="acc-tabs" role="tablist">
-      <button class="acc-tab active" type="button" data-login-mode="admin">Адміністратор</button>
+      <button class="acc-tab active" type="button" data-login-mode="owner">Власник</button>
+      <button class="acc-tab" type="button" data-login-mode="admin">Адміністратор</button>
       <button class="acc-tab" type="button" data-login-mode="master">Майстер</button>
     </div>
     <form id="masterLoginForm" hidden>
@@ -25,7 +26,7 @@
       <div class="msg error" id="mLoginMsg"></div>
     </form>
     <form id="loginForm">
-      <input id="tokenInput" class="input" type="password" placeholder="Токен адміна" autocomplete="current-password" required>
+      <input id="tokenInput" class="input" type="password" placeholder="Ключ доступу власника" autocomplete="current-password" required>
       <button class="btn btn-primary btn-block" type="submit">Увійти</button>
       <div class="msg error" id="loginMsg"></div>
     </form>
@@ -54,6 +55,7 @@
     <button class="tab" data-tab="tips" type="button">Поради</button>
     <button class="tab" data-tab="masters" type="button">Майстри</button>
     <button class="tab" data-tab="studio" type="button">Кабінет</button>
+    <button class="tab" data-tab="access" type="button" hidden>Доступ</button>
   </div>
   <div class="tg-strip" id="masterTg" hidden></div>
   <div class="tg-strip" id="masterCal" hidden></div>

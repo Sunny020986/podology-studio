@@ -111,17 +111,24 @@
     }
   });
 
-  // Перемикач «Адміністратор / Майстер» на сторінці входу
-  document.querySelectorAll('[data-login-mode]').forEach((b) => b.addEventListener('click', () => {
-    const master = b.dataset.loginMode === 'master';
-    document.querySelectorAll('[data-login-mode]').forEach((x) => x.classList.toggle('active', x === b));
-    $('#loginForm').hidden = master;
-    $('#masterLoginForm').hidden = !master;
-  }));
+  // Вхід: «Власник» — ключ доступу (ADMIN_TOKEN); «Адміністратор» і «Майстер» — логін і пароль.
+  // Обраний варіант браузер пам'ятає.
+  let loginMode = 'owner';
+  try { loginMode = localStorage.getItem('adminLoginMode') || 'owner'; } catch { /* немає сховища */ }
+  function setLoginMode(mode) {
+    loginMode = ['owner', 'admin', 'master'].includes(mode) ? mode : 'owner';
+    document.querySelectorAll('[data-login-mode]').forEach((x) => x.classList.toggle('active', x.dataset.loginMode === loginMode));
+    $('#loginForm').hidden = loginMode !== 'owner';
+    $('#masterLoginForm').hidden = loginMode === 'owner';
+    $('#mLoginMsg').textContent = '';
+    try { localStorage.setItem('adminLoginMode', loginMode); } catch { /* не збережеться */ }
+  }
+  document.querySelectorAll('[data-login-mode]').forEach((b) => b.addEventListener('click', () => setLoginMode(b.dataset.loginMode)));
+  setLoginMode(loginMode);
   $('#masterLoginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      const r = await fetch('/api/master-login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const r = await fetch(loginMode === 'admin' ? '/api/admin-login' : '/api/master-login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ login: $('#mLogin').value, password: $('#mPass').value }) });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || 'Не вдалося увійти');
@@ -135,7 +142,8 @@
   });
 
   $('#logoutBtn').addEventListener('click', () => {
-    if (!isSuper()) fetch('/api/admin/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + token } }).catch(() => {});
+    // Сесію майстра чи адміністратора закриваємо на сервері; ключ власника — постійний
+    if (!me.owner) fetch('/api/admin/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + token } }).catch(() => {});
     logout();
   });
 
@@ -157,9 +165,11 @@
     }
     $('#login').hidden = true;
     $('#app').hidden = false;
-    $('#adminTitle').textContent = isSuper() ? 'Адмінка' : 'Адмінка · ' + me.master.name;
-    // Майстрові показуємо лише його вкладки; чат лише для адміністратора
-    document.querySelectorAll('[data-tab]').forEach((b) => { b.hidden = !(isSuper() || MASTER_TABS.includes(b.dataset.tab)); });
+    $('#adminTitle').textContent = !isSuper() ? 'Адмінка · ' + me.master.name : me.admin ? 'Адмінка · ' + me.admin.name : 'Адмінка';
+    // Майстрові показуємо лише його вкладки; чат лише для адміністратора; «Доступ» — лише власникові
+    document.querySelectorAll('[data-tab]').forEach((b) => {
+      b.hidden = b.dataset.tab === 'access' ? !me.owner : !(isSuper() || MASTER_TABS.includes(b.dataset.tab));
+    });
     connectWs(); // адміністратор: чат і записи наживо; майстер — лише події своїх записів
     renderMasterTg();
     renderMasterCal().catch(() => {});
@@ -180,6 +190,7 @@
     stats: renderStats,
     tips: renderTips,
     masters: renderMasters,
+    access: renderAccess,
   };
 
   function show(name) {
@@ -2056,6 +2067,98 @@ ${isSuper() ? `
         <button class="btn btn-ghost small" type="button" data-csv="appointments">Вивантажити всі записи місяця (CSV)</button>
       </div>`);
   }
+  // ----- Доступ: окремі входи адміністраторів і журнал дій (лише власник) -----
+  const KIND_UA = { owner: 'Власник', admin: 'Адміністратор', master: 'Майстер', unknown: 'невідомий' };
+  const fmtStamp = (s) => (s ? fmtDate(s.slice(0, 10)) + ' ' + s.slice(11, 16) : '—');
+  const audit = { from: '', to: '', actor: '', rows: [] };
+  const auditQuery = () => new URLSearchParams({ from: audit.from, to: audit.to, actor: audit.actor });
+  async function renderAccess() {
+    const [users, actors] = await Promise.all([api('/api/admin/admin-users'), api('/api/admin/audit/actors')]);
+    if (!audit.from) { audit.from = shiftDay(today(), -6); audit.to = today(); }
+    $('#view').innerHTML = `
+      <h3>Адміністратори</h3>
+      <p class="muted">У кожного адміністратора свій логін і пароль, а його дії підписані в журналі нижче. Права — як у вас, крім цієї вкладки: керувати доступом і дивитися журнал можна лише з ключем доступу власника.</p>
+      <table><thead><tr><th>Ім'я</th><th>Логін</th><th>Статус</th><th>Останній вхід</th><th></th></tr></thead><tbody>
+      ${users.length ? users.map((u) => `<tr><td>${esc(u.name)}</td><td>${esc(u.login)}</td><td>${u.status === 'active' ? 'Активний' : 'Заблоковано'}</td><td>${fmtStamp(u.last_login_at)}</td>
+        <td><div class="client-actions"><button class="btn btn-ghost small" type="button" data-au-pass="${u.id}" data-name="${esc(u.name)}">Новий пароль</button>
+        <button class="btn btn-ghost small" type="button" data-au-status="${u.id}" data-to="${u.status === 'active' ? 'blocked' : 'active'}" data-name="${esc(u.name)}">${u.status === 'active' ? 'Заблокувати' : 'Розблокувати'}</button>
+        <button class="btn btn-ghost small danger" type="button" data-au-del="${u.id}" data-name="${esc(u.name)}">Видалити</button></div></td></tr>`).join('')
+        : '<tr><td colspan="5" class="muted">Окремих адміністраторів ще немає. Додайте першого нижче.</td></tr>'}
+      </tbody></table>
+      <form id="auForm" class="au-form">
+        <input class="input" id="auName" placeholder="Ім'я" required minlength="2" maxlength="60">
+        <input class="input" id="auLogin" placeholder="Логін латиницею" required minlength="3" maxlength="30" autocomplete="off" autocapitalize="none">
+        <input class="input" id="auPass" type="password" placeholder="Пароль, від 8 символів" required minlength="8" maxlength="100" autocomplete="new-password">
+        <button class="btn btn-primary" type="submit">Додати адміністратора</button>
+      </form>
+      <h3 style="margin-top:28px">Журнал дій</h3>
+      <p class="muted">Хто й коли що змінював в адмінці: записи, клієнти, розклад, налаштування, входи, відповіді в чаті (без тексту). Зберігається 365 днів.</p>
+      <div class="toolbar au-filter">
+        <label>Від <input type="date" id="auFrom" value="${audit.from}"></label>
+        <label>До <input type="date" id="auTo" value="${audit.to}"></label>
+        <select id="auActor" aria-label="Хто"><option value="">Усі</option>${actors.map((a) => {
+          const v = a.kind + (a.id != null ? ':' + a.id : '');
+          return `<option value="${v}" ${v === audit.actor ? 'selected' : ''}>${esc(a.name)}${a.kind === 'owner' ? '' : ' · ' + (KIND_UA[a.kind] || a.kind)}</option>`;
+        }).join('')}</select>
+        <button class="btn btn-primary small" type="button" id="auShow">Показати</button>
+        <button class="btn btn-ghost small" type="button" id="auCsv">Вивантажити CSV</button>
+      </div>
+      <div id="auLog"></div>`;
+
+    $('#auForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api('/api/admin/admin-users', { method: 'POST', body: { name: $('#auName').value, login: $('#auLogin').value, password: $('#auPass').value } });
+        notify('Адміністратора додано. Передайте йому логін і пароль: вхід — вкладка «Адміністратор» на сторінці входу');
+        await renderAccess();
+      } catch (err) { notify(err.message, true); }
+    });
+    $('#view').querySelectorAll('[data-au-pass]').forEach((b) => b.addEventListener('click', async () => {
+      const password = prompt(`Новий пароль для «${b.dataset.name}» (від 8 символів). Старі входи цього адміністратора закриються.`);
+      if (password === null) return;
+      try {
+        await api('/api/admin/admin-users/' + b.dataset.auPass, { method: 'PUT', body: { password } });
+        notify('Пароль змінено');
+      } catch (err) { notify(err.message, true); }
+    }));
+    $('#view').querySelectorAll('[data-au-status]').forEach((b) => b.addEventListener('click', async () => {
+      const block = b.dataset.to === 'blocked';
+      if (block && !confirm(`Заблокувати «${b.dataset.name}»? Доступ до адмінки закриється одразу.`)) return;
+      try {
+        await api('/api/admin/admin-users/' + b.dataset.auStatus, { method: 'PUT', body: { status: b.dataset.to } });
+        notify(block ? 'Заблоковано' : 'Розблоковано');
+        await renderAccess();
+      } catch (err) { notify(err.message, true); }
+    }));
+    $('#view').querySelectorAll('[data-au-del]').forEach((b) => b.addEventListener('click', async () => {
+      if (!confirm(`Видалити «${b.dataset.name}»? Доступ закриється одразу, а дії лишаться в журналі.`)) return;
+      try {
+        await api('/api/admin/admin-users/' + b.dataset.auDel, { method: 'DELETE' });
+        notify('Адміністратора видалено');
+        await renderAccess();
+      } catch (err) { notify(err.message, true); }
+    }));
+    const readFilter = () => { audit.from = $('#auFrom').value; audit.to = $('#auTo').value; audit.actor = $('#auActor').value; };
+    $('#auShow').addEventListener('click', () => { readFilter(); loadAudit(false).catch((err) => notify(err.message, true)); });
+    $('#auCsv').addEventListener('click', () => {
+      readFilter();
+      downloadCsv('/api/admin/audit.csv?' + auditQuery(), `zhurnal-${audit.from || 'all'}-${audit.to || today()}.csv`).catch((err) => notify(err.message, true));
+    });
+    await loadAudit(false);
+  }
+  async function loadAudit(more) {
+    const q = auditQuery();
+    if (more && audit.rows.length) q.set('before', audit.rows[audit.rows.length - 1].id);
+    const r = await api('/api/admin/audit?' + q);
+    audit.rows = more ? audit.rows.concat(r.rows) : r.rows;
+    $('#auLog').innerHTML = `<table><thead><tr><th>Коли</th><th>Хто</th><th>Дія</th><th>Об'єкт</th></tr></thead><tbody>` +
+      (audit.rows.length ? audit.rows.map((x) => `<tr><td>${fmtStamp(x.at)}</td><td>${esc(x.actor_name)}${x.actor_kind === 'owner' ? '' : ` <span class="muted">· ${KIND_UA[x.actor_kind] || ''}</span>`}</td>
+        <td>${esc(x.action)}</td><td>${esc(x.target || '—')}</td></tr>`).join('')
+        : '<tr><td colspan="4" class="muted">За ці дні дій немає.</td></tr>') +
+      '</tbody></table>' + (r.more ? '<button class="btn btn-ghost small" type="button" id="auMore">Показати ще 100</button>' : '');
+    if (r.more) $('#auMore').addEventListener('click', () => loadAudit(true).catch((err) => notify(err.message, true)));
+  }
+
   async function downloadCsv(url, filename) {
     const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
     if (!r.ok) throw new Error('Не вдалося вивантажити файл');

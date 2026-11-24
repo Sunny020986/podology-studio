@@ -8,6 +8,8 @@ const { createCourseColumns } = require('./course');
 const { createHolidayTable } = require('./holidays');
 const { createReportColumns } = require('./reports');
 const { createReminderColumns } = require('./reminder-buttons');
+const { createAdminUserTables } = require('./admin-users');
+const { createAuditTable } = require('./audit');
 const { createWaitlistTable } = require('./waitlist');
 const { createTipsTable } = require('./tips');
 const { createMasterTables } = require('./masters');
@@ -139,6 +141,8 @@ function openDb() {
   createHolidayTable(db);
   createReportColumns(db);
   createReminderColumns(db);
+  createAdminUserTables(db);
+  createAuditTable(db);
   createWaitlistTable(db);
   createTipsTable(db);
   seed(db);

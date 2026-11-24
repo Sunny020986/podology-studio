@@ -290,8 +290,8 @@
       '<label class="step-label" for="afDate">Дата</label><input class="input" type="date" id="afDate" min="' + today() + '" value="' + date + '">' +
       '<div class="step-label">Вільний час</div><div class="slots-grid" id="afSlots"></div>' +
       (move ? '' :
-        '<label class="step-label" for="afName">Клієнт</label><input class="input" id="afName" maxlength="60" placeholder="Ім\'я" required>' +
-        '<input class="input" id="afPhone" type="tel" maxlength="30" placeholder="Телефон" required>' +
+        '<label class="step-label" for="afName">Клієнт</label><input class="input" id="afName" maxlength="60" placeholder="Ім\'я" required value="' + esc(preset.name || '') + '">' +
+        '<input class="input" id="afPhone" type="tel" maxlength="30" placeholder="Телефон" required value="' + esc(preset.phone || '') + '">' +
         '<textarea class="input" id="afComment" rows="2" maxlength="500" placeholder="Коментар (необов\'язково)"></textarea>') +
       '<div class="toolbar"><button class="btn btn-primary" type="submit">' + (move ? 'Перенести' : 'Записати') + '</button></div>' +
       '</form>';
@@ -528,6 +528,8 @@
       <textarea id="clientNote" class="input" rows="4" maxlength="5000" placeholder="Особливості, рекомендації, домовленості">${esc(c.note)}</textarea>
       <button class="btn btn-primary small" type="button" id="saveClientNote">Зберегти нотатку</button>
 
+      <div id="courseBox"></div>
+
       <h3 style="margin:28px 0 4px">Фото стану стоп</h3>
       <p class="muted" style="margin:0 0 10px">Бачать лише адміністратор і майстер, який веде клієнта. Фото стискається в браузері, а разом із ним прибираються метадані, зокрема місце зйомки.</p>
       <div class="consent-box">
@@ -556,6 +558,30 @@
     // наступний кадр: на телефоні таблиця вже стала картками, ширина поля остаточна
     requestAnimationFrame(() => document.querySelectorAll('.visit-note').forEach(fitNote));
     loadClientPhotos(key).catch((err) => { $('#cpList').innerHTML = '<span class="muted">' + esc(err.message) + '</span>'; });
+    loadCourse(key).catch(() => {});
+  }
+
+  // Курс лікування: план дат від запису, з якого курс почався
+  let currentCourses = [];
+  const COURSE_STATE = { done: 'відбувся', booked: 'записано', missed: 'пропущено', todo: 'ще не записано' };
+  async function loadCourse(key) {
+    const plans = await api('/api/admin/clients/' + key + '/course');
+    currentCourses = plans;
+    const box = $('#courseBox');
+    if (!box || currentClient !== key) return;
+    if (!plans.length) { box.innerHTML = ''; return; }
+    box.innerHTML = '<h3 style="margin:28px 0 8px">Курс лікування</h3>' + plans.map((p, pi) => `
+      <div class="course-card">
+        <div class="course-title">«${esc(p.start.service)}» від ${fmtDate(p.start.date)}</div>
+        <div class="muted course-sub">Далі ${p.steps.length} × «${esc(p.next_service)}», кожні ${p.interval_days} дн.</div>
+        <ol class="course-steps">${p.steps.map((st, si) => `
+          <li class="cs-${st.state}">
+            <span class="cs-date">≈ ${fmtDate(st.planned)}</span>
+            <span class="cs-state">${COURSE_STATE[st.state]}${st.appt ? ': ' + fmtDate(st.appt.date) + ' о ' + st.appt.time : ''}</span>
+            ${st.state === 'todo' || st.state === 'missed' ? `<button class="btn btn-ghost small" type="button" data-course-book="${pi}:${si}">Записати</button>` : ''}
+          </li>`).join('')}
+        </ol>
+      </div>`).join('');
   }
 
   // Нотатка до візиту розтягується під весь текст, щоб її можна було прочитати повністю
@@ -865,13 +891,20 @@ ${isSuper() ? `
   }
 
   // ----- Послуги -----
-  const serviceRow = (s) => `<tr>
+  const serviceRow = (s, all = []) => `<tr>
     <td data-label="Назва" class="c-wide"><input type="text" class="f-name" value="${esc(s.name)}"></td>
     <td data-label="Опис" class="c-wide"><input type="text" class="f-desc" value="${esc(s.description)}"></td>
     <td data-label="Тривалість, хв"><input type="number" class="f-dur" min="5" max="480" step="5" value="${s.duration_min}"></td>
     <td data-label="Ціна, грн"><input type="number" class="f-price" min="0" step="10" value="${s.price_uah}"></td>
     <td data-label="Орієнтовна ціна (текст)" class="c-wide"><input type="text" class="f-note" maxlength="60" value="${esc(s.price_note)}" placeholder="напр. від 1380 грн"></td>
     <td data-label="Повтор, тижнів"><input type="number" class="f-repeat" min="0" max="52" step="1" value="${s.repeat_weeks || 0}" aria-label="Нагадати про повторний візит через, тижнів" title="0 — не нагадувати"></td>
+    <td data-label="Курс лікування" class="c-wide c-course">
+      <div class="course-fields">
+        <label>повторних візитів <input type="number" class="f-course-visits" min="0" max="20" step="1" value="${s.course_visits || 0}"></label>
+        <label>кожні, днів <input type="number" class="f-course-interval" min="0" max="180" step="1" value="${s.course_interval_days || 0}"></label>
+        <label>послуга для повторних <select class="f-course-next"><option value="">та сама</option>${all.filter((x) => x.id !== s.id).map((x) => `<option value="${x.id}" ${x.id === s.course_next_service_id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+      </div>
+    </td>
     <td data-label="Активна" class="c-check"><label><input type="checkbox" class="f-active" ${s.active ? 'checked' : ''}> <span class="m-only">Показувати на сайті</span></label></td>
     <td class="c-wide"><button class="btn btn-ghost small" type="button" data-save-service="${s.id}">Зберегти</button></td>
   </tr>`;
@@ -883,6 +916,9 @@ ${isSuper() ? `
     price_uah: Number(row.querySelector('.f-price').value),
     price_note: row.querySelector('.f-note').value,
     repeat_weeks: Number(row.querySelector('.f-repeat').value || 0),
+    course_visits: Number(row.querySelector('.f-course-visits').value || 0),
+    course_interval_days: Number(row.querySelector('.f-course-interval').value || 0),
+    course_next_service_id: row.querySelector('.f-course-next').value || null,
     active: row.querySelector('.f-active').checked ? 1 : 0,
   });
 
@@ -890,8 +926,8 @@ ${isSuper() ? `
     const list = await api('/api/admin/services');
     $('#view').innerHTML = `
       <table class="card-table">
-        <thead><tr><th>Назва</th><th>Опис</th><th>Хв</th><th>Ціна, грн</th><th>Орієнтовна ціна (текст)</th><th title="Через скільки тижнів бот нагадає про повторний візит. 0 — не нагадувати">Повтор, тижнів</th><th>Активна</th><th></th></tr></thead>
-        <tbody>${list.map(serviceRow).join('')}</tbody>
+        <thead><tr><th>Назва</th><th>Опис</th><th>Хв</th><th>Ціна, грн</th><th>Орієнтовна ціна (текст)</th><th title="Через скільки тижнів бот нагадає про повторний візит. 0 — не нагадувати">Повтор, тижнів</th><th title="Наприклад: встановлення скоби, потім 4 корекції кожні 21 день. 0 — без курсу">Курс лікування</th><th>Активна</th><th></th></tr></thead>
+        <tbody>${list.map((x) => serviceRow(x, list)).join('')}</tbody>
       </table>
       <h3 style="margin-bottom:8px">Нова послуга</h3>
       <form class="inline-form" id="serviceForm">
@@ -1348,6 +1384,17 @@ ${isSuper() ? `
         await api('/api/admin/clients/' + e.target.dataset.restore + '/restore', { method: 'POST' });
         notify('Клієнта повернуто з архіву');
         return await loadClients();
+      }
+
+      if (e.target.dataset.courseBook) {
+        const [pi, si] = e.target.dataset.courseBook.split(':').map(Number);
+        const p = currentCourses[pi], st = p && p.steps[si];
+        if (!st) return;
+        apptForm = { mode: 'new', preset: {
+          serviceId: p.next_service_id, date: st.planned >= today() ? st.planned : today(),
+          masterId: isSuper() ? p.start.master_id : '', name: p.client.name, phone: p.client.phone,
+        } };
+        return show('appointments');
       }
 
       if (e.target.dataset.delPhoto) {

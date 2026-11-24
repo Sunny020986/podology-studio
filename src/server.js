@@ -21,6 +21,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const { securityHeaders, setupHealth } = require('./security');
 const { setupClientPhotos } = require('./client-photos');
 const { setupPrivacy } = require('./privacy');
+const { validateCourse, setupCourse } = require('./course');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const DATA_DIR = path.dirname(DB_PATH);
 
@@ -143,6 +144,11 @@ function validateService(body, partial = false) {
     out.repeat_weeks = w;
   }
   if (body.active !== undefined) out.active = body.active ? 1 : 0;
+  const courseError = validateCourse(body, out, partial);
+  if (courseError) return { error: courseError };
+  if (out.course_next_service_id && !db.prepare('SELECT 1 FROM services WHERE id = ?').get(out.course_next_service_id)) {
+    return { error: 'Курс: послугу для повторних візитів не знайдено' };
+  }
   return { data: out };
 }
 
@@ -371,7 +377,7 @@ const MASTER_ROUTES = [
   /^GET \/me$/, /^POST \/logout$/,
   /^GET \/appointments$/, /^PATCH \/appointments\/\d+$/, /^PUT \/appointments\/\d+\/note$/, /^GET \/appointments\/\d+\/review-link$/,
   /^GET \/clients$/, /^GET \/clients\/\d{9}$/, /^PUT \/clients\/\d{9}\/note$/,
-  /^GET \/clients\/\d{9}\/photos$/, /^POST \/clients\/\d{9}\/photos$/, /^GET \/clients\/\d{9}\/photo-consent$/, /^PUT \/clients\/\d{9}\/photo-consent$/, /^GET \/client-photos\/\d+\/file$/, /^DELETE \/client-photos\/\d+$/,
+  /^GET \/clients\/\d{9}\/course$/, /^GET \/clients\/\d{9}\/photos$/, /^POST \/clients\/\d{9}\/photos$/, /^GET \/clients\/\d{9}\/photo-consent$/, /^PUT \/clients\/\d{9}\/photo-consent$/, /^GET \/client-photos\/\d+\/file$/, /^DELETE \/client-photos\/\d+$/,
   /^GET \/schedule$/, /^PUT \/schedule\/\d$/, /^GET \/breaks$/, /^POST \/breaks$/, /^DELETE \/breaks\/\d+$/,
   /^GET \/blocks$/, /^POST \/blocks$/, /^DELETE \/blocks\/\d+$/, /^GET \/waitlist$/, /^DELETE \/waitlist\/\d+$/,
   /^POST \/appointments$/, /^PATCH \/appointments\/\d+\/move$/, /^GET \/slots$/, /^GET \/calendar$/,
@@ -444,6 +450,10 @@ setupAdminAppointments({
 // Відгуки: публічні маршрути і маршрути адмінки (останні вже під перевіркою доступу)
 setupReviews({ app, db, telegram, todayStr, siteUrl, last9 });
 setupRepeatReminders({ db, telegram, todayStr, siteUrl, last9 });
+setupCourse({
+  app, db, telegram, todayStr, siteUrl, last9,
+  canSeeClient: (req, key) => req.role === 'super' || listClients(undefined, undefined, req.masterId).some((c) => c.key === key),
+});
 setupStats({ app, db, toMin, weekdayOf, last9 });
 setupTips({ app, db, siteUrl, readStudio });
 setupPrivacy({ app, readStudio });
@@ -789,16 +799,16 @@ app.put('/api/admin/appointments/:id/note', (req, res) => {
 });
 
 app.get('/api/admin/services', (req, res) => {
-  res.json(db.prepare('SELECT id, name, description, duration_min, price_uah, price_note, repeat_weeks, active FROM services ORDER BY id').all());
+  res.json(db.prepare('SELECT id, name, description, duration_min, price_uah, price_note, repeat_weeks, course_visits, course_interval_days, course_next_service_id, active FROM services ORDER BY id').all());
 });
 
 app.post('/api/admin/services', (req, res) => {
   const v = validateService(req.body || {});
   if (v.error) return res.status(400).json({ error: v.error });
-  const d = { description: '', price_uah: 0, price_note: '', repeat_weeks: 0, active: 1, ...v.data };
+  const d = { description: '', price_uah: 0, price_note: '', repeat_weeks: 0, active: 1, course_visits: 0, course_interval_days: 0, course_next_service_id: null, ...v.data };
   const info = db
-    .prepare('INSERT INTO services (name, description, duration_min, price_uah, price_note, repeat_weeks, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(d.name, d.description, d.duration_min, d.price_uah, d.price_note, d.repeat_weeks, d.active);
+    .prepare('INSERT INTO services (name, description, duration_min, price_uah, price_note, repeat_weeks, active, course_visits, course_interval_days, course_next_service_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(d.name, d.description, d.duration_min, d.price_uah, d.price_note, d.repeat_weeks, d.active, d.course_visits, d.course_interval_days, d.course_next_service_id);
   db.prepare("INSERT OR IGNORE INTO master_services (master_id, service_id) SELECT id, ? FROM masters WHERE status = 'active'").run(Number(info.lastInsertRowid));
   res.status(201).json({ id: Number(info.lastInsertRowid) });
 });

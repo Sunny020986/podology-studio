@@ -4,6 +4,7 @@ const Database = require('better-sqlite3');
 const { createAccountTables } = require('./accounts');
 const { createReviewTables } = require('./reviews');
 const { createRepeatColumns } = require('./repeat');
+const { createCourseColumns } = require('./course');
 const { createWaitlistTable } = require('./waitlist');
 const { createTipsTable } = require('./tips');
 const { createMasterTables } = require('./masters');
@@ -131,6 +132,7 @@ function openDb() {
   createAccountTables(db);
   createReviewTables(db);
   createRepeatColumns(db);
+  createCourseColumns(db);
   createWaitlistTable(db);
   createTipsTable(db);
   seed(db);

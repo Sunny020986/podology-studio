@@ -411,6 +411,22 @@
     updateSummary();
   });
 
+  // Клієнт увійшов у кабінет (або щойно зареєструвався): його ім'я й телефон уже відомі, тож підставляємо їх у форму запису.
+  // Те, що клієнт устиг ввести сам, не чіпаємо; після виходу прибираємо лише підставлене.
+  let autoFilled = { name: '', phone: '' };
+  document.addEventListener('account:me', (e) => {
+    const me = e.detail, n = $('#nameInput'), p = $('#phoneInput');
+    if (me) {
+      if (!n.value || n.value === autoFilled.name) { n.value = me.name; autoFilled.name = me.name; }
+      if (!p.value || p.value === autoFilled.phone) { p.value = me.phone; autoFilled.phone = me.phone; }
+    } else {
+      if (n.value === autoFilled.name) n.value = '';
+      if (p.value === autoFilled.phone) p.value = '';
+      autoFilled = { name: '', phone: '' };
+    }
+    p.dispatchEvent(new Event('input')); // перерахувати ціну зі знижкою для цього номера
+  });
+
   $('#bookingForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const msg = $('#bookingMsg');
@@ -473,8 +489,9 @@
       $('#remindBtn').href = data.remindLink;
       $('#remindBtn').hidden = false;
     }
-    $('#nameInput').value = '';
-    $('#phoneInput').value = '';
+    // Після запису поля очищаємо, але для клієнта з кабінету лишаємо його дані
+    $('#nameInput').value = autoFilled.name;
+    $('#phoneInput').value = autoFilled.phone;
     quoteState.key = '';
     renderPrice();
     document.dispatchEvent(new CustomEvent('booking:success'));

@@ -49,6 +49,8 @@
     btn.textContent = name || 'Кабінет';
     btn.title = state.me ? 'Особистий кабінет: ' + state.me.name : '';
     btn.setAttribute('aria-label', state.me ? 'Особистий кабінет, ' + state.me.name : 'Особистий кабінет');
+    // Форма запису на сайті підставляє ім'я й телефон того, хто увійшов (app.js)
+    document.dispatchEvent(new CustomEvent('account:me', { detail: state.me }));
   }
   // Одразу після завантаження сторінки перевіряємо, чи клієнт уже увійшов
   api('/api/account/me').then((me) => { state.me = me; updateHeader(); }).catch(() => {});

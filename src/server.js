@@ -15,7 +15,7 @@ const { setupTips } = require('./tips');
 const { setupAdminAppointments } = require('./admin-appointments');
 const { activeMasters, masterOffers, checkPassword: checkMasterPassword, sha, setupMasterAdmin } = require('./masters');
 const { localBusinessJsonLd, setupSeo } = require('./seo');
-const { freeSlots, masterFreeSlots, pickMaster, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
+const { nowMin, freeSlots, masterFreeSlots, pickMaster, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
 const { securityHeaders, setupHealth } = require('./security');
@@ -332,9 +332,11 @@ app.post('/api/appointments', (req, res) => {
     if (wantMaster && !masterOffers(db, wantMaster, service.id)) return res.status(400).json({ error: 'Цей майстер не виконує обрану послугу' });
     const { id, remindCode, masterId: assigned } = bookTx({ service, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, masterId: wantMaster });
     const masterName = db.prepare('SELECT name FROM masters WHERE id = ?').get(assigned)?.name || '';
-    notifyMasterOf(assigned, `🗓 Новий запис до вас\n${service.name}\n${date.split('-').reverse().join('.')} о ${time}\n${cleanName}, ${cleanPhone}${cleanComment ? '\nКоментар: ' + cleanComment : ''}`);
+    const streak = noShowStreaks().get(last9(cleanPhone)) || 0;
+    const warn = streak >= 2 ? `\n⚠️ Цей клієнт не прийшов ${streak} рази поспіль` : '';
+    notifyMasterOf(assigned, `🗓 Новий запис до вас\n${service.name}\n${date.split('-').reverse().join('.')} о ${time}\n${cleanName}, ${cleanPhone}${cleanComment ? '\nКоментар: ' + cleanComment : ''}${warn}`);
     bookingLimiter.hit(req.ip);
-    telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, master: masterName });
+    telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, master: masterName, warn });
     res.status(201).json({ id: Number(id), date, time, service: service.name, master: masterName, remindLink: telegram.remindLink(remindCode) });
   } catch (e) {
     if (e.status) return res.status(e.status).json({ error: e.message });
@@ -502,6 +504,7 @@ app.post('/api/admin/telegram/test', tgRoute(async () => { await telegram.test()
 app.get('/api/admin/appointments', (req, res) => {
   const from = isValidDate(req.query.from) ? req.query.from : todayStr();
   const to = isValidDate(req.query.to) ? req.query.to : from;
+  const streaks = noShowStreaks();
   res.json(
     db
       .prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.client_name, a.client_phone, a.status, a.client_comment,
@@ -509,6 +512,7 @@ app.get('/api/admin/appointments', (req, res) => {
                 FROM appointments a JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id
                 WHERE a.date BETWEEN ? AND ? AND (? IS NULL OR a.master_id = ?) ORDER BY a.date, a.start_time`)
       .all(from, to, scopeMaster(req), scopeMaster(req))
+      .map((a) => ({ ...a, noshow_streak: streaks.get(last9(a.client_phone)) || 0 }))
   );
 });
 
@@ -527,10 +531,17 @@ const setStatusTx = db.transaction((id, status) => {
   db.prepare('UPDATE appointments SET status = ? WHERE id = ?').run(status, id);
 });
 
+// «Відбувся» і «Не прийшов» можна поставити лише після часу початку запису
+const AFTER_START = ['done', 'no_show'];
+const hasStarted = (a) => a.date < todayStr() || (a.date === todayStr() && toMin(a.start_time) <= nowMin());
 app.patch('/api/admin/appointments/:id', (req, res) => {
   const status = req.body?.status;
-  if (!['new', 'confirmed', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Некоректний статус' });
+  if (!['new', 'confirmed', 'cancelled', ...AFTER_START].includes(status)) return res.status(400).json({ error: 'Некоректний статус' });
   if (!ownsAppt(req, Number(req.params.id))) return res.status(403).json({ error: 'Це запис іншого майстра' });
+  if (AFTER_START.includes(status)) {
+    const a = db.prepare('SELECT date, start_time FROM appointments WHERE id = ?').get(Number(req.params.id));
+    if (a && !hasStarted(a)) return res.status(400).json({ error: 'Позначити «Відбувся» чи «Не прийшов» можна лише після початку запису' });
+  }
   try {
     setStatusTx(Number(req.params.id), status);
     if (status === 'cancelled') {
@@ -576,7 +587,7 @@ telegram.onStart((code, chatId) => {
 
 async function sendDueReminders() {
   const rows = db.prepare(`SELECT a.*, s.name AS service FROM appointments a JOIN services s ON s.id = a.service_id
-    WHERE a.tg_chat_id IS NOT NULL AND a.reminded = 0 AND a.status != 'cancelled' AND a.date BETWEEN ? AND date(?, '+2 day')`)
+    WHERE a.tg_chat_id IS NOT NULL AND a.reminded = 0 AND a.status NOT IN ('cancelled', 'no_show') AND a.date BETWEEN ? AND date(?, '+2 day')`)
     .all(todayStr(), todayStr());
   for (const a of rows) {
     const left = msUntil(a.date, a.start_time);
@@ -601,6 +612,17 @@ function notifyClientCancelled(id) {
 // ---------- Клієнти ----------
 // Клієнт визначається за останніми 9 цифрами телефону, тому +380 67 123 45 67 і 067 123 45 67 це одна людина.
 const isClientKey = (k) => /^\d{9}$/.test(k);
+// Скільки разів поспіль клієнт не прийшов (за всіма майстрами); обнуляється першим візитом після неявок
+function noShowStreaks() {
+  const today = todayStr();
+  const m = new Map();
+  for (const r of db.prepare("SELECT client_phone, date, status FROM appointments WHERE status != 'cancelled' ORDER BY date, start_time").all()) {
+    const k = last9(r.client_phone);
+    if (r.status === 'no_show') m.set(k, (m.get(k) || 0) + 1);
+    else if (r.date < today) m.set(k, 0);
+  }
+  return m;
+}
 const NOTE_MAX = 5000;
 
 // mode: 'active' — лише активні, 'archived' — лише в архіві, без параметра — усі (для вивантаження)
@@ -616,15 +638,19 @@ function listClients(q, mode, masterId = null) {
   const map = new Map();
   for (const r of rows) {
     const key = last9(r.client_phone);
-    if (!map.has(key)) map.set(key, { key, name: '', phone: '', visits: 0, cancelled: 0, last_visit: null, next_visit: null, last_change: '' });
+    if (!map.has(key)) map.set(key, { key, name: '', phone: '', visits: 0, cancelled: 0, no_shows: 0, noshow_streak: 0, last_visit: null, next_visit: null, last_change: '' });
     const c = map.get(key);
     if (r.updated_at > c.last_change) c.last_change = r.updated_at;
     c.name = r.client_name;   // рядки йдуть за датою, тому залишаються ім'я і телефон з найновішого запису
     c.phone = r.client_phone;
     if (r.status === 'cancelled') {
       c.cancelled += 1;
+    } else if (r.status === 'no_show') {
+      c.no_shows += 1;
+      c.noshow_streak += 1; // неявки поспіль: обнуляється першим візитом після них
     } else if (r.date < today) {
       c.visits += 1;
+      c.noshow_streak = 0;
       c.last_visit = r.date;
     } else if (!c.next_visit) {
       c.next_visit = r.date;

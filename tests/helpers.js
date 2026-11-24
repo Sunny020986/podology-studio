@@ -91,3 +91,16 @@ async function book(srv, { serviceId, masterId, phone = '+380501112233', name = 
 const fakeJpeg = () => Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), Buffer.alloc(200, 7)]);
 
 module.exports = { startServer, makeMaster, nextSlot, book, fakeJpeg, ADMIN };
+
+// Запис у минулому — напряму в тимчасову базу (через сайт у минуле записати не можна)
+function insertAppt(srv, { date, start = '10:00', end = '10:45', phone, name = 'Тест Клієнт', masterId, serviceId, status = 'confirmed' }) {
+  const Database = require('better-sqlite3');
+  const db = new Database(require('path').join(srv.dir, 'studio.db'));
+  const id = db.prepare(`INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code, master_id, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(serviceId, date, start, end, name, phone, 'c' + Math.random().toString(36).slice(2), masterId, status).lastInsertRowid;
+  db.close();
+  return Number(id);
+}
+const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+module.exports.insertAppt = insertAppt;
+module.exports.daysAgo = daysAgo;

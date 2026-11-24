@@ -35,7 +35,8 @@ function setupStats({ app, db, toMin, weekdayOf, last9 }) {
       FROM appointments a JOIN services s ON s.id = a.service_id WHERE a.date BETWEEN ? AND ?`).all(from, to)
       .filter((a) => !masterId || a.master_id === masterId);
     const active = appts.filter((a) => a.status !== 'cancelled');
-    const done = active.filter((a) => a.date < today);
+    const noShows = active.filter((a) => a.status === 'no_show');
+    const done = active.filter((a) => a.date < today && a.status !== 'no_show');
 
     // Нові клієнти: перший запис за всю історію припадає на цей місяць
     const firstSeen = new Map();
@@ -67,6 +68,8 @@ function setupStats({ app, db, toMin, weekdayOf, last9 }) {
       active: active.length,
       done: done.length,
       cancelled: appts.length - active.length,
+      noShows: noShows.length,
+      noShowPercent: done.length + noShows.length ? Math.round((noShows.length / (done.length + noShows.length)) * 100) : 0,
       newClients,
       uniqueClients,
       topServices,

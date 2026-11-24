@@ -29,7 +29,19 @@
     const d = new Date();
     return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
   };
-  const STATUS = { new: 'Нова', confirmed: 'Підтверджено', cancelled: 'Скасовано' };
+  const STATUS = { new: 'Нова', confirmed: 'Підтверджено', done: 'Відбувся', no_show: 'Не прийшов', cancelled: 'Скасовано' };
+  const AFTER_START = ['done', 'no_show'];
+  // Чи почався запис: «Відбувся» і «Не прийшов» доступні лише після цього
+  const started = (a) => {
+    const d = new Date();
+    const now = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    return a.date < today() || (a.date === today() && a.start_time <= now);
+  };
+  const statusOptions = (a) => Object.entries(STATUS)
+    .filter(([k]) => started(a) || !AFTER_START.includes(k) || k === a.status)
+    .map(([k, v]) => `<option value="${k}" ${k === a.status ? 'selected' : ''}>${v}</option>`).join('');
+  // Позначка, якщо клієнт не прийшов 2 і більше разів поспіль
+  const noShowBadge = (n) => (n >= 2 ? ` <span class="badge-warn" title="Клієнт не прийшов ${n} рази поспіль">⚠ неявок поспіль: ${n}</span>` : '');
   const DAYS_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
   const DAYS = ['Понеділок', 'Вівторок', 'Середа', 'Четвер', "П'ятниця", 'Субота', 'Неділя'];
 
@@ -229,11 +241,10 @@
           <td>${r.start_time}–${r.end_time}</td>
           <td>${esc(r.service)}</td>
           ${isSuper() ? `<td>${esc(r.master || '—')}</td>` : ''}
-          <td>${esc(r.client_name)}</td>
+          <td>${esc(r.client_name)}${noShowBadge(r.noshow_streak)}</td>
           <td>${esc(r.client_phone)}</td>
           <td>${esc(r.client_comment || '—')}</td>
-          <td><select data-appt="${r.id}">${Object.entries(STATUS)
-            .map(([k, v]) => `<option value="${k}" ${k === r.status ? 'selected' : ''}>${v}</option>`).join('')}</select>${apptArchive && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-review-link="${r.id}" title="Скопіювати посилання на форму відгуку">Відгук</button>` : ''}${!apptArchive && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-move-appt="${r.id}">Перенести</button>` : ''}</td>
+          <td><select data-appt="${r.id}">${statusOptions(r)}</select>${apptArchive && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-review-link="${r.id}" title="Скопіювати посилання на форму відгуку">Відгук</button>` : ''}${!apptArchive && r.status !== 'cancelled' ? ` <button class="btn btn-ghost small" type="button" data-move-appt="${r.id}">Перенести</button>` : ''}</td>
         </tr>`).join('')
       : `<tr><td colspan="8" class="muted">${apptArchive ? 'В архіві поки немає записів.' : 'Поточних і майбутніх записів немає.'}</td></tr>`;
   }
@@ -483,9 +494,9 @@
     if (q !== clientQuery || !$('#clientRows')) return; // запит застарів або вкладку вже змінено
     $('#clientRows').innerHTML = list.length
       ? list.map((c) => `<tr>
-          <td><button class="link" type="button" data-client="${c.key}">${esc(c.name)}</button></td>
+          <td><button class="link" type="button" data-client="${c.key}">${esc(c.name)}</button>${noShowBadge(c.noshow_streak)}</td>
           <td>${esc(c.phone)}</td>
-          <td>${c.visits}</td>
+          <td>${c.visits}${c.no_shows ? ` <span class="muted">(не прийшов: ${c.no_shows})</span>` : ''}</td>
           <td>${fmtDate(c.last_visit)}</td>
           <td>${fmtDate(c.next_visit)}</td>
           <td>${c.has_note ? 'є' : '—'}</td>
@@ -499,11 +510,19 @@
   async function renderClient(key) {
     const c = await api('/api/admin/clients/' + key);
     currentClient = key;
-    const done = c.appointments.filter((a) => a.status !== 'cancelled' && a.date < today()).length;
+    const done = c.appointments.filter((a) => !['cancelled', 'no_show'].includes(a.status) && a.date < today()).length;
+    const noShows = c.appointments.filter((a) => a.status === 'no_show').length;
+    // неявки поспіль: від найновішого минулого запису назад, до першого візиту
+    let streak = 0;
+    for (const a of c.appointments) { // відсортовано від нових до старих
+      if (a.status === 'cancelled' || (a.date >= today() && a.status !== 'no_show')) continue;
+      if (a.status === 'no_show') streak++; else break;
+    }
     $('#view').innerHTML = `
       <button class="btn btn-ghost small" type="button" id="clientBack">← До списку клієнтів</button>
       <h3 style="margin:16px 0 4px">${esc(c.name)}</h3>
-      <div class="muted">${esc(c.phone)} · візитів: ${done} · усього записів: ${c.appointments.length}</div>
+      <div class="muted">${esc(c.phone)} · візитів: ${done}${noShows ? ` · не прийшов: ${noShows}` : ''} · усього записів: ${c.appointments.length}</div>
+      ${streak >= 2 ? `<div class="warn-box">⚠ Клієнт не прийшов ${streak} рази поспіль. Варто підтвердити наступний запис дзвінком.</div>` : ''}
 
       <label class="step-label" for="clientNote" style="margin-top:20px">Загальна нотатка про клієнта</label>
       <textarea id="clientNote" class="input" rows="4" maxlength="5000" placeholder="Особливості, рекомендації, домовленості">${esc(c.note)}</textarea>
@@ -1052,6 +1071,7 @@ ${isSuper() ? `
       '<div class="stat-tiles">' +
         tile(s.active, 'записів', 'з них відбулось: ' + s.done) +
         tile(s.cancelled, 'скасовано', s.total ? Math.round((s.cancelled / s.total) * 100) + '% від усіх' : '') +
+        tile(s.noShows, 'не прийшли', s.noShows ? s.noShowPercent + '% від минулих записів' : 'неявок немає') +
         tile(s.newClients, 'нових клієнтів', 'усього клієнтів: ' + s.uniqueClients) +
         tile(s.loadPercent + '%', 'заповненість розкладу', s.bookedHours.toLocaleString('uk-UA') + ' з ' + s.availableHours.toLocaleString('uk-UA') + ' год') +
         tile(s.revenue ? s.revenue.toLocaleString('uk-UA') + ' грн' : '—', 'орієнтовний дохід', s.revenue ? 'за ' + s.revenueCount + ' візитами з вказаною ціною' : 'ціни послуг не вказані') +

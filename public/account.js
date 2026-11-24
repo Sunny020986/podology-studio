@@ -5,7 +5,7 @@
   const fmt = (d) => d.split('-').reverse().join('.');
   const pad = (n) => String(n).padStart(2, '0');
   const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
-  const STATUS_TEXT = { new: 'очікує підтвердження', confirmed: 'підтверджено', cancelled: 'скасовано' };
+  const STATUS_TEXT = { new: 'очікує підтвердження', confirmed: 'підтверджено', cancelled: 'скасовано', done: 'відбувся', no_show: 'не прийшли' };
 
   const overlay = $('#accOverlay');
   const body = $('#accBody');

@@ -123,4 +123,4 @@ function addDays(dateStr, n) {
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
 
-module.exports = { freeSlots, masterFreeSlots, pickMaster, candidateMasters, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays, STEP_MIN };
+module.exports = { nowMin, freeSlots, masterFreeSlots, pickMaster, candidateMasters, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays, STEP_MIN };

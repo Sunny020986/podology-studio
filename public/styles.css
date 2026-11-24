@@ -730,3 +730,9 @@ html, body { overflow-x: clip; }       /* страховка: нічого не 
 
 /* Нотатка до візиту: розтягується під текст */
 .visit-note { width: 100%; min-width: 0; min-height: 38px; resize: vertical; overflow: hidden; line-height: 1.45; font: inherit; }
+
+/* Неявки */
+.badge-warn { display: inline-block; margin-left: 6px; padding: 2px 8px; border-radius: 999px; background: #FDECEC; color: #A23B3B; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.warn-box { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: #FDF3E7; border: 1px solid #F0D2A8; color: #7A4B12; font-size: 14px; }
+.cal-appt.st-no_show { opacity: .6; text-decoration: line-through; border-left-color: #E3A0A0; }
+.cal-appt.st-done { border-left-color: var(--accent); }

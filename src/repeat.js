@@ -24,7 +24,7 @@ function setupRepeatReminders({ db, telegram, todayStr, siteUrl, last9 }) {
     if (!base) return;
     const today = todayStr();
     const due = db.prepare(`SELECT a.*, s.name AS service, s.repeat_weeks FROM appointments a JOIN services s ON s.id = a.service_id
-      WHERE s.repeat_weeks > 0 AND a.status != 'cancelled' AND a.repeat_sent = 0
+      WHERE s.repeat_weeks > 0 AND a.status NOT IN ('cancelled', 'no_show') AND a.repeat_sent = 0
         AND a.date <= date(?, '-' || (s.repeat_weeks * 7) || ' day')
         AND a.date >= date(?, '-' || (s.repeat_weeks * 7 + ${LATE_WINDOW_DAYS}) || ' day')`).all(today, today);
     if (!due.length) return;

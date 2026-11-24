@@ -51,7 +51,7 @@ function setupReviews({ app, db, telegram, todayStr, siteUrl, last9 }) {
     const hour = new Date().getHours();
     if (hour < ASK_FROM_HOUR || hour >= ASK_TO_HOUR || !siteUrl()) return;
     const rows = db.prepare(`SELECT a.*, s.name AS service FROM appointments a JOIN services s ON s.id = a.service_id
-      WHERE a.status != 'cancelled' AND a.review_asked = 0 AND a.date < ? AND a.date >= date(?, '-${ASK_WITHIN_DAYS} day')
+      WHERE a.status NOT IN ('cancelled', 'no_show') AND a.review_asked = 0 AND a.date < ? AND a.date >= date(?, '-${ASK_WITHIN_DAYS} day')
         AND NOT EXISTS (SELECT 1 FROM reviews r WHERE r.appointment_id = a.id)`).all(todayStr(), todayStr());
     for (const a of rows) {
       const chat = chatFor(a);
@@ -81,6 +81,7 @@ function setupReviews({ app, db, telegram, todayStr, siteUrl, last9 }) {
     const a = apptByCode(req.params.code);
     if (!a) return res.status(404).json({ error: 'Посилання недійсне або застаріле' });
     if (a.status === 'cancelled') return res.status(400).json({ error: 'Цей запис скасовано' });
+    if (a.status === 'no_show') return res.status(400).json({ error: 'Цей візит не відбувся' });
     const rating = Number(req.body?.rating);
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) return res.status(400).json({ error: 'Оберіть оцінку від 1 до 5 зірок' });
     const text = String(req.body?.text ?? '').trim().slice(0, TEXT_MAX);

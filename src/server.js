@@ -15,7 +15,7 @@ const { setupTips } = require('./tips');
 const { setupAdminAppointments } = require('./admin-appointments');
 const { activeMasters, masterOffers, checkPassword: checkMasterPassword, hashPassword: hashStaffPassword, sha, setupMasterAdmin } = require('./masters');
 const { localBusinessJsonLd, setupSeo } = require('./seo');
-const { nowMin, freeSlots, masterFreeSlots, masterFreeAt, workHours, pickMaster, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
+const { nowMin, candidateMasters, freeSlots, masterFreeSlots, masterFreeAt, workHours, pickMaster, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
 const { securityHeaders, setupHealth } = require('./security');
@@ -294,6 +294,19 @@ app.get('/api/slots', (req, res) => {
   if (!service) return res.status(400).json({ error: 'Невідома послуга' });
   if (!isBookableDate(date, HORIZON_DAYS)) return res.status(400).json({ error: `Запис відкрито від сьогодні до ${maxDateStr(HORIZON_DAYS)}` });
   res.json({ date, slots: freeSlots(db, date, service.duration_min, { masterId: masterParam(req.query.masterId), serviceId: service.id }) });
+});
+
+// Дні, коли для послуги (і майстра) ніхто не працює: вихідні майстрів і свята кабінету. Сайт не пропонує їх для запису.
+app.get('/api/days-off', (req, res) => {
+  const serviceId = Number(req.query.serviceId) || null;
+  const ids = candidateMasters(db, masterParam(req.query.masterId), serviceId);
+  const off = [];
+  for (let i = 0; i <= HORIZON_DAYS; i++) {
+    const date = addDays(todayStr(), i);
+    if (!isBookableDate(date, HORIZON_DAYS)) break;
+    if (!ids.some((id) => workHours(db, date, id))) off.push(date);
+  }
+  res.json({ off });
 });
 
 // Найближчий день з вільним часом для послуги, щоб клієнт одразу бачив записи, а не порожню дату

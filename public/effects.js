@@ -36,6 +36,27 @@
     servicesList.querySelectorAll('.service').forEach((el, i) => reveal(el, (i % 6) * 90));
   }).observe(servicesList, { childList: true });
 
+  // Картки «Наші майстри» запливають з двох боків: непарні зліва, парні справа; рух сповільнюється до зупинки
+  const teamList = document.getElementById('teamList');
+  const sideIo = new IntersectionObserver((entries) => {
+    entries.forEach((en) => {
+      if (!en.isIntersecting) return;
+      const el = en.target;
+      sideIo.unobserve(el);
+      el.classList.add('side-in');
+      setTimeout(() => { el.classList.remove('side-l', 'side-r', 'side-in'); el.style.transitionDelay = ''; }, 1600);
+    });
+  }, { threshold: 0.15 });
+  new MutationObserver(() => {
+    teamList.querySelectorAll('.team-card:not(.side-l):not(.side-r)').forEach((el, i) => {
+      if (el.dataset.sideDone) return;
+      el.dataset.sideDone = '1';
+      el.classList.add(i % 2 === 0 ? 'side-l' : 'side-r');
+      el.style.transitionDelay = Math.min(i, 5) * 120 + 'ms';
+      sideIo.observe(el);
+    });
+  }).observe(teamList, { childList: true });
+
   // ----- 2. Кнопки часу з'являються хвилею -----
   const slotsGrid = document.getElementById('slotsGrid');
   new MutationObserver(() => {

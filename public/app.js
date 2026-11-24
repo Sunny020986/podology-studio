@@ -91,6 +91,7 @@
   // ----- Стан запису -----
   const state = { services: [], serviceId: null, date: today(), time: null, reqId: 0, masters: [], masterId: '' };
   // Майстри: вибір показується, лише коли їх більше одного. '' = «будь-який вільний»
+  const addDaysStr = (d, n) => { const [y, m, dd] = d.split('-').map(Number); const t = new Date(y, m - 1, dd + n); return [t.getFullYear(), String(t.getMonth() + 1).padStart(2, '0'), String(t.getDate()).padStart(2, '0')].join('-'); };
   const masterQ = () => (state.masterId ? '&masterId=' + state.masterId : '');
   const masterName = (id) => state.masters.find((m) => String(m.id) === String(id))?.name || '';
   function renderMasterOptions() {
@@ -155,7 +156,7 @@
     state.serviceId = state.services[0]?.id ?? null;
     $('#serviceSearch').value = state.services.find((s) => s.id === state.serviceId)?.name ?? '';
     $('#dateInput').min = today();
-    settingsReady.then((cfg) => { if (cfg.maxDate) $('#dateInput').max = cfg.maxDate; });
+    settingsReady.then((cfg) => { if (cfg.maxDate) { $('#dateInput').max = cfg.maxDate; state.maxDate = cfg.maxDate; } });
     $('#dateInput').value = state.date;
     pickNearestDate();
   }
@@ -180,11 +181,29 @@
     };
   }
 
+  // Вихідні дні (ніхто не працює): їх не пропонуємо для запису й черги очікування
+  let daysOff = new Set();
+  async function loadDaysOff() {
+    try {
+      const r = await fetch(`/api/days-off?serviceId=${state.serviceId || ''}` + masterQ());
+      daysOff = new Set(r.ok ? (await r.json()).off : []);
+    } catch { daysOff = new Set(); }
+  }
+  const nextWorkingDay = (from) => {
+    for (let i = 1; i <= 120; i++) {
+      const d = addDaysStr(from, i);
+      if (state.maxDate && d > state.maxDate) return null;
+      if (!daysOff.has(d)) return d;
+    }
+    return null;
+  };
+
   // Клієнт одразу бачить найближчий день з вільним часом, а не порожню дату
   async function pickNearestDate() {
     if (!state.serviceId) return refreshSlots();
     try {
       renderMasterOptions(); // послуга могла змінитись: показуємо лише майстрів, які її роблять
+      await loadDaysOff();
       const r = await fetch(`/api/next-slot?serviceId=${state.serviceId}` + masterQ());
       const data = r.ok ? await r.json() : null;
       if (data?.date) {
@@ -236,6 +255,20 @@
     const grid = $('#slotsGrid');
     grid.innerHTML = '';
     if (!state.serviceId || !state.date) return;
+    if (daysOff.has(state.date)) {
+      // Вихідний: переходимо на найближчий робочий день і кажемо про це
+      const next = nextWorkingDay(state.date);
+      const was = state.date;
+      if (next) {
+        state.date = next;
+        $('#dateInput').value = next;
+        state.offNotice = { date: next, text: `${fmtDate(was)} — вихідний, кабінет не працює. Показуємо ${fmtDate(next)}.` };
+        await refreshSlots();
+      } else {
+        $('#slotsHint').textContent = `${fmtDate(was)} — вихідний, кабінет не працює. Оберіть іншу дату.`;
+      }
+      return;
+    }
 
     const reqId = ++state.reqId;
     $('#slotsHint').textContent = 'Завантажую вільний час…';
@@ -251,7 +284,7 @@
       showWaitBox(true);
       return;
     }
-    $('#slotsHint').textContent = '';
+    $('#slotsHint').textContent = state.offNotice && state.offNotice.date === state.date ? state.offNotice.text : '';
     grid.innerHTML = data.slots.map((t) => `<button type="button" class="slot" data-time="${t}">${t}</button>`).join('');
   }
 

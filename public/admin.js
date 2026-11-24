@@ -52,6 +52,7 @@
   let clientQuery = '';
   let clientsArchived = false; // вкладка «Клієнти»: показувати архів замість активних
   let currentClient = null;
+  let currentClientData = null; // картка відкритого клієнта (для «Записати» та інших дій)
   // Хто увійшов: суперадмін (керує всім) або майстер (бачить лише своє)
   let me = { role: 'super' };
   let masters = [];          // для суперадміна: усі майстри для вибору у вкладках
@@ -747,6 +748,7 @@
   async function renderClient(key) {
     const c = await api('/api/admin/clients/' + key);
     currentClient = key;
+    currentClientData = c;
     const done = c.appointments.filter((a) => !['cancelled', 'no_show'].includes(a.status) && a.date < today()).length;
     const noShows = c.appointments.filter((a) => a.status === 'no_show').length;
     // неявки поспіль: від найновішого минулого запису назад, до першого візиту
@@ -759,6 +761,9 @@
       <button class="btn btn-ghost small" type="button" id="clientBack">← До списку клієнтів</button>
       <h3 style="margin:16px 0 4px">${esc(c.name)}</h3>
       <div class="muted">${esc(c.phone)} · візитів: ${done}${noShows ? ` · не прийшов: ${noShows}` : ''} · усього записів: ${c.appointments.length}</div>
+      <div class="toolbar client-actions">
+        <button class="btn btn-primary small" type="button" id="clientBook">+ Записати</button>
+      </div>
       ${streak >= 2 ? `<div class="warn-box">⚠ Клієнт не прийшов ${streak} рази поспіль. Варто підтвердити наступний запис дзвінком.</div>` : ''}
 
       <label class="step-label" for="clientNote" style="margin-top:20px">Загальна нотатка про клієнта</label>
@@ -1967,6 +1972,13 @@ ${isSuper() ? `
         const items = [...document.querySelectorAll('.sm-amount')].map((i) => ({ material_id: Number(i.dataset.material), amount: i.value || 0 }));
         await api('/api/admin/services/' + matService + '/materials', { method: 'PUT', body: { items } });
         return notify('Витрату збережено');
+      }
+
+      if (e.target.id === 'clientBook' && currentClientData) {
+        const c = currentClientData;
+        // суперадміну підставляємо майстра з останнього запису клієнта; майстер записує до себе
+        apptForm = { mode: 'new', preset: { name: c.name, phone: c.phone, masterId: isSuper() ? (c.appointments[0]?.master_id || '') : '' } };
+        return show('appointments');
       }
 
       if (e.target.dataset.courseBook) {

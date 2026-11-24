@@ -859,3 +859,6 @@ tr.is-muted td { opacity: .6; }
 .af-note { color: #7A4B12; }
 .af-hint { display: block; margin: -4px 0 8px; }
 .af-picked:not([hidden]) ~ .af-hint { display: none; } /* клієнта обрано з бази — підказка для нового не потрібна */
+
+/* Картка клієнта: дії під іменем */
+.client-actions { margin: 10px 0 0; flex-wrap: wrap; }

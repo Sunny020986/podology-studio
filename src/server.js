@@ -1116,6 +1116,17 @@ app.get('/api/admin/conversations/:id/messages', (req, res) => {
   res.json(messagesOf(req.params.id));
 });
 
+// Видалення одного повідомлення з діалогу: зникає і в адмінці, і в чаті відвідувача (якщо він відкритий). Скасувати не можна.
+app.delete('/api/admin/conversations/:id/messages/:mid', (req, res) => {
+  const id = req.params.id, mid = Number(req.params.mid);
+  if (!db.prepare('DELETE FROM messages WHERE id = ? AND conversation_id = ?').run(mid, id).changes) {
+    return res.status(404).json({ error: 'Повідомлення не знайдено' });
+  }
+  (clients.get(id) || new Set()).forEach((c) => send(c, { type: 'message_deleted', messageId: mid }));
+  notifyAdmins({ type: 'message_deleted', conversationId: id, messageId: mid });
+  res.json({ ok: true });
+});
+
 // Видалення діалогу разом з усіма його повідомленнями. Дію не можна скасувати.
 const deleteConversationTx = db.transaction((id) => {
   db.prepare('DELETE FROM messages WHERE conversation_id = ?').run(id);

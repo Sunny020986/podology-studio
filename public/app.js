@@ -396,6 +396,7 @@
   function addMsg(m) {
     const div = document.createElement('div');
     div.className = `bubble ${m.sender === 'client' ? 'mine' : 'theirs'}`;
+    div.dataset.msg = m.id;
     div.textContent = m.body;
     $('#chatBody').appendChild(div);
     $('#chatBody').scrollTop = 1e9;
@@ -429,6 +430,7 @@
         if (hint) hint.remove();
       }
       if (m.type === 'message') addMsg(m.message);
+      if (m.type === 'message_deleted') document.querySelector(`#chatBody [data-msg="${m.messageId}"]`)?.remove();
       if (m.type === 'error') addSystem(m.error);
     };
     chat.ws.onclose = () => setTimeout(connectChat, 3000);

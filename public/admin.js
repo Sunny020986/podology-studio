@@ -1248,7 +1248,7 @@
     return d.toLocaleString('uk-UA', sameDay ? { hour: '2-digit', minute: '2-digit' }
       : { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   };
-  const bubbleHtml = (m) => `<div class="bubble ${m.sender === 'operator' ? 'mine' : 'theirs'}"><div class="who">${m.sender === 'operator' ? 'Ви' : 'Клієнт'} · ${esc(localTime(m.created_at))}</div>${esc(m.body)}</div>`;
+  const bubbleHtml = (m) => `<div class="bubble ${m.sender === 'operator' ? 'mine' : 'theirs'}" data-msg="${m.id}"><div class="who"><span>${m.sender === 'operator' ? 'Ви' : 'Клієнт'} · ${esc(localTime(m.created_at))}</span><button class="bubble-del" type="button" data-del-msg="${m.id}" title="Видалити це повідомлення" aria-label="Видалити повідомлення">×</button></div>${esc(m.body)}</div>`;
 
   async function renderChat() {
     $('#view').innerHTML = `
@@ -1369,6 +1369,13 @@
           notify('Нове повідомлення в чаті');
         }
         // Новий діалог або нове повідомлення: оновлюємо список зліва, якщо вкладка чату відкрита
+        if ($('#convList')) refreshConvList().catch(() => {});
+      }
+      if (m.type === 'message_deleted') {
+        if (m.conversationId === currentConv) {
+          document.querySelector(`#threadBody [data-msg="${m.messageId}"]`)?.remove();
+          if ($('#threadBody') && !$('#threadBody .bubble')) $('#threadBody').innerHTML = '<div class="muted">Повідомлень ще немає.</div>';
+        }
         if ($('#convList')) refreshConvList().catch(() => {});
       }
       if (m.type === 'conversation_deleted') {
@@ -1686,7 +1693,7 @@ ${isSuper() ? `
   async function renderServices() {
     const list = await api('/api/admin/services');
     $('#view').innerHTML = `
-      <table class="card-table">
+      <table class="card-table svc-table">
         <thead><tr><th>Назва</th><th>Опис</th><th>Хв</th><th>Ціна, грн</th><th>Орієнтовна ціна (текст)</th><th title="Через скільки тижнів бот нагадає про повторний візит. 0 — не нагадувати">Повтор, тижнів</th><th title="Наприклад: встановлення скоби, потім 4 корекції кожні 21 день. 0 — без курсу">Курс лікування</th><th>Активна</th><th></th></tr></thead>
         <tbody>${list.map((x) => serviceRow(x, list)).join('')}</tbody>
       </table>
@@ -2713,6 +2720,14 @@ ${isSuper() ? `
         await api('/api/admin/telegram', { method: 'DELETE' });
         notify('Сповіщення вимкнено');
         return await renderTelegram();
+      }
+
+      if (e.target.dataset.delMsg) {
+        if (!currentConv) return;
+        if (!confirm('Видалити це повідомлення? Воно зникне і в клієнта. Відновити його буде неможливо.')) return;
+        await api(`/api/admin/conversations/${currentConv}/messages/${e.target.dataset.delMsg}`, { method: 'DELETE' });
+        notify('Повідомлення видалено');
+        return;
       }
 
       if (e.target.id === 'deleteConv') {

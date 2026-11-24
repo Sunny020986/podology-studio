@@ -75,6 +75,7 @@ function setupAudit({ app, db, last9 }) {
       return key ? client(key) : {};
     }],
     ['PUT', /^\/archive-months$/, 'Клієнти: строк архіву'],
+    ['DELETE', /^\/conversations\/([^/]+)\/messages\/\d+$/, 'Чат: повідомлення видалено', (m) => ({ target: 'діалог ' + m[1].slice(0, 6) })],
     ['DELETE', /^\/conversations\/(.+)$/, 'Чат: діалог видалено', (m) => ({ target: 'діалог ' + m[1].slice(0, 6) })],
     ['POST', /^\/chat-templates$/, 'Чат: шаблон додано', (m, b) => ({ target: b.title })],
     ['PUT', /^\/chat-templates\/(\d+)$/, 'Чат: шаблон змінено', (m) => named('chat_templates', m[1], 'title')],

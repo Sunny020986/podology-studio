@@ -156,7 +156,7 @@
     $('#adminTitle').textContent = isSuper() ? 'Адмінка' : 'Адмінка · ' + me.master.name;
     // Майстрові показуємо лише його вкладки; чат лише для адміністратора
     document.querySelectorAll('[data-tab]').forEach((b) => { b.hidden = !(isSuper() || MASTER_TABS.includes(b.dataset.tab)); });
-    if (isSuper()) connectWs();
+    connectWs(); // адміністратор: чат і записи наживо; майстер — лише події своїх записів
     renderMasterTg();
     renderMasterCal().catch(() => {});
     show('appointments');
@@ -1185,11 +1185,19 @@
     $('#threadBody').scrollTop = 1e9;
   }
 
+  let wsWasOpen = false;
   function connectWs() {
+    if (!token || (ws && ws.readyState <= 1)) return; // уже підключено або підключається
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}/ws?admin=${encodeURIComponent(token)}`);
+    ws.onopen = () => {
+      // Після обриву зв'язку могли пропустити зміни — тихо оновлюємо розклад
+      if (wsWasOpen) liveRefresh();
+      wsWasOpen = true;
+    };
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
+      if (m.type === 'appt') liveAppt(m);
       if (m.type === 'message') {
         if (m.conversationId === currentConv && $('#threadBody') && $('#replyForm') && !$('#replyForm').hidden) {
           const empty = $('#threadBody .muted');
@@ -1209,7 +1217,121 @@
       }
       if (m.type === 'error') notify(m.error, true);
     };
-    ws.onclose = () => { if (token) setTimeout(connectWs, 3000); };
+    ws.onclose = (ev) => {
+      if (!token) return;
+      if (ev.code === 4003) {
+        // Канал не пустив: сесія закінчилась (api виведе на сторінку входу) або забагато невдалих спроб — пробуємо пізніше
+        api('/api/admin/me').then(() => setTimeout(connectWs, 60000)).catch(() => {});
+        return;
+      }
+      setTimeout(connectWs, 3000);
+    };
+  }
+
+  // ----- Записи наживо: новий запис із сайту, скасування чи перенесення клієнтом -----
+  // Повідомлення внизу екрана + звук (вимикається кнопкою вгорі, вибір пам'ятає браузер).
+  // Зміни, зроблені персоналом в іншому вікні ('changed'), лише тихо оновлюють розклад.
+  let soundOn = true;
+  try { soundOn = localStorage.getItem('adminSound') !== '0'; } catch { /* немає доступу до сховища — звук увімкнено */ }
+  let audioCtx = null;
+  let unseen = 0;
+  const baseTitle = document.title;
+  const LIVE_TEXT = {
+    new: (m) => `🗓 Новий запис: ${m.client_name}, ${fmtDate(m.date)} о ${m.start_time} · ${m.service}${isSuper() && m.master ? ' · ' + m.master : ''}`,
+    cancelled: (m) => `❌ Клієнт скасував запис: ${m.client_name}, ${fmtDate(m.date)} о ${m.start_time}`,
+    moved: (m) => `🔁 Клієнт переніс запис: ${m.client_name}, тепер ${fmtDate(m.date)} о ${m.start_time}`,
+    confirmed: (m) => `✅ Клієнт підтвердив візит: ${m.client_name}, ${fmtDate(m.date)} о ${m.start_time}`,
+  };
+
+  function audio() {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    return audioCtx;
+  }
+  // Браузер дає грати звук лише після першого натискання на сторінці — готуємо його заздалегідь
+  document.addEventListener('pointerdown', () => { if (soundOn) try { audio(); } catch { /* без звуку */ } }, { passive: true });
+  function beep(cancel) {
+    if (!soundOn) return;
+    try {
+      const ctx = audio();
+      const t = ctx.currentTime;
+      // Новий запис — два тони вгору, скасування — вниз
+      (cancel ? [[880, 0], [587, 0.2]] : [[660, 0], [990, 0.2]]).forEach(([f, d]) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = 'sine';
+        o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, t + d);
+        g.gain.exponentialRampToValueAtTime(0.3, t + d + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.18);
+        o.connect(g).connect(ctx.destination);
+        o.start(t + d);
+        o.stop(t + d + 0.2);
+      });
+    } catch { /* браузер не дав звук — лишається повідомлення */ }
+  }
+  function renderSoundBtn() {
+    const b = $('#soundBtn');
+    b.textContent = soundOn ? '🔔 Звук' : '🔕 Без звуку';
+    b.setAttribute('aria-pressed', String(soundOn));
+    b.title = soundOn ? 'Звук нових записів увімкнено' : 'Звук нових записів вимкнено';
+  }
+  $('#soundBtn').addEventListener('click', () => {
+    soundOn = !soundOn;
+    try { localStorage.setItem('adminSound', soundOn ? '1' : '0'); } catch { /* вибір не збережеться після закриття */ }
+    renderSoundBtn();
+    if (soundOn) beep(); // одразу чути, як звучить
+  });
+  renderSoundBtn();
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && unseen) { unseen = 0; document.title = baseTitle; }
+  });
+
+  function liveToast(m) {
+    const box = $('#liveToasts');
+    const el = document.createElement('div');
+    el.className = 'live-toast' + (m.kind === 'cancelled' ? ' cancel' : '');
+    el.innerHTML = `<span class="live-text">${esc(LIVE_TEXT[m.kind](m))}</span>
+      <span class="live-actions"><button class="btn btn-primary small" type="button" data-live-open>Відкрити</button>
+      <button class="btn btn-ghost small" type="button" data-live-close aria-label="Закрити">✕</button></span>`;
+    el.querySelector('[data-live-open]').addEventListener('click', () => {
+      el.remove();
+      closeDay = null; absence = null; apptForm = null; apptWaitlist = false; apptArchive = false;
+      if (apptView !== 'table') calDate = m.date;
+      show('appointments');
+    });
+    el.querySelector('[data-live-close]').addEventListener('click', () => el.remove());
+    box.prepend(el);
+    while (box.children.length > 3) box.lastElementChild.remove(); // не більше 3 одночасно
+    setTimeout(() => el.remove(), 20000);
+  }
+
+  function liveAppt(m) {
+    if (LIVE_TEXT[m.kind]) {
+      liveToast(m);
+      if (m.kind !== 'confirmed') beep(m.kind === 'cancelled');
+      if (document.hidden) { unseen += 1; document.title = `(${unseen}) ${baseTitle}`; }
+    }
+    liveRefresh();
+  }
+
+  // Оновити «Записи», якщо вкладка відкрита і людина зараз нічого не заповнює
+  let liveTimer = null;
+  function liveRefresh() {
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(() => {
+      const tab = document.querySelector('[data-tab].active')?.dataset.tab;
+      const el = document.activeElement;
+      const typing = el && $('#view').contains(el) && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
+      if (tab !== 'appointments' || apptForm || absence || closeDay || typing) return updateCloseDayCount();
+      const wrap = $('.cal-wrap');
+      const pos = { x: window.scrollX, y: window.scrollY, l: wrap ? wrap.scrollLeft : 0, t: wrap ? wrap.scrollTop : 0 };
+      renderAppointments().then(() => {
+        const w = $('.cal-wrap');
+        if (w) { w.scrollLeft = pos.l; w.scrollTop = pos.t; }
+        window.scrollTo(pos.x, pos.y);
+      }).catch(() => {});
+    }, 400);
   }
 
   // ----- Розклад -----

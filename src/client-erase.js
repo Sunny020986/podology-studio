@@ -9,7 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 
-function setupClientErase({ app, db, dataDir, todayStr, last9, notifyMasterOf, waitlistCheck }) {
+function setupClientErase({ app, db, dataDir, todayStr, last9, notifyMasterOf, waitlistCheck, live = () => {} }) {
   const photoDir = path.join(dataDir, 'private', 'client-photos');
   const isKey = (k) => /^\d{9}$/.test(k);
   const apptsOf = (key) => db.prepare('SELECT id, date, start_time, status, client_name, client_phone, master_id FROM appointments').all()
@@ -85,6 +85,7 @@ function setupClientErase({ app, db, dataDir, todayStr, last9, notifyMasterOf, w
       notifyMasterOf(a.master_id, `🗑 Запис видалено на прохання клієнта\n${a.date.split('-').reverse().join('.')} о ${a.start_time}\n${a.client_name}`);
     }
     if (futureAppts.length) waitlistCheck();
+    if (appts.length) live('changed', {}, [...new Set(appts.map((a) => a.master_id))]); // відкриті адмінки оновлять розклад
     res.json({ ok: true, deleted: p });
   });
 }

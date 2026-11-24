@@ -4,7 +4,7 @@
 function setupAdminAppointments(ctx) {
   const {
     app, db, telegram, bookTx, masterFreeSlots, freeSlots, masterOffers, isValidDate, isTime,
-    toMin, toHHMM, todayStr, addDays, masterParam, ownsAppt, notifyMasterOf, last9,
+    toMin, toHHMM, todayStr, addDays, masterParam, ownsAppt, notifyMasterOf, last9, live = () => {},
   } = ctx;
   const ADMIN_HORIZON_DAYS = 365; // адмін може записати на рік уперед
   const fmt = (d) => d.split('-').reverse().join('.');
@@ -44,6 +44,7 @@ function setupAdminAppointments(ctx) {
       const mName = masterName(r.masterId);
       telegram.notifyMaster(`🗓 Запис додано в адмінці\n${service.name} · майстер: ${mName}\n${fmt(b.date)} о ${b.time}\n${name}, ${phone}`);
       if (req.role !== 'master') notifyMasterOf(r.masterId, `🗓 Новий запис до вас\n${service.name}\n${fmt(b.date)} о ${b.time}\n${name}, ${phone}`);
+      live('changed', { id: Number(r.id), master_id: r.masterId, date: b.date, start_time: b.time, client_name: name, service: service.name, master: mName });
       res.status(201).json({ id: Number(r.id), master: mName });
     } catch (e) {
       if (e.status) return res.status(e.status).json({ error: e.message });
@@ -91,6 +92,7 @@ function setupAdminAppointments(ctx) {
     } else if (req.role !== 'master') {
       notifyMasterOf(target, `🔁 Ваш запис перенесено\n${a.service}\n${fmt(date)} о ${time}\n${a.client_name}, ${a.client_phone}`);
     }
+    live('changed', { id, master_id: target, date, start_time: time, client_name: a.client_name, service: a.service, master: newName }, [a.master_id, target]);
     res.json({ ok: true, date, time, master: newName });
   });
 

@@ -905,3 +905,24 @@ tr.is-muted td { opacity: .6; }
 /* Звіт по майстрах */
 .rep-table td:not(:first-child), .rep-table th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
 .rep-total td { font-weight: 700; border-top: 2px solid var(--line); }
+
+/* Записи наживо: повідомлення внизу екрана адмінки */
+.live-toasts {
+  position: fixed; right: 16px; bottom: 16px; z-index: 50; width: min(420px, calc(100vw - 32px));
+  display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+}
+.live-toast {
+  pointer-events: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--card); border: 1px solid var(--accent-text); border-left: 5px solid var(--accent-text);
+  border-radius: 12px; padding: 10px 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, .12); font-size: 14px;
+}
+.live-toast.cancel { border-color: var(--danger); }
+.live-toast .live-text { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.live-toast .live-actions { display: flex; gap: 6px; margin-left: auto; }
+.live-toast .btn { white-space: nowrap; }
+@media print { .live-toasts { display: none; } }
+@media (max-width: 640px) {
+  .live-toasts { right: 12px; left: 12px; bottom: 12px; width: auto; }
+  .admin-top { gap: 8px; flex-wrap: wrap; }
+  .admin-top h2 { min-width: 0; overflow-wrap: anywhere; }
+}

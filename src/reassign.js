@@ -16,7 +16,7 @@ const SUGGEST_GAP_MIN = 120; // варіанти одного дня — не б
 function setupReassign(ctx) {
   const {
     app, db, telegram, masterFreeSlots, masterFreeAt, workHours, bufferMin, nowMin, weekdayOf,
-    toMin, toHHMM, todayStr, addDays, isValidDate, isTime, last9, notifyMasterOf, setStatus, waitlistCheck, studioPhone,
+    toMin, toHHMM, todayStr, addDays, isValidDate, isTime, last9, notifyMasterOf, setStatus, waitlistCheck, studioPhone, live = () => {},
   } = ctx;
   const WD = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
   const fmt = (d) => d.split('-').reverse().join('.');
@@ -263,6 +263,11 @@ function setupReassign(ctx) {
         (blocksCreated ? `\nЗапис до майстра закрито на днів: ${blocksCreated}.` : ''));
       notifyMasterOf(r.master.id, `📋 Ваші записи на ${period} опрацьовано: передано іншим — ${counts.master}, перенесено — ${counts.time}, скасовано — ${counts.cancel}.` +
         (blocksCreated ? ' Запис до вас на ці дні закрито.' : ''));
+    }
+    if (changed) {
+      // адмінка наживо: оновити розклад у майстра, якого немає, і в тих, кому передали записи
+      const touched = [...new Set([r.master.id, ...actions.filter((x) => x.master_id).map((x) => Number(x.master_id))])];
+      live('changed', {}, touched);
     }
     res.json({ results, counts, blocks_created: blocksCreated, call_list: callList });
   });

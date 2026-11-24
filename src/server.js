@@ -100,6 +100,18 @@ function tokenOk(t) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// Активний майстер за токеном сесії (або null)
+function masterBySession(token) {
+  return (token && db.prepare(`SELECT m.id, m.name FROM master_sessions ss JOIN masters m ON m.id = ss.master_id
+    WHERE ss.token_hash = ? AND ss.expires_at > ? AND m.status = 'active'`).get(sha(token), Date.now())) || null;
+}
+// Хто відкрив канал адмінки: адміністратор (чат і всі записи) чи майстер (лише події своїх записів)
+function wsStaff(token) {
+  if (tokenOk(token)) return { role: 'admin', masterId: null };
+  const m = masterBySession(token);
+  return m ? { role: 'master', masterId: m.id } : null;
+}
+
 // Після LOGIN_MAX_FAILS невдалих спроб адреса блокується до кінця вікна, навіть із правильним токеном:
 // інакше перебір паролів просто тривав би далі.
 const requireAdmin = (req, res, next) => {
@@ -113,8 +125,7 @@ const requireAdmin = (req, res, next) => {
     return next();
   }
   // Майстер: токен сесії після входу за логіном і паролем; заблокований майстер одразу втрачає доступ
-  const s = token && db.prepare(`SELECT m.id, m.name FROM master_sessions ss JOIN masters m ON m.id = ss.master_id
-    WHERE ss.token_hash = ? AND ss.expires_at > ? AND m.status = 'active'`).get(sha(token), Date.now());
+  const s = masterBySession(token);
   if (s) {
     req.role = 'master';
     req.masterId = s.id;
@@ -318,6 +329,7 @@ function readChangeHours() {
 const accounts = setupAccounts({
   app, db, telegram, freeSlots, todayStr, isBookableDate, isTime,
   horizonDays: HORIZON_DAYS, makeLimiter, notifyMaster: (t) => telegram.notifyMaster(t), changeHours: readChangeHours, notifyMasterOf,
+  live: (kind, a) => liveAppt(kind, a),
 });
 
 
@@ -352,6 +364,7 @@ app.post('/api/appointments', (req, res) => {
     notifyMasterOf(assigned, `🗓 Новий запис до вас\n${service.name}\n${date.split('-').reverse().join('.')} о ${time}\n${cleanName}, ${cleanPhone}${cleanComment ? '\nКоментар: ' + cleanComment : ''}${warn}`);
     bookingLimiter.hit(req.ip);
     telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, master: masterName, warn });
+    liveAppt('new', { id: Number(id), master_id: assigned, date, start_time: time, client_name: cleanName, service: service.name, master: masterName });
     res.status(201).json({ id: Number(id), date, time, service: service.name, master: masterName, remindLink: telegram.remindLink(remindCode) });
   } catch (e) {
     if (e.status) return res.status(e.status).json({ error: e.message });
@@ -456,6 +469,7 @@ setupClientPhotos({
 setupAdminAppointments({
   app, db, telegram, bookTx, masterFreeSlots, freeSlots, masterOffers, isValidDate, isTime,
   toMin, toHHMM, todayStr, addDays, masterParam, ownsAppt, notifyMasterOf, last9,
+  live: (kind, a, masters) => liveAppt(kind, a, masters),
 });
 // «Майстер не вийде»: масова передача, перенесення чи скасування записів (лише суперадмін).
 // setStatusTx і waitlist оголошені нижче, тому — через обгортки (викликаються вже під час запитів)
@@ -465,6 +479,7 @@ setupReassign({
   setStatus: (id, status) => setStatusTx(id, status),
   waitlistCheck: () => waitlist.checkWaitlist().catch(() => {}),
   studioPhone: () => readStudio().phone,
+  live: (kind, a, masters) => liveAppt(kind, a, masters),
 });
 
 // Відгуки: публічні маршрути і маршрути адмінки (останні вже під перевіркою доступу)
@@ -478,6 +493,7 @@ setupReports({ app, db, todayStr, hasStarted: (a) => hasStarted(a) });
 setupClientErase({
   app, db, dataDir: DATA_DIR, todayStr, last9, notifyMasterOf,
   waitlistCheck: () => waitlist.checkWaitlist().catch(() => {}),
+  live: (kind, a, masters) => liveAppt(kind, a, masters),
 });
 materialsApply = setupMaterials({ app, db, notify: (t) => telegram.notifyMaster(t) }).applyVisit;
 setupCourse({
@@ -585,9 +601,10 @@ app.patch('/api/admin/appointments/:id', (req, res) => {
   }
   try {
     setStatusTx(Number(req.params.id), status);
+    const c = apptForClient('a.id = ?', Number(req.params.id));
+    if (c) liveAppt('changed', c);
     if (status === 'cancelled') {
       notifyClientCancelled(Number(req.params.id));
-      const c = apptForClient('a.id = ?', Number(req.params.id));
       if (c && req.role !== 'master') notifyMasterOf(c.master_id, `❌ Запис скасовано\n${c.service}, ${telegram.fmtDate(c.date)} о ${c.start_time}\n${c.client_name}, ${c.client_phone}`);
       waitlist.checkWaitlist().catch(() => {}); // звільнився час: може, хтось на нього чекає
     }
@@ -624,20 +641,21 @@ app.post('/api/admin/close-day', (req, res) => {
     const id = Number(it?.id);
     const status = it?.status;
     if (!['done', 'no_show', 'cancelled'].includes(status)) return { id, ok: false, error: 'Некоректний статус' };
-    const a = db.prepare('SELECT id, date, start_time, status FROM appointments WHERE id = ?').get(id);
+    const a = db.prepare('SELECT id, date, start_time, status, master_id FROM appointments WHERE id = ?').get(id);
     if (!a || !ownsAppt(req, id)) return { id, ok: false, error: 'Запис не знайдено' };
     if (!['new', 'confirmed'].includes(a.status)) return { id, ok: false, error: 'Запис уже позначено' };
     if (!hasStarted(a)) return { id, ok: false, error: 'Запис ще не почався' };
     try {
       setStatusTx(id, status);
-      return { id, ok: true, status };
+      return { id, ok: true, status, master_id: a.master_id };
     } catch (e) {
       return { id, ok: false, error: e.message };
     }
   });
   const ok = results.filter((r) => r.ok);
+  if (ok.length) liveAppt('changed', {}, [...new Set(ok.map((r) => r.master_id))]);
   res.json({
-    results,
+    results: results.map(({ master_id, ...r }) => r),
     counts: { done: ok.filter((r) => r.status === 'done').length, no_show: ok.filter((r) => r.status === 'no_show').length,
       cancelled: ok.filter((r) => r.status === 'cancelled').length, failed: results.length - ok.length },
   });
@@ -1118,6 +1136,22 @@ const send = (ws, obj) => {
 };
 const notifyAdmins = (obj) => admins.forEach((a) => send(a, obj));
 
+// Події записів наживо для адмінки: новий запис з сайту, скасування чи перенесення клієнтом, зміни персоналу.
+// Адміністратор отримує всі; майстер — лише ті, що стосуються його записів (masters — кого стосується подія).
+// kind: 'new' | 'cancelled' | 'moved' | 'confirmed' — від клієнта (адмінка показує й подає звук); 'changed' — тихе оновлення.
+const staffSockets = new Set();
+function liveAppt(kind, a, masters = [a.master_id]) {
+  const payload = { type: 'appt', kind, id: a.id, date: a.date, start_time: a.start_time, client_name: a.client_name, service: a.service, master: a.master || '' };
+  for (const s of staffSockets) {
+    if (s.meta.role === 'master') {
+      // Сесія закінчилась або майстра заблокували — канал закривається, події більше не йдуть
+      if (!masterBySession(s.meta.token)) { staffSockets.delete(s); s.close(4003, 'forbidden'); continue; }
+      if (!masters.map(Number).includes(s.meta.masterId)) continue;
+    }
+    send(s, payload);
+  }
+}
+
 function detach(ws) {
   const id = ws.meta.conversationId;
   if (id && clients.has(id)) clients.get(id).delete(ws);
@@ -1127,22 +1161,27 @@ function detach(ws) {
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://localhost');
   const adminParam = url.searchParams.get('admin');
-  let isAdmin = false;
+  let role = 'client';
+  let masterId = null;
   if (adminParam !== null) {
-    // Спроба зайти як адмін: ті самі обмеження, що й для входу через сторінку
+    // Адміністратор (чат і всі записи) або майстер (лише події своїх записів, без чату).
+    // Ті самі обмеження спроб, що й для входу через сторінку
     const ip = wsIp(req);
-    if (loginLimiter.blocked(ip) || !tokenOk(adminParam)) {
+    const who = loginLimiter.blocked(ip) ? null : wsStaff(adminParam);
+    if (!who) {
       if (!loginLimiter.blocked(ip)) loginLimiter.hit(ip);
       return ws.close(4003, 'forbidden');
     }
-    isAdmin = true;
+    role = who.role;
+    masterId = who.masterId;
   }
-  ws.meta = { role: isAdmin ? 'admin' : 'client', conversationId: null, hits: [] };
+  ws.meta = { role, masterId, token: role === 'client' ? null : adminParam, conversationId: null, hits: [] };
 
-  if (isAdmin) {
+  if (role === 'admin') {
     admins.add(ws);
     send(ws, { type: 'admin_ready' });
   }
+  if (role === 'admin' || role === 'master') staffSockets.add(ws);
 
   ws.on('message', (raw) => {
     let msg;
@@ -1153,7 +1192,7 @@ wss.on('connection', (ws, req) => {
     }
     try {
       if (ws.meta.role === 'admin') handleAdmin(ws, msg);
-      else handleClient(ws, msg);
+      else if (ws.meta.role === 'client') handleClient(ws, msg); // майстер у цьому каналі лише слухає події записів
     } catch (e) {
       console.error(e);
       send(ws, { type: 'error', error: 'Помилка сервера' });
@@ -1162,6 +1201,7 @@ wss.on('connection', (ws, req) => {
 
   ws.on('close', () => {
     admins.delete(ws);
+    staffSockets.delete(ws);
     detach(ws);
   });
 });

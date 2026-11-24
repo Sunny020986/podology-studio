@@ -880,3 +880,10 @@ tr.is-muted td { opacity: .6; }
 .sched-print td:first-child { white-space: nowrap; }
 .sched-print td:last-child { width: 22mm; }
 .sched-foot { margin-top: 4mm; font-size: 8.5pt; color: #666; text-align: right; }
+
+/* Свята кабінету */
+.cal-holiday { background: repeating-linear-gradient(45deg, #FDF3E7, #FDF3E7 10px, #F8E6CF 10px, #F8E6CF 20px); }
+.cal-holiday span { color: #7A4B12; font-weight: 600; }
+.hol-list li { display: grid; gap: 6px; }
+.hol-list li > .btn { justify-self: start; }
+.hol-warn { margin-top: 0; }

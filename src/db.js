@@ -5,6 +5,7 @@ const { createAccountTables } = require('./accounts');
 const { createReviewTables } = require('./reviews');
 const { createRepeatColumns } = require('./repeat');
 const { createCourseColumns } = require('./course');
+const { createHolidayTable } = require('./holidays');
 const { createWaitlistTable } = require('./waitlist');
 const { createTipsTable } = require('./tips');
 const { createMasterTables } = require('./masters');
@@ -133,6 +134,7 @@ function openDb() {
   createReviewTables(db);
   createRepeatColumns(db);
   createCourseColumns(db);
+  createHolidayTable(db);
   createWaitlistTable(db);
   createTipsTable(db);
   seed(db);

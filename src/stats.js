@@ -5,6 +5,7 @@ function setupStats({ app, db, toMin, weekdayOf, last9 }) {
 
   // Скільки хвилин за день доступно для запису в одного майстра: робочі години мінус перерви й блокування
   function availableMinutes(date, masterId) {
+    if (db.prepare('SELECT 1 FROM studio_holidays WHERE date = ?').get(date)) return 0; // свято кабінету
     const wd = weekdayOf(date);
     const h = db.prepare('SELECT start_time, end_time FROM master_hours WHERE master_id = ? AND weekday = ?').get(masterId, wd);
     if (!h || !h.start_time) return 0;

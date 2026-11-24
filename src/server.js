@@ -26,6 +26,7 @@ const { setupCalendar } = require('./calendar');
 const { setupMaterials } = require('./materials');
 const { setupCertificates } = require('./certificates');
 const { setupReassign } = require('./reassign');
+const { setupHolidays } = require('./holidays');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 let materialsApply = null; // списання матеріалів при «Відбувся» (src/materials.js), задається нижче
 const DATA_DIR = path.dirname(DB_PATH);
@@ -468,6 +469,7 @@ setupReviews({ app, db, telegram, todayStr, siteUrl, last9 });
 setupRepeatReminders({ db, telegram, todayStr, siteUrl, last9 });
 setupCalendar({ app, db, todayStr, addDays });
 setupCertificates({ app, db, todayStr, isValidDate });
+setupHolidays({ app, db, todayStr, isValidDate, addDays });
 materialsApply = setupMaterials({ app, db, notify: (t) => telegram.notifyMaster(t) }).applyVisit;
 setupCourse({
   app, db, telegram, todayStr, siteUrl, last9,

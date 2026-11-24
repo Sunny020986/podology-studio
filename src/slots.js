@@ -59,8 +59,9 @@ function bufferMin(db) {
   return Number.isInteger(n) && n > 0 ? n : 0;
 }
 
-// Робочі години майстра на дату в хвилинах або null, якщо вихідний
+// Робочі години майстра на дату в хвилинах або null, якщо вихідний (свій чи свято кабінету — src/holidays.js)
 function workHours(db, dateStr, masterId) {
+  if (db.prepare('SELECT 1 FROM studio_holidays WHERE date = ?').get(dateStr)) return null; // свято: кабінет не працює
   const hours = db.prepare('SELECT start_time, end_time FROM master_hours WHERE master_id = ? AND weekday = ?').get(masterId, weekdayOf(dateStr));
   return hours && hours.start_time ? { start: toMin(hours.start_time), end: toMin(hours.end_time) } : null;
 }

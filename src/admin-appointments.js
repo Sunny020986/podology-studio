@@ -104,13 +104,14 @@ function setupAdminAppointments(ctx) {
     const masters = db.prepare("SELECT id, name, status FROM masters WHERE status != 'deleted' ORDER BY id").all()
       .filter((m) => (only ? m.id === only : m.status === 'active'));
     const ids = masters.map((m) => m.id);
-    if (!ids.length) return res.json({ from, to, masters: [], hours: [], breaks: [], blocks: [], appointments: [] });
+    if (!ids.length) return res.json({ from, to, masters: [], hours: [], breaks: [], blocks: [], holidays: [], appointments: [] });
     const inList = `(${ids.map(() => '?').join(',')})`;
     res.json({
       from, to, masters,
       hours: db.prepare(`SELECT master_id, weekday, start_time, end_time FROM master_hours WHERE master_id IN ${inList}`).all(...ids),
       breaks: db.prepare(`SELECT master_id, weekday, start_time, end_time, note FROM breaks WHERE master_id IN ${inList}`).all(...ids),
       blocks: db.prepare(`SELECT master_id, date, start_time, end_time, note FROM blocks WHERE master_id IN ${inList} AND date BETWEEN ? AND ?`).all(...ids, from, to),
+      holidays: db.prepare('SELECT date, note FROM studio_holidays WHERE date BETWEEN ? AND ?').all(from, to),
       appointments: db.prepare(`SELECT a.id, a.master_id, a.date, a.start_time, a.end_time, a.status, a.client_name, a.client_phone, a.client_comment, a.service_id, s.name AS service
         FROM appointments a JOIN services s ON s.id = a.service_id
         WHERE a.master_id IN ${inList} AND a.date BETWEEN ? AND ? AND a.status != 'cancelled' ORDER BY a.date, a.start_time`).all(...ids, from, to),

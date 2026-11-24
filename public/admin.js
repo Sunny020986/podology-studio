@@ -649,7 +649,10 @@
       const h = hoursOf(c);
       const wd = weekdayOf(c.date);
       let inner = '';
-      if (!h || !h.start_time) {
+      const hol = (data.holidays || []).find((x) => x.date === c.date);
+      if (hol) {
+        inner += '<div class="cal-off cal-holiday" style="top:0;height:' + height + 'px"><span>Свято' + (hol.note ? ': ' + esc(hol.note) : '') + '</span></div>';
+      } else if (!h || !h.start_time) {
         inner += '<div class="cal-off" style="top:0;height:' + height + 'px"><span>Вихідний</span></div>';
       } else {
         if (toMin(h.start_time) > start) inner += '<div class="cal-off" style="top:0;height:' + y(h.start_time) + 'px"></div>';
@@ -1207,9 +1210,18 @@ ${isSuper() ? `
         <input name="note" placeholder="Причина (необов'язково)" maxlength="100">
         <button class="btn btn-primary small" type="submit">Заблокувати час</button>
       </form>
-      <ul class="list" id="blockList"></ul>`;
+      <ul class="list" id="blockList"></ul>
+      ${isSuper() ? `<h3 style="margin:32px 0 6px">Свята й вихідні кабінету</h3>
+      <div class="muted">День закривається для всіх майстрів: клієнти не зможуть записатися, а перенесення його не пропонують.</div>
+      <form class="inline-form" id="holForm" style="margin-top:10px">
+        <label>Дата <input type="date" name="date" min="${today()}" required></label>
+        <input name="note" maxlength="80" placeholder="Назва, наприклад «Новий рік»">
+        <button class="btn btn-primary small" type="submit">Закрити день для всіх</button>
+      </form>
+      <div id="holList"></div>` : ''}`;
     await renderBreaks();
     await renderBlocks();
+    if (isSuper()) await renderHolidays();
     $('#changeHoursForm')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       try {
@@ -1260,6 +1272,32 @@ ${isSuper() ? `
           <button class="btn btn-ghost small" type="button" data-del-break="${g.ids.join(',')}">Видалити</button></li>`).join('')
       : '<li class="muted">Перерв ще немає.</li>';
   }
+
+  // Свята кабінету (розділ у «Розкладі», лише суперадмін)
+  async function renderHolidays() {
+    const box = $('#holList');
+    if (!box) return;
+    const list = await api('/api/admin/holidays');
+    box.innerHTML = list.length ? '<ul class="list hol-list">' + list.map((h) => `<li>
+        <div><strong>${DAYS[(new Date(h.date + 'T12:00:00').getDay() + 6) % 7]}, ${fmtDate(h.date)}</strong>${h.note ? ' — ' + esc(h.note) : ''}</div>
+        ${h.affected.length ? `<div class="warn-box hol-warn">⚠ На цей день є записи: ${h.affected.map((a) => `${esc(a.master || 'без майстра')} — ${a.count}`).join(', ')}.
+          Їх треба перенести або скасувати:
+          <div class="toolbar" style="margin:6px 0 0;flex-wrap:wrap">${h.affected.filter((a) => a.master_id).map((a) => `<button class="btn btn-ghost small" type="button" data-hol-fix="${a.master_id}|${h.date}">Опрацювати записи: ${esc(a.master)}</button>`).join('')}</div></div>` : ''}
+        <button class="btn btn-ghost small" type="button" data-hol-del="${h.date}">Відкрити день знову</button>
+      </li>`).join('') + '</ul>' : '<p class="muted">Свят і вихідних кабінету не заплановано.</p>';
+  }
+  $('#view').addEventListener('submit', async (e) => {
+    if (e.target.id !== 'holForm') return;
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      const r = await api('/api/admin/holidays', { method: 'POST', body: { date: f.get('date'), note: f.get('note') } });
+      const n = r.affected.reduce((s, a) => s + a.count, 0);
+      notify(n ? `День закрито. Увага: на цей день уже є записи (${n}) — їх треба перенести або скасувати` : 'День закрито для всіх майстрів', n > 0);
+      e.target.reset();
+      await renderHolidays();
+    } catch (err) { notify(err.message, true); }
+  });
 
   // Разові блокування на обрану дату (розділ у вкладці «Розклад»)
   async function renderBlocks() {
@@ -1806,6 +1844,21 @@ ${isSuper() ? `
   view.addEventListener('click', async (e) => {
     try {
       if (e.target.id === 'calPrint') return await printSchedule();
+      if (e.target.dataset.holDel) {
+        if (!confirm('Відкрити цей день знову? Клієнти зможуть записатися.')) return;
+        await api('/api/admin/holidays/' + e.target.dataset.holDel, { method: 'DELETE' });
+        notify('День відкрито');
+        return await renderHolidays();
+      }
+      if (e.target.dataset.holFix) {
+        // записи майстра на свято — у «Майстер не вийде» на цю дату (закривати не треба: свято вже закрите)
+        const [mid, date] = e.target.dataset.holFix.split('|');
+        closeDay = null;
+        apptForm = null;
+        absence = { step: 'form', masterId: Number(mid), from: date, to: date, block: false, note: '' };
+        show('appointments');
+        return await loadAbsencePlan();
+      }
       if (e.target.closest('#apptCloseDay')) { closeDay = {}; return await renderCloseDay(); }
       if (e.target.id === 'cdBack') { closeDay = null; return await renderAppointments(); }
       if (e.target.dataset.cdAll) {

@@ -268,6 +268,32 @@
     } catch { /* лічильник необов'язковий */ }
   }
 
+  // ----- Друк розкладу: день (кожен майстер — окрема сторінка) або тиждень одного майстра -----
+  let calPrintData = null;
+  async function printSchedule() {
+    const d = calPrintData;
+    if (!d) return;
+    const DAY_NAMES = ['Понеділок', 'Вівторок', 'Середа', 'Четвер', 'П\'ятниця', 'Субота', 'Неділя'];
+    const studio = (await api('/api/settings')).studio;
+    const days = [];
+    for (let x = d.from; x <= d.to; x = shiftDay(x, 1)) days.push(x);
+    const pages = d.masters.map((m) => {
+      const list = d.appointments.filter((a) => a.master_id === m.id);
+      const byDay = days.map((day) => ({ day, rows: list.filter((a) => a.date === day) })).filter((g) => !d.week || g.rows.length);
+      const period = d.week ? fmtDate(d.from) + ' – ' + fmtDate(d.to) : DAY_NAMES[weekdayOf(d.from)] + ', ' + fmtDate(d.from);
+      return `<section class="sched-print">
+        <div class="sched-head"><div><strong>${esc(m.name)}</strong> · ${esc(period)}</div><div>${esc(studio.name)}</div></div>
+        ${byDay.length ? byDay.map((g) => `${d.week ? `<h4>${DAY_NAMES[weekdayOf(g.day)]}, ${fmtDate(g.day)}</h4>` : ''}
+          ${g.rows.length ? `<table><thead><tr><th>Час</th><th>Послуга</th><th>Клієнт</th><th>Телефон</th><th>Коментар</th><th>Позначка</th></tr></thead>
+            <tbody>${g.rows.map((a) => `<tr><td>${a.start_time}–${a.end_time}</td><td>${esc(a.service)}</td><td>${esc(a.client_name)}</td>
+              <td>${esc(a.client_phone)}</td><td>${esc(a.client_comment || '')}</td><td>${a.status === 'new' ? 'не підтв.' : ''}</td></tr>`).join('')}</tbody></table>`
+            : '<p>Записів немає.</p>'}`).join('') : '<p>Записів на цей тиждень немає.</p>'}
+        <div class="sched-foot">Надруковано ${new Date().toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' })}</div>
+      </section>`;
+    });
+    printHtml(pages.join('') || '<p>Немає майстрів для друку.</p>');
+  }
+
   // ----- «Закрити день»: позначити минулі записи «Відбувся» / «Не прийшов» / «Скасовано» за раз -----
   let closeDay = null; // null | { rows }
   const CLOSE_OPTS = [['done', 'Відбувся'], ['no_show', 'Не прийшов'], ['cancelled', 'Скасовано'], ['keep', 'Лишити як є']];
@@ -657,6 +683,7 @@
         '<button class="btn btn-ghost small" type="button" data-cal-shift="0">Сьогодні</button>' +
         '<button class="btn btn-ghost small" type="button" data-cal-shift="1" aria-label="Вперед">›</button>' +
         '<input type="date" id="calDate" value="' + calDate + '"><b class="cal-title">' + title + '</b>' +
+        '<button class="btn btn-ghost small" type="button" id="calPrint">Друк</button>' +
         '<span class="muted cal-hint">Клік по вільному місцю — новий запис, по запису — перенесення.</span>' +
       '</div>' +
       (cols.length && cols[0].master
@@ -665,6 +692,7 @@
         : '<p class="muted">Немає активних майстрів для показу.</p>');
     window.__calAppts = data.appointments; // для відкриття форми перенесення
     window.__calMasters = data.masters;
+    calPrintData = { week, from, to, masters: data.masters, appointments: data.appointments };
     updateCloseDayCount();
   }
 
@@ -1777,6 +1805,7 @@ ${isSuper() ? `
 
   view.addEventListener('click', async (e) => {
     try {
+      if (e.target.id === 'calPrint') return await printSchedule();
       if (e.target.closest('#apptCloseDay')) { closeDay = {}; return await renderCloseDay(); }
       if (e.target.id === 'cdBack') { closeDay = null; return await renderAppointments(); }
       if (e.target.dataset.cdAll) {

@@ -868,3 +868,15 @@ tr.is-muted td { opacity: .6; }
 .count-badge[hidden] { display: none; }
 .cd-table .cd-status { min-width: 150px; }
 @media (max-width: 700px) { .cd-table .cd-status { min-width: 0; width: 100%; } }
+
+/* Друк розкладу */
+.sched-print { width: 186mm; margin: 12mm auto; color: #1f1d27; font-family: Inter, system-ui, sans-serif; font-size: 10.5pt; }
+.sched-print + .sched-print { break-before: page; page-break-before: always; }
+.sched-head { display: flex; justify-content: space-between; gap: 8mm; border-bottom: 1.5px solid #333; padding-bottom: 2mm; margin-bottom: 4mm; font-size: 12pt; }
+.sched-print h4 { margin: 5mm 0 2mm; font-size: 11pt; }
+.sched-print table { width: 100%; border-collapse: collapse; }
+.sched-print th, .sched-print td { border: 1px solid #999; padding: 1.6mm 2mm; text-align: left; vertical-align: top; }
+.sched-print th { background: #f1f1f1; font-weight: 600; }
+.sched-print td:first-child { white-space: nowrap; }
+.sched-print td:last-child { width: 22mm; }
+.sched-foot { margin-top: 4mm; font-size: 8.5pt; color: #666; text-align: right; }

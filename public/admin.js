@@ -157,6 +157,7 @@
     document.querySelectorAll('[data-tab]').forEach((b) => { b.hidden = !(isSuper() || MASTER_TABS.includes(b.dataset.tab)); });
     if (isSuper()) connectWs();
     renderMasterTg();
+    renderMasterCal().catch(() => {});
     show('appointments');
   }
 
@@ -443,6 +444,50 @@
       ? '<span>✅ Telegram підключено: ваші нові записи, скасування й перенесення надходять у бот.</span><button class="btn btn-ghost small" type="button" id="mtgOff">Відключити</button>'
       : '<span>Підключіть Telegram, щоб отримувати свої нові записи, скасування й перенесення.</span><button class="btn btn-primary small" type="button" id="mtgOn">Підключити Telegram</button>';
   }
+  // Посилання на календар: показується один раз, тому одразу пропонуємо скопіювати
+  function calLinkHtml(r) {
+    return '<div class="cal-link">' +
+      '<input class="input" readonly value="' + esc(r.url) + '" aria-label="Посилання на календар">' +
+      '<div class="toolbar"><button class="btn btn-primary small" type="button" data-cal-copy="' + esc(r.url) + '">Скопіювати</button>' +
+      '<a class="btn btn-ghost small" href="' + esc(r.webcal) + '">Додати в календар iPhone</a></div>' +
+      '<small class="muted">Посилання показується лише зараз — збережіть його. ' +
+      (r.public ? 'У Google Календарі: «Інші календарі» → «+» → «З URL-адреси».'
+        : 'Google Календар не зможе його відкрити, поки сайт працює лише в локальній мережі; iPhone у тій самій Wi-Fi мережі — зможе.') +
+      ' У календар потрапляє лише послуга й ім\'я клієнта, без телефону.</small></div>';
+  }
+  async function renderMasterCal(fresh) {
+    const box = $('#masterCal');
+    if (isSuper()) { box.hidden = true; return; }
+    box.hidden = false;
+    const st = fresh || await api('/api/admin/me/calendar');
+    box.innerHTML = fresh
+      ? '<span>📅 Нове посилання на ваш календар:</span>' + calLinkHtml(fresh)
+      : st.enabled
+        ? '<span>📅 Календар у телефоні підключено. Загубили посилання — створіть нове, старе перестане працювати.</span><span class="toolbar"><button class="btn btn-ghost small" type="button" id="mcalNew" data-replace="1">Нове посилання</button><button class="btn btn-ghost small" type="button" id="mcalOff">Вимкнути</button></span>'
+        : '<span>📅 Додайте свої записи в календар телефона: він сам оновлюватиметься.</span><button class="btn btn-primary small" type="button" id="mcalNew">Отримати посилання</button>';
+  }
+  $('#masterCal').addEventListener('click', async (e) => {
+    try {
+      if (e.target.id === 'mcalNew') {
+        if (e.target.dataset.replace && !confirm('Старе посилання перестане працювати. Створити нове?')) return;
+        return await renderMasterCal(await api('/api/admin/me/calendar', { method: 'POST' }));
+      }
+      if (e.target.id === 'mcalOff') {
+        if (!confirm('Вимкнути календар? Посилання перестане працювати.')) return;
+        await api('/api/admin/me/calendar', { method: 'DELETE' });
+        notify('Календар вимкнено');
+        return await renderMasterCal();
+      }
+    } catch (err) { notify(err.message, true); }
+  });
+  // Кнопка «Скопіювати» (і для майстра, і в картці майстра у суперадміна)
+  document.addEventListener('click', async (e) => {
+    const url = e.target.dataset && e.target.dataset.calCopy;
+    if (!url) return;
+    try { await navigator.clipboard.writeText(url); notify('Посилання скопійовано'); }
+    catch { e.target.closest('.cal-link').querySelector('input').select(); notify('Виділіть і скопіюйте посилання вручну'); }
+  });
+
   $('#masterTg').addEventListener('click', async (e) => {
     try {
       if (e.target.id === 'mtgOn') {
@@ -970,6 +1015,7 @@ ${isSuper() ? `
             (m.photo ? '<img src="/media/masters/' + esc(m.photo) + '" alt="Фото: ' + esc(m.name) + '" id="mfPhotoImg">' : '<div class="mf-photo-empty" id="mfPhotoImg">' + esc(m.name.slice(0, 1)) + '</div>') +
             '<label class="btn btn-ghost small">Завантажити фото<input type="file" id="mfPhoto" accept="image/*" hidden></label>' +
             (m.photo ? '<button class="btn btn-ghost small danger" type="button" id="mfPhotoDel">Прибрати фото</button>' : '') + '</div>') +
+        (isNew ? '' : '<div class="step-label">Календар у телефоні</div><div id="mfCal"><button class="btn btn-ghost small" type="button" id="mfCalNew">Створити посилання для майстра</button> <small class="muted">Нове посилання скасовує попереднє.</small></div>') +
         '<fieldset class="svc-field"><legend class="step-label">Послуги, які робить майстер</legend>' +
         '<div class="toolbar"><button class="btn btn-ghost small" type="button" id="svcAll">Позначити всі</button><button class="btn btn-ghost small" type="button" id="svcNone">Зняти всі</button></div>' +
         '<div class="svc-grid">' + services.map((s) => '<label class="svc-check"><input type="checkbox" name="svc" value="' + s.id + '"' +
@@ -1321,6 +1367,13 @@ ${isSuper() ? `
       if (e.target.id === 'clientsCsv') return await downloadClientsCsv();
       if (e.target.id === 'masterNew') { editingMaster = 'new'; return await renderMasters(); }
       if (e.target.id === 'masterBack') { editingMaster = null; return await renderMasters(); }
+      if (e.target.id === 'mfCalNew') {
+        if (!confirm('Створити нове посилання на календар майстра? Попереднє перестане працювати.')) return;
+        const r = await api('/api/admin/masters/' + editingMaster + '/calendar', { method: 'POST' });
+        $('#mfCal').innerHTML = calLinkHtml(r);
+        return;
+      }
+
       if (e.target.id === 'mfPhotoDel') {
         await api('/api/admin/masters/' + editingMaster + '/photo', { method: 'DELETE' });
         notify('Фото прибрано');

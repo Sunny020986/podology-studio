@@ -22,6 +22,7 @@ const { securityHeaders, setupHealth } = require('./security');
 const { setupClientPhotos } = require('./client-photos');
 const { setupPrivacy } = require('./privacy');
 const { validateCourse, setupCourse } = require('./course');
+const { setupCalendar } = require('./calendar');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const DATA_DIR = path.dirname(DB_PATH);
 
@@ -382,6 +383,7 @@ const MASTER_ROUTES = [
   /^GET \/blocks$/, /^POST \/blocks$/, /^DELETE \/blocks\/\d+$/, /^GET \/waitlist$/, /^DELETE \/waitlist\/\d+$/,
   /^POST \/appointments$/, /^PATCH \/appointments\/\d+\/move$/, /^GET \/slots$/, /^GET \/calendar$/,
   /^POST \/me\/telegram$/, /^DELETE \/me\/telegram$/,
+  /^GET \/me\/calendar$/, /^POST \/me\/calendar$/, /^DELETE \/me\/calendar$/,
 ];
 app.use('/api/admin', (req, res, next) => {
   if (req.role === 'super' || MASTER_ROUTES.some((rx) => rx.test(`${req.method} ${req.path}`))) return next();
@@ -450,6 +452,7 @@ setupAdminAppointments({
 // Відгуки: публічні маршрути і маршрути адмінки (останні вже під перевіркою доступу)
 setupReviews({ app, db, telegram, todayStr, siteUrl, last9 });
 setupRepeatReminders({ db, telegram, todayStr, siteUrl, last9 });
+setupCalendar({ app, db, todayStr, addDays });
 setupCourse({
   app, db, telegram, todayStr, siteUrl, last9,
   canSeeClient: (req, key) => req.role === 'super' || listClients(undefined, undefined, req.masterId).some((c) => c.key === key),

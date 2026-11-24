@@ -753,3 +753,9 @@ html, body { overflow-x: clip; }       /* страховка: нічого не 
 .cs-missed .cs-state { color: #A23B3B; }
 .cs-todo .cs-state { color: var(--muted); }
 @media (max-width: 700px) { .course-fields input { width: 72px; } .course-fields select { max-width: 100%; } }
+
+/* Календар майстра */
+.cal-link { display: grid; gap: 8px; width: 100%; margin-top: 6px; }
+.cal-link input { font-size: 13px; }
+.cal-link .toolbar { margin: 0; flex-wrap: wrap; }
+.tg-strip .toolbar { margin: 0; }

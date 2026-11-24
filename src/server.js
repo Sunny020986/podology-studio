@@ -28,6 +28,7 @@ const { setupCertificates } = require('./certificates');
 const { setupReassign } = require('./reassign');
 const { setupHolidays } = require('./holidays');
 const { setupClientErase } = require('./client-erase');
+const { setupChatTemplates } = require('./chat-templates');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 let materialsApply = null; // списання матеріалів при «Відбувся» (src/materials.js), задається нижче
 const DATA_DIR = path.dirname(DB_PATH);
@@ -471,6 +472,7 @@ setupRepeatReminders({ db, telegram, todayStr, siteUrl, last9 });
 setupCalendar({ app, db, todayStr, addDays });
 setupCertificates({ app, db, todayStr, isValidDate });
 setupHolidays({ app, db, todayStr, isValidDate, addDays });
+setupChatTemplates({ app, db, readStudio });
 setupClientErase({
   app, db, dataDir: DATA_DIR, todayStr, last9, notifyMasterOf,
   waitlistCheck: () => waitlist.checkWaitlist().catch(() => {}),

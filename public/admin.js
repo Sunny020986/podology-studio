@@ -1100,14 +1100,70 @@
           </div>
           <div class="thread-body" id="threadBody"><div class="muted">Оберіть діалог у списку.</div></div>
           <form class="reply-form" id="replyForm" hidden>
+            <div class="tpl-menu" id="tplMenu" role="menu" hidden></div>
+            <button class="btn btn-ghost" type="button" id="tplBtn" aria-expanded="false" aria-controls="tplMenu">Шаблони</button>
             <input class="input" id="replyInput" maxlength="1000" placeholder="Відповідь клієнту" autocomplete="off">
             <button class="btn btn-primary" type="submit">Надіслати</button>
           </form>
         </div>
-      </div>`;
+      </div>
+      <details class="tpl-manage" id="tplManage">
+        <summary>Шаблони відповідей</summary>
+        <p class="muted">Можна вставити {адреса}, {телефон}, {назва}, {сайт} — підставиться з налаштувань кабінету.</p>
+        <div id="tplList"></div>
+        <form class="tpl-form" id="tplForm">
+          <input class="input" name="title" maxlength="40" placeholder="Назва, наприклад «Як доїхати»" required>
+          <textarea class="input" name="body" rows="3" maxlength="1000" placeholder="Текст відповіді" required></textarea>
+          <div class="toolbar"><button class="btn btn-primary small" type="submit" id="tplSave">Додати шаблон</button>
+          <button class="btn btn-ghost small" type="button" id="tplCancel" hidden>Скасувати</button></div>
+        </form>
+      </details>`;
+    await loadTemplates();
     await refreshConvList();
     if (currentConv) await openConv(currentConv);
   }
+
+  // Швидкі відповіді (шаблони) у чаті
+  let chatTemplates = [];
+  async function loadTemplates() {
+    chatTemplates = await api('/api/admin/chat-templates');
+    const list = $('#tplList');
+    if (list) {
+      list.innerHTML = chatTemplates.length ? '<ul class="list tpl-list">' + chatTemplates.map((t) => `<li>
+          <div><strong>${esc(t.title)}</strong><div class="muted">${esc(t.text)}</div></div>
+          <span class="toolbar" style="margin:0"><button class="btn btn-ghost small" type="button" data-tpl-edit="${t.id}">Змінити</button>
+          <button class="btn btn-ghost small danger" type="button" data-tpl-del="${t.id}">Видалити</button></span></li>`).join('') + '</ul>'
+        : '<p class="muted">Шаблонів поки немає.</p>';
+    }
+    const menu = $('#tplMenu');
+    if (menu) {
+      menu.innerHTML = chatTemplates.length
+        ? chatTemplates.map((t) => `<button type="button" role="menuitem" class="tpl-item" data-tpl-use="${t.id}"><strong>${esc(t.title)}</strong><span>${esc(t.text.slice(0, 80))}${t.text.length > 80 ? '…' : ''}</span></button>`).join('')
+        : '<div class="muted" style="padding:8px">Шаблонів немає — додайте їх нижче, у «Шаблони відповідей».</div>';
+    }
+  }
+  const tplMenuOpen = (open) => {
+    const m = $('#tplMenu');
+    if (!m) return;
+    m.hidden = !open;
+    $('#tplBtn')?.setAttribute('aria-expanded', String(open));
+  };
+  document.addEventListener('click', (e) => { if (!e.target.closest('#tplMenu, #tplBtn')) tplMenuOpen(false); });
+  $('#view').addEventListener('submit', async (e) => {
+    if (e.target.id !== 'tplForm') return;
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const id = e.target.dataset.editing;
+    try {
+      await api('/api/admin/chat-templates' + (id ? '/' + id : ''), { method: id ? 'PUT' : 'POST', body: { title: f.get('title'), body: f.get('body') } });
+      notify(id ? 'Шаблон змінено' : 'Шаблон додано');
+      delete e.target.dataset.editing;
+      e.target.reset();
+      $('#tplSave').textContent = 'Додати шаблон';
+      $('#tplCancel').hidden = true;
+      await loadTemplates();
+    } catch (err) { notify(err.message, true); }
+  });
 
   async function refreshConvList() {
     const convs = await api('/api/admin/conversations');
@@ -1845,6 +1901,42 @@ ${isSuper() ? `
   view.addEventListener('click', async (e) => {
     try {
       if (e.target.id === 'calPrint') return await printSchedule();
+      if (e.target.id === 'tplBtn') return tplMenuOpen($('#tplMenu').hidden);
+      if (e.target.closest('[data-tpl-use]')) {
+        const t = chatTemplates.find((x) => x.id === Number(e.target.closest('[data-tpl-use]').dataset.tplUse));
+        const input = $('#replyInput');
+        if (t && input) {
+          input.value = input.value.trim() ? input.value.trim() + ' ' + t.text : t.text;
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+        }
+        return tplMenuOpen(false);
+      }
+      if (e.target.dataset.tplEdit) {
+        const t = chatTemplates.find((x) => x.id === Number(e.target.dataset.tplEdit));
+        const f = $('#tplForm');
+        if (!t || !f) return;
+        f.title.value = t.title;
+        f.body.value = t.body;
+        f.dataset.editing = t.id;
+        $('#tplSave').textContent = 'Зберегти зміни';
+        $('#tplCancel').hidden = false;
+        return f.title.focus();
+      }
+      if (e.target.id === 'tplCancel') {
+        const f = $('#tplForm');
+        delete f.dataset.editing;
+        f.reset();
+        $('#tplSave').textContent = 'Додати шаблон';
+        e.target.hidden = true;
+        return;
+      }
+      if (e.target.dataset.tplDel) {
+        if (!confirm('Видалити шаблон?')) return;
+        await api('/api/admin/chat-templates/' + e.target.dataset.tplDel, { method: 'DELETE' });
+        notify('Шаблон видалено');
+        return await loadTemplates();
+      }
       if (e.target.dataset.holDel) {
         if (!confirm('Відкрити цей день знову? Клієнти зможуть записатися.')) return;
         await api('/api/admin/holidays/' + e.target.dataset.holDel, { method: 'DELETE' });

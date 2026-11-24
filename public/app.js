@@ -44,14 +44,6 @@
     $('#promoPill').hidden = !first.title;
     $('#promoPill').textContent = first.title ? `🎁 ${first.title}` : '';
 
-    const offers = [
-      ['🎁', S.promo_first], ['🤝', S.promo_friend], ['💝', S.promo_gift], ['🩺', S.partners],
-    ].map(([icon, t]) => ({ icon, ...splitBlock(t) })).filter((o) => o.title);
-    $('#offers').hidden = !offers.length;
-    $('#offersList').innerHTML = offers.map((o) => `
-      <div class="card offer"><div class="offer-icon">${o.icon}</div>
-        <div class="offer-title">${esc(o.title)}</div><div class="offer-text">${esc(o.text)}</div></div>`).join('');
-
     // Лічильники: показуються лише заповнені числа з адмінки
     const plural = (n, one, few, many) => (n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many);
     const stats = [

@@ -2215,7 +2215,7 @@ ${isSuper() ? `
         <textarea name="${name}" maxlength="${max}" rows="${rows}">${esc(s[name])}</textarea>
         ${hint ? `<small class="muted">${hint}</small>` : ''}
       </label>`;
-    const PROMO_HINT = 'Перший рядок це заголовок, далі опис. Порожнє поле ховає картку на сайті.';
+    const PROMO_HINT = 'Перший рядок це заголовок, далі опис. Порожнє поле вимикає цей текст на сайті.';
     $('#view').innerHTML = `
       <form id="studioForm" class="studio-form">
         <h3 class="studio-group">Основне</h3>
@@ -2229,6 +2229,7 @@ ${isSuper() ? `
         ${field('site_url', 'Адреса сайту, наприклад https://podology.example.ua', 200, 'Потрібна для посилань у Telegram: відгуки, повторний візит, список очікування')}
         ${field('review_url', 'Посилання «Залишити відгук у Google»', 300, 'Google Профіль компанії → «Попросити відгуки» → скопіювати посилання. Порожнє поле ховає кнопку.')}
         <h3 class="studio-group">Акції</h3>
+        <p class="muted">Блок «Акції» з головної сторінки прибрано. Перший рядок «Знижки на перший візит» показується плашкою зверху сторінки, а текст «Приведи друга» — у картці після запису. «Подарункові сертифікати» і «Для лікарів і салонів» на сайті зараз не показуються.</p>
         <label class="studio-field">
           <span>Відсоток знижки на перший візит (0 — без знижки)</span>
           <input name="first_discount_pct" type="number" min="0" max="90" step="1" value="${esc(s.first_discount_pct)}" style="max-width:120px">

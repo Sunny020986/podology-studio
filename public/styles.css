@@ -290,10 +290,7 @@ textarea.input { resize: vertical; min-height: 96px; }
   background: var(--accent); color: var(--accent-ink, #fff); font-size: 14px; font-weight: 600; text-decoration: none;
   box-shadow: 0 4px 14px rgba(142, 216, 198, 0.45); transition: transform 0.2s ease; }
 @media (hover: hover) { .promo-pill:hover { transform: translateY(-1px); } }
-.offer { display: grid; gap: 8px; align-content: start; }
-.offer-icon { font-size: 28px; line-height: 1; }
-.offer-title { font-size: 18px; font-weight: 600; }
-.offer-text, .about-text, .faq-answer { color: var(--muted); line-height: 1.6; white-space: pre-line; }
+.about-text, .faq-answer { color: var(--muted); line-height: 1.6; white-space: pre-line; }
 .about { max-width: 860px; }
 .about-name { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
 /* Питання в три колонки на всю ширину: кожне питання окремою карткою */
@@ -365,9 +362,10 @@ textarea.input { resize: vertical; min-height: 96px; }
 .acc-slots { display: flex; flex-wrap: wrap; gap: 8px; }
 .acc-tg { display: grid; gap: 6px; margin: 12px 0 4px; }
 
-/* Водяні кола на картках акцій (ефект з effects.js) */
-.fx .offer { position: relative; overflow: hidden; isolation: isolate; transition: transform 0.3s ease, box-shadow 0.3s ease; }
-@media (hover: hover) { .fx .offer:hover { transform: translateY(-3px); box-shadow: 0 12px 28px rgba(95, 185, 170, 0.18); } }
+/* Водяні кола на картках майстрів (ефект з effects.js). Перехід лише коли картка вже запливла (side-l/side-r знято), щоб не скоротити її появу */
+.fx .team-card { position: relative; overflow: hidden; isolation: isolate; }
+.fx .team-card:not(.side-l):not(.side-r) { transition: transform 0.3s ease, box-shadow 0.3s ease; }
+@media (hover: hover) { .fx .team-card:not(.side-l):not(.side-r):hover { transform: translateY(-3px); box-shadow: 0 12px 28px rgba(95, 185, 170, 0.18); } }
 .water-ring {
   position: absolute; z-index: -1; width: 24px; height: 24px; margin: -12px 0 0 -12px;
   border-radius: 50%; pointer-events: none;

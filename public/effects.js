@@ -81,11 +81,10 @@
     dot.addEventListener('animationend', () => dot.remove());
   });
 
-  // ----- 3а. Водяна хвиля на картках акцій -----
+  // ----- 3а. Водяна хвиля на картках майстрів -----
   // Через чверть секунди після наведення від курсора один раз розходиться хвиля, як від краплі на воді.
   // Наступна хвиля буде лише після того, як курсор вийде з картки й наведеться знову.
-  const offersList = document.getElementById('offersList');
-  if (offersList) {
+  if (teamList) {
     const RIPPLE_DELAY_MS = 250;
     let hovered = null;   // картка під курсором
     let timer = null;
@@ -105,16 +104,16 @@
     }
 
     // На телефоні наведення немає: хвиля з'являється одразу від дотику
-    offersList.addEventListener('pointerdown', (e) => {
+    teamList.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'mouse') return;
-      const card = e.target.closest('.offer');
+      const card = e.target.closest('.team-card');
       if (card) dropRipple(card, e.clientX, e.clientY);
     });
-    offersList.addEventListener('pointermove', (e) => {
+    teamList.addEventListener('pointermove', (e) => {
       if (e.pointerType !== 'mouse') return;
       lastX = e.clientX;
       lastY = e.clientY;
-      const card = e.target.closest('.offer');
+      const card = e.target.closest('.team-card');
       if (card === hovered) return;
       clearTimeout(timer);
       hovered = card;
@@ -123,7 +122,7 @@
         if (hovered === card) dropRipple(card, lastX, lastY);
       }, RIPPLE_DELAY_MS);
     });
-    offersList.addEventListener('pointerleave', () => {
+    teamList.addEventListener('pointerleave', () => {
       clearTimeout(timer);
       hovered = null;
     });

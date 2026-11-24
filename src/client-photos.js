@@ -3,7 +3,8 @@
 // - файли лежать у data/private/, а не в public: прямого посилання на фото немає;
 // - віддаються тільки через адмінку з перевіркою доступу (суперадмін — будь-яке, майстер — клієнтів, яких він веде);
 // - фото приходить уже стиснуте в JPEG з браузера: при перекодуванні зникають метадані (EXIF), зокрема GPS;
-// - видаляти може суперадмін або майстер, який це фото додав.
+// - видаляти може суперадмін або майстер, який це фото додав;
+// - нове фото приймається лише після позначки «клієнт дав згоду» (дані про здоров'я — особлива категорія).
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -32,11 +33,44 @@ function setupClientPhotos({ app, db, dataDir, canSeeClient }) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_client_photos_key ON client_photos(phone_key);
+    CREATE TABLE IF NOT EXISTS client_photo_consent (
+      phone_key  TEXT PRIMARY KEY,
+      granted    INTEGER NOT NULL,
+      changed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      changed_by TEXT NOT NULL DEFAULT ''
+    );
   `);
 
   const dir = path.join(dataDir, 'private', 'client-photos');
   const row = (id) => db.prepare('SELECT * FROM client_photos WHERE id = ?').get(id);
   const canDelete = (req, p) => req.role === 'super' || p.master_id === req.masterId;
+  const consentRow = (key) => db.prepare('SELECT granted, changed_at, changed_by FROM client_photo_consent WHERE phone_key = ?').get(key);
+  const hasConsent = (key) => !!consentRow(key)?.granted;
+  const who = (req) => (req.role === 'master'
+    ? (db.prepare('SELECT name FROM masters WHERE id = ?').get(req.masterId)?.name || 'Майстер')
+    : 'Адміністратор');
+
+  // Згода клієнта на фото стоп: без неї нові фото не приймаються.
+  // Хто й коли позначив або відкликав — зберігається.
+  app.get('/api/admin/clients/:key/photo-consent', (req, res) => {
+    const key = req.params.key;
+    if (!isClientKey(key)) return res.status(400).json({ error: 'Некоректний клієнт' });
+    if (!canSeeClient(req, key)) return res.status(403).json({ error: 'Це клієнт іншого майстра' });
+    const r = consentRow(key);
+    res.json(r ? { granted: !!r.granted, changed_at: r.changed_at, changed_by: r.changed_by } : { granted: false, changed_at: null, changed_by: '' });
+  });
+  app.put('/api/admin/clients/:key/photo-consent', (req, res) => {
+    const key = req.params.key;
+    if (!isClientKey(key)) return res.status(400).json({ error: 'Некоректний клієнт' });
+    if (!canSeeClient(req, key)) return res.status(403).json({ error: 'Це клієнт іншого майстра' });
+    if (typeof req.body?.granted !== 'boolean') return res.status(400).json({ error: 'Вкажіть, чи є згода' });
+    const by = who(req);
+    db.prepare(`INSERT INTO client_photo_consent (phone_key, granted, changed_by) VALUES (?, ?, ?)
+                ON CONFLICT(phone_key) DO UPDATE SET granted = excluded.granted, changed_by = excluded.changed_by, changed_at = datetime('now')`)
+      .run(key, req.body.granted ? 1 : 0, by);
+    const r = consentRow(key);
+    res.json({ granted: !!r.granted, changed_at: r.changed_at, changed_by: r.changed_by });
+  });
 
   // Список фото клієнта (найновіші зверху)
   app.get('/api/admin/clients/:key/photos', (req, res) => {
@@ -56,6 +90,7 @@ function setupClientPhotos({ app, db, dataDir, canSeeClient }) {
       const key = req.params.key;
       if (!isClientKey(key)) return res.status(400).json({ error: 'Некоректний клієнт' });
       if (!canSeeClient(req, key)) return res.status(403).json({ error: 'Це клієнт іншого майстра' });
+      if (!hasConsent(key)) return res.status(403).json({ error: 'Спершу позначте, що клієнт дав згоду на фото' });
       const taken = String(req.query.date || '');
       if (!isValidDate(taken)) return res.status(400).json({ error: 'Вкажіть дату фото' });
       const note = String(req.query.note || '').trim();

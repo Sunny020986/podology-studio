@@ -511,10 +511,14 @@
 
       <h3 style="margin:28px 0 4px">Фото стану стоп</h3>
       <p class="muted" style="margin:0 0 10px">Бачать лише адміністратор і майстер, який веде клієнта. Фото стискається в браузері, а разом із ним прибираються метадані, зокрема місце зйомки.</p>
-      <div class="toolbar">
+      <div class="consent-box">
+        <label class="consent-check"><input type="checkbox" id="cpConsentBox" disabled> Клієнт дав письмову згоду на фото стоп</label>
+        <div class="muted" id="cpConsentInfo">Перевіряю…</div>
+      </div>
+      <div class="toolbar" id="cpTools">
         <input type="date" id="cpDate" value="${today()}" aria-label="Дата фото" style="max-width:170px">
         <input type="text" id="cpNote" maxlength="300" placeholder="Примітка, наприклад: після 2-ї процедури" aria-label="Примітка до фото" style="flex:1;min-width:200px">
-        <label class="btn btn-primary small">Додати фото<input type="file" id="cpFile" accept="image/jpeg,image/png,image/webp,image/*" hidden></label>
+        <label class="btn btn-primary small" id="cpAddBtn">Додати фото<input type="file" id="cpFile" accept="image/jpeg,image/png,image/webp,image/*" hidden disabled></label>
       </div>
       <div id="cpList" class="photo-grid"><span class="muted">Завантажую…</span></div>
 
@@ -533,8 +537,28 @@
     loadClientPhotos(key).catch((err) => { $('#cpList').innerHTML = '<span class="muted">' + esc(err.message) + '</span>'; });
   }
 
+  // Згода на фото: без неї додати фото не можна (сервер теж перевіряє)
+  function applyConsent(c) {
+    const box = $('#cpConsentBox');
+    if (!box) return;
+    box.disabled = false;
+    box.checked = c.granted;
+    $('#cpFile').disabled = !c.granted;
+    $('#cpAddBtn').classList.toggle('is-disabled', !c.granted);
+    $('#cpAddBtn').title = c.granted ? '' : 'Спершу позначте згоду клієнта';
+    // changed_at у базі — UTC; показуємо дату за Києвом
+    const when = c.changed_at ? new Date(c.changed_at.replace(' ', 'T') + 'Z').toLocaleDateString('uk-UA', { timeZone: 'Europe/Kyiv' }) : '';
+    $('#cpConsentInfo').textContent = c.granted
+      ? `Позначено ${when}, ${c.changed_by}.`
+      : c.changed_at
+        ? `Згоду відкликано ${when}, ${c.changed_by}. Нові фото додати не можна; наявні видаліть, якщо клієнт просить.`
+        : 'Без згоди фото додати не можна. Попросіть клієнта підписати згоду, потім поставте позначку.';
+  }
+
   // Фото стану стоп: список і самі зображення (з токеном, тому через fetch, а не просте посилання)
   async function loadClientPhotos(key) {
+    api('/api/admin/clients/' + key + '/photo-consent').then(applyConsent)
+      .catch((err) => { const i = $('#cpConsentInfo'); if (i) i.textContent = err.message; });
     const box = $('#cpList');
     const list = await api('/api/admin/clients/' + key + '/photos');
     if (!list.length) { box.innerHTML = '<span class="muted">Фото ще немає. Додайте перше, щоб бачити динаміку лікування.</span>'; return; }
@@ -552,6 +576,26 @@
       } catch { /* картка лишиться з порожнім місцем, список працює */ }
     }));
   }
+
+  // Позначка або відкликання згоди
+  $('#view').addEventListener('change', async (e) => {
+    if (e.target.id !== 'cpConsentBox' || !currentClient) return;
+    const box = e.target;
+    const granted = box.checked;
+    if (!granted && !confirm('Відкликати згоду? Нові фото додати буде не можна. Наявні фото лишаться — видаліть їх, якщо клієнт просить.')) {
+      box.checked = true;
+      return;
+    }
+    box.disabled = true;
+    try {
+      applyConsent(await api('/api/admin/clients/' + currentClient + '/photo-consent', { method: 'PUT', body: { granted } }));
+      notify(granted ? 'Згоду позначено' : 'Згоду відкликано');
+    } catch (err) {
+      box.checked = !granted;
+      box.disabled = false;
+      notify(err.message, true);
+    }
+  });
 
   // Завантаження: фото стискається в JPEG 1600 пікселів (це прибирає метадані), далі йде на сервер
   $('#view').addEventListener('change', async (e) => {
@@ -1050,6 +1094,7 @@ ${isSuper() ? `
         <h3 class="studio-group">Основне</h3>
         ${field('name', 'Назва кабінету', 80)}
         ${field('tagline', 'Підзаголовок над головним заголовком', 120)}
+        ${field('owner_legal', 'Хто обробляє дані, наприклад «ФОП Іваненко Олена Петрівна»', 120, 'Показується на сторінці <a href="/privacy" target="_blank" rel="noopener">«Обробка персональних даних»</a>. Текст цієї сторінки — шаблон, варто перевірити його з юристом.')}
         <h3 class="studio-group">Контакти й карта</h3>
         ${field('city', 'Місто', 80, 'Потрібне, щоб карта знайшла правильну вулицю')}
         ${field('address', 'Адреса', 200)}

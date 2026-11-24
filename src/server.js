@@ -20,6 +20,7 @@ const { freeSlots, masterFreeSlots, pickMaster, bufferMin, isValidDate, isBookab
 const PORT = Number(process.env.PORT) || 3000;
 const { securityHeaders, setupHealth } = require('./security');
 const { setupClientPhotos } = require('./client-photos');
+const { setupPrivacy } = require('./privacy');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const DATA_DIR = path.dirname(DB_PATH);
 
@@ -225,6 +226,7 @@ const STUDIO_FIELDS = {
   name: 80, tagline: 120, address: 200, phone: 40, city: 80, review_url: 300,
   promo_first: 400, promo_friend: 400, promo_gift: 400, partners: 600,
   master_name: 80, master_about: 2000, faq: 6000, stat_years: 6, stat_clients: 6, site_url: 200,
+  owner_legal: 120,
 };
 function readStudio() {
   const rows = db.prepare('SELECT key, value FROM settings').all();
@@ -367,7 +369,7 @@ const MASTER_ROUTES = [
   /^GET \/me$/, /^POST \/logout$/,
   /^GET \/appointments$/, /^PATCH \/appointments\/\d+$/, /^PUT \/appointments\/\d+\/note$/, /^GET \/appointments\/\d+\/review-link$/,
   /^GET \/clients$/, /^GET \/clients\/\d{9}$/, /^PUT \/clients\/\d{9}\/note$/,
-  /^GET \/clients\/\d{9}\/photos$/, /^POST \/clients\/\d{9}\/photos$/, /^GET \/client-photos\/\d+\/file$/, /^DELETE \/client-photos\/\d+$/,
+  /^GET \/clients\/\d{9}\/photos$/, /^POST \/clients\/\d{9}\/photos$/, /^GET \/clients\/\d{9}\/photo-consent$/, /^PUT \/clients\/\d{9}\/photo-consent$/, /^GET \/client-photos\/\d+\/file$/, /^DELETE \/client-photos\/\d+$/,
   /^GET \/schedule$/, /^PUT \/schedule\/\d$/, /^GET \/breaks$/, /^POST \/breaks$/, /^DELETE \/breaks\/\d+$/,
   /^GET \/blocks$/, /^POST \/blocks$/, /^DELETE \/blocks\/\d+$/, /^GET \/waitlist$/, /^DELETE \/waitlist\/\d+$/,
   /^POST \/appointments$/, /^PATCH \/appointments\/\d+\/move$/, /^GET \/slots$/, /^GET \/calendar$/,
@@ -442,6 +444,7 @@ setupReviews({ app, db, telegram, todayStr, siteUrl, last9 });
 setupRepeatReminders({ db, telegram, todayStr, siteUrl, last9 });
 setupStats({ app, db, toMin, weekdayOf, last9 });
 setupTips({ app, db, siteUrl, readStudio });
+setupPrivacy({ app, readStudio });
 setupSeo({ app, db, siteUrl });
 const waitlist = setupWaitlist({
   app, db, telegram, freeSlots, isBookableDate, horizonDays: HORIZON_DAYS, todayStr, siteUrl, makeLimiter, last9,

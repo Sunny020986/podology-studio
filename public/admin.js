@@ -834,6 +834,7 @@
       <div class="muted">${esc(c.phone)} · візитів: ${done}${noShows ? ` · не прийшов: ${noShows}` : ''} · усього записів: ${c.appointments.length}</div>
       <div class="toolbar client-actions">
         <button class="btn btn-primary small" type="button" id="clientBook">+ Записати</button>
+        ${isSuper() ? '<button class="btn btn-ghost small danger" type="button" id="clientErase">Видалити клієнта</button>' : ''}
       </div>
       ${streak >= 2 ? `<div class="warn-box">⚠ Клієнт не прийшов ${streak} рази поспіль. Варто підтвердити наступний запис дзвінком.</div>` : ''}
 
@@ -2114,6 +2115,23 @@ ${isSuper() ? `
         const items = [...document.querySelectorAll('.sm-amount')].map((i) => ({ material_id: Number(i.dataset.material), amount: i.value || 0 }));
         await api('/api/admin/services/' + matService + '/materials', { method: 'PUT', body: { items } });
         return notify('Витрату збережено');
+      }
+
+      if (e.target.id === 'clientErase' && currentClient) {
+        const key = currentClient;
+        const p = await api('/api/admin/clients/' + key + '/erase-preview');
+        const parts = [`записів — ${p.appointments}` + (p.future ? ` (з них майбутніх — ${p.future})` : ''), `фото стоп — ${p.photos}`,
+          `відгуків — ${p.reviews}`, `заявок у черзі — ${p.waitlist}`, p.account ? 'кабінет клієнта' : '', p.note ? 'нотатка' : ''].filter(Boolean);
+        const typed = prompt(`Видалити всі дані клієнта «${p.name}»?\n\nБуде видалено: ${parts.join(', ')}.\n` +
+          'Скасувати це неможливо. У резервних копіях дані зникнуть, коли старі копії видаляться (зазвичай через 30 днів). ' +
+          'Анонімний чат на сайті й імена в сертифікатах видаляються окремо.\n\nЩоб підтвердити, введіть останні 4 цифри телефону клієнта:');
+        if (typed === null) return;
+        if (typed.trim() !== key.slice(-4)) return notify('Цифри не збігаються — клієнта не видалено', true);
+        await api('/api/admin/clients/' + key, { method: 'DELETE', body: { confirm: typed.trim() } });
+        notify('Дані клієнта видалено');
+        currentClient = null;
+        currentClientData = null;
+        return show('clients');
       }
 
       if (e.target.id === 'clientBook' && currentClientData) {

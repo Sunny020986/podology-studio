@@ -512,7 +512,7 @@
       <h3 style="margin:28px 0 4px">Фото стану стоп</h3>
       <p class="muted" style="margin:0 0 10px">Бачать лише адміністратор і майстер, який веде клієнта. Фото стискається в браузері, а разом із ним прибираються метадані, зокрема місце зйомки.</p>
       <div class="consent-box">
-        <label class="consent-check"><input type="checkbox" id="cpConsentBox" disabled> Клієнт дав письмову згоду на фото стоп</label>
+        <label class="consent-check"><input type="checkbox" id="cpConsentBox" disabled> Клієнт дав згоду на фото стоп</label>
         <div class="muted" id="cpConsentInfo">Перевіряю…</div>
       </div>
       <div class="toolbar" id="cpTools">
@@ -552,7 +552,7 @@
       ? `Позначено ${when}, ${c.changed_by}.`
       : c.changed_at
         ? `Згоду відкликано ${when}, ${c.changed_by}. Нові фото додати не можна; наявні видаліть, якщо клієнт просить.`
-        : 'Без згоди фото додати не можна. Попросіть клієнта підписати згоду, потім поставте позначку.';
+        : 'Без згоди фото додати не можна. Спершу отримайте згоду клієнта, потім поставте позначку.';
   }
 
   // Фото стану стоп: список і самі зображення (з токеном, тому через fetch, а не просте посилання)

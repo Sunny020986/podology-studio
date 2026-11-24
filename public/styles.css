@@ -1027,3 +1027,8 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; -webkit-us
 @media (min-width: 901px) {
   .hero .how { justify-self: end; align-self: center; width: 320px; margin-right: -32px; }
 }
+
+/* Головний екран на комп'ютері: на всю висоту вікна. Тоді співвідношення сторін близьке до фото, і воно не обрізається зверху й знизу */
+@media (min-width: 901px) {
+  .hero { min-height: calc(100svh - 72px); align-content: center; background-position: center, center 70%; }
+}

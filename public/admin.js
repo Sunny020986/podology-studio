@@ -582,12 +582,15 @@
       <div class="consent-box">
         <label class="consent-check"><input type="checkbox" id="cpConsentBox" disabled> Клієнт дав згоду на фото стоп</label>
         <div class="muted" id="cpConsentInfo">Перевіряю…</div>
+        <div class="consent-print-row"><button class="btn btn-ghost small" type="button" id="cpConsentPrint">Надрукувати згоду для підпису</button>
+        <small class="muted">Текст — шаблон, варто перевірити з юристом.</small></div>
       </div>
       <div class="toolbar" id="cpTools">
         <input type="date" id="cpDate" value="${today()}" aria-label="Дата фото" style="max-width:170px">
         <input type="text" id="cpNote" maxlength="300" placeholder="Примітка, наприклад: після 2-ї процедури" aria-label="Примітка до фото" style="flex:1;min-width:200px">
         <label class="btn btn-primary small" id="cpAddBtn">Додати фото<input type="file" id="cpFile" accept="image/jpeg,image/png,image/webp,image/*" hidden disabled></label>
       </div>
+      <div id="cmpBar" class="cmp-bar" hidden><span id="cmpHint">Позначте 2 фото, щоб порівняти «до і після».</span><button class="btn btn-primary small" type="button" id="cmpOpen" disabled>Порівняти</button></div>
       <div id="cpList" class="photo-grid"><span class="muted">Завантажую…</span></div>
 
       <h3 style="margin:28px 0 8px">Історія записів</h3>
@@ -639,6 +642,68 @@
   $('#view').addEventListener('input', (e) => { if (e.target.classList.contains('visit-note')) fitNote(e.target); });
   window.addEventListener('resize', () => document.querySelectorAll('.visit-note').forEach(fitNote));
 
+  // ----- Порівняння фото «до і після» -----
+  let currentPhotos = [];
+  let cmpPicked = [];
+  $('#view').addEventListener('change', (e) => {
+    if (!e.target.dataset || !e.target.dataset.cmp) return;
+    const id = Number(e.target.dataset.cmp);
+    if (e.target.checked) {
+      cmpPicked.push(id);
+      if (cmpPicked.length > 2) { // лишаємо 2 останні позначені
+        const drop = cmpPicked.shift();
+        const cb = document.querySelector('[data-cmp="' + drop + '"]');
+        if (cb) cb.checked = false;
+      }
+    } else cmpPicked = cmpPicked.filter((x) => x !== id);
+    $('#cmpOpen').disabled = cmpPicked.length !== 2;
+    $('#cmpHint').textContent = cmpPicked.length === 2 ? 'Обрано 2 фото.' : 'Позначте 2 фото, щоб порівняти «до і після».';
+  });
+  function openCompare(mode = 'slider') {
+    const pics = cmpPicked.map((id) => currentPhotos.find((p) => p.id === id)).filter(Boolean)
+      .sort((a, b) => (a.taken_on < b.taken_on ? -1 : a.taken_on > b.taken_on ? 1 : a.id - b.id)); // раніше — «до»
+    if (pics.length !== 2) return;
+    const src = (p) => document.querySelector('[data-photo-img="' + p.id + '"]')?.src || '';
+    const [before, after] = pics;
+    const cap = (p, label) => label + ' · ' + fmtDate(p.taken_on) + (p.note ? ' · ' + esc(p.note) : '');
+    document.querySelector('.cmp-overlay')?.remove();
+    const el = document.createElement('div');
+    el.className = 'cmp-overlay';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-label', 'Порівняння фото до і після');
+    el.innerHTML = `<div class="cmp-panel">
+      <div class="cmp-head">
+        <div class="cmp-modes">
+          <button type="button" class="btn small ${mode === 'slider' ? 'btn-primary' : 'btn-ghost'}" data-cmp-mode="slider">Повзунок</button>
+          <button type="button" class="btn small ${mode === 'side' ? 'btn-primary' : 'btn-ghost'}" data-cmp-mode="side">Поруч</button>
+        </div>
+        <button type="button" class="btn btn-ghost small" data-cmp-close aria-label="Закрити">✕ Закрити</button>
+      </div>
+      ${mode === 'side' ? `<div class="cmp-side">
+          <figure><img src="${src(before)}" alt="До"><figcaption>${cap(before, 'До')}</figcaption></figure>
+          <figure><img src="${src(after)}" alt="Після"><figcaption>${cap(after, 'Після')}</figcaption></figure>
+        </div>`
+      : `<div class="cmp-slider" style="--pos:50%">
+          <img src="${src(before)}" alt="До">
+          <img class="cmp-top" src="${src(after)}" alt="Після">
+          <div class="cmp-line" aria-hidden="true"></div>
+          <span class="cmp-tag cmp-tag-l">До</span><span class="cmp-tag cmp-tag-r">Після</span>
+        </div>
+        <input type="range" class="cmp-range" min="0" max="100" value="50" aria-label="Межа між фото до і після">
+        <div class="cmp-caps"><span>${cap(before, 'До')}</span><span>${cap(after, 'Після')}</span></div>`}
+    </div>`;
+    document.body.appendChild(el);
+    const range = el.querySelector('.cmp-range');
+    if (range) range.addEventListener('input', () => el.querySelector('.cmp-slider').style.setProperty('--pos', range.value + '%'));
+    el.addEventListener('click', (e) => {
+      if (e.target === el || e.target.closest('[data-cmp-close]')) return el.remove();
+      const m = e.target.closest('[data-cmp-mode]');
+      if (m) openCompare(m.dataset.cmpMode);
+    });
+    el.querySelector('[data-cmp-close]').focus();
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelector('.cmp-overlay')?.remove(); });
+
   // Згода на фото: без неї додати фото не можна (сервер теж перевіряє)
   function applyConsent(c) {
     const box = $('#cpConsentBox');
@@ -663,12 +728,18 @@
       .catch((err) => { const i = $('#cpConsentInfo'); if (i) i.textContent = err.message; });
     const box = $('#cpList');
     const list = await api('/api/admin/clients/' + key + '/photos');
+    currentPhotos = list;
+    cmpPicked = [];
+    if ($('#cmpBar')) $('#cmpBar').hidden = list.length < 2;
     if (!list.length) { box.innerHTML = '<span class="muted">Фото ще немає. Додайте перше, щоб бачити динаміку лікування.</span>'; return; }
     box.innerHTML = list.map((p) => `<figure class="photo-card">
         <button type="button" class="photo-open" data-open-photo="${p.id}" aria-label="Відкрити фото ${fmtDate(p.taken_on)}"><img data-photo-img="${p.id}" alt="Фото стопи ${fmtDate(p.taken_on)}" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></button>
         <figcaption><strong>${fmtDate(p.taken_on)}</strong>${p.note ? '<br>' + esc(p.note) : ''}<br><span class="muted">${esc(p.master || 'Суперадмін')}</span></figcaption>
+        <label class="cmp-pick"><input type="checkbox" data-cmp="${p.id}"> порівняти</label>
         ${p.can_delete ? `<button class="btn btn-ghost small danger" type="button" data-del-photo="${p.id}">Видалити</button>` : ''}
       </figure>`).join('');
+    const bar = $('#cmpBar');
+    if (bar) bar.hidden = list.length < 2;
     await Promise.all(list.map(async (p) => {
       try {
         const r = await fetch('/api/admin/client-photos/' + p.id + '/file', { headers: { Authorization: 'Bearer ' + token } });
@@ -1604,6 +1675,34 @@ ${isSuper() ? `
         await api('/api/admin/clients/' + e.target.dataset.restore + '/restore', { method: 'POST' });
         notify('Клієнта повернуто з архіву');
         return await loadClients();
+      }
+
+      if (e.target.id === 'cmpOpen') return openCompare('slider');
+
+      if (e.target.id === 'cpConsentPrint') {
+        const [st, c] = await Promise.all([api('/api/settings'), api('/api/admin/clients/' + currentClient)]);
+        const s = st.studio;
+        const who = s.owner_legal ? esc(s.owner_legal) + ' (кабінет «' + esc(s.name) + '»)' : 'кабінету «' + esc(s.name) + '»';
+        const place = [s.city, s.address].filter(Boolean).map(esc).join(', ');
+        printHtml(`<div class="consent-print">
+          <h1>Згода на фотографування стоп<br>і зберігання фото</h1>
+          <p>Я, <span class="fill">${esc(c.name)}</span>, телефон <span class="fill">${esc(c.phone)}</span>,</p>
+          <p>даю згоду ${who} на фотографування стану моїх стоп і зберігання цих фото, щоб вести історію лікування й бачити його результат.</p>
+          <p>Мене повідомлено, що:</p>
+          <ul>
+            <li>фото бачать лише адміністратор кабінету і майстер, який мене веде;</li>
+            <li>фото не публікуються і не передаються іншим особам без моєї окремої згоди;</li>
+            <li>фото зберігаються на сервері кабінету з резервною копією;</li>
+            <li>я можу відкликати згоду будь-коли: тоді нові фото не робитимуть, а наявні видалять на мою вимогу;</li>
+            <li>обробка відбувається відповідно до Закону України «Про захист персональних даних».</li>
+          </ul>
+          <div class="consent-sign">
+            <div>Дата: «____» ______________ 20___ р.</div>
+            <div>Підпис: ______________ / ______________________</div>
+          </div>
+          ${place || s.phone ? `<p class="consent-foot">${place}${place && s.phone ? ' · ' : ''}${esc(s.phone || '')}</p>` : ''}
+        </div>`);
+        return;
       }
 
       if (e.target.dataset.certPrint) {

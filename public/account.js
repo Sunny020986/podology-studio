@@ -155,6 +155,7 @@
         <li class="acc-appt" data-appt="${a.id}" data-sid="${a.service_id}" data-mid="${a.master_id || ''}">
           <div><b>${esc(a.service)}</b></div>
           <div class="muted">${fmt(a.date)} о ${a.start_time}–${a.end_time}${a.master ? ' · майстер ' + esc(a.master) : ''} · ${STATUS_TEXT[a.status] || esc(a.status)}</div>
+          ${a.price ? `<div class="acc-price">${a.price.pct ? `Ціна: ${a.price.full} грн − знижка ${a.price.pct}% (${a.price.full - a.price.final} грн) = <b>${a.price.final} грн</b>` : `Ціна: <b>${a.price.final} грн</b>`}</div>` : ''}
           ${a.upcoming && a.status !== 'cancelled' && a.canChange
             ? `<div class="acc-actions">
                  <button class="btn btn-ghost small" type="button" data-act="move" data-id="${a.id}">Перенести</button>

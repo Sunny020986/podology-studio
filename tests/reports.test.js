@@ -23,7 +23,11 @@ test('ціна запам’ятовується на момент запису 
   await setPrice(s1.id, 500);
   const a = await book(srv, { serviceId: s1.id, masterId: A.id, phone: '+380631000001' });
   await setPrice(s1.id, 600);
-  assert.equal(dbRun((db) => db.prepare('SELECT price_uah FROM appointments WHERE id = ?').get(a.id).price_uah), 500);
+  // Перший візит: 500 грн мінус знижка 10% = 450; повна ціна за прайсом теж запам'ятана
+  assert.deepEqual(dbRun((db) => db.prepare('SELECT price_uah, price_full_uah FROM appointments WHERE id = ?').get(a.id)), { price_uah: 450, price_full_uah: 500 });
+  // Той самий клієнт вдруге: без знижки, за прайсом на цей момент (600)
+  const again = await book(srv, { serviceId: s1.id, masterId: A.id, phone: '+380631000001' });
+  assert.equal(dbRun((db) => db.prepare('SELECT price_uah FROM appointments WHERE id = ?').get(again.id).price_uah), 600);
 });
 
 test('звіт: візити, неявки, скасовані, не позначені; суми за ціною запису або поточною', async () => {

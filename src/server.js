@@ -29,6 +29,7 @@ const { setupReassign } = require('./reassign');
 const { setupHolidays } = require('./holidays');
 const { setupClientErase } = require('./client-erase');
 const { setupReminderButtons } = require('./reminder-buttons');
+const { setupFirstDiscount, quote: firstQuote } = require('./first-discount');
 const { adminBySession: adminSessionLookup, setupAdminUsers } = require('./admin-users');
 const { setupAudit } = require('./audit');
 const { setupChatTemplates } = require('./chat-templates');
@@ -186,6 +187,7 @@ function validateService(body, partial = false) {
     out.repeat_weeks = w;
   }
   if (body.active !== undefined) out.active = body.active ? 1 : 0;
+  if (body.first_discount !== undefined) out.first_discount = body.first_discount ? 1 : 0;
   const courseError = validateCourse(body, out, partial);
   if (courseError) return { error: courseError };
   if (out.course_next_service_id && !db.prepare('SELECT 1 FROM services WHERE id = ?').get(out.course_next_service_id)) {
@@ -245,7 +247,7 @@ app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'admin.html')
 
 // ---------- Публічне API ----------
 app.get('/api/services', (req, res) => {
-  res.json(db.prepare(`SELECT id, name, description, duration_min, price_uah, price_note FROM services s WHERE active = 1
+  res.json(db.prepare(`SELECT id, name, description, duration_min, price_uah, price_note, first_discount FROM services s WHERE active = 1
     AND EXISTS (SELECT 1 FROM master_services ms JOIN masters m ON m.id = ms.master_id WHERE ms.service_id = s.id AND m.status = 'active')
     ORDER BY id`).all());
 });
@@ -274,7 +276,7 @@ const STUDIO_FIELDS = {
   name: 80, tagline: 120, address: 200, phone: 40, city: 80, review_url: 300,
   promo_first: 400, promo_friend: 400, promo_gift: 400, partners: 600,
   master_name: 80, master_about: 2000, faq: 6000, stat_years: 6, stat_clients: 6, site_url: 200,
-  owner_legal: 120,
+  owner_legal: 120, first_discount_pct: 2,
 };
 function readStudio() {
   const rows = db.prepare('SELECT key, value FROM settings').all();
@@ -312,6 +314,8 @@ app.get('/api/next-slot', (req, res) => {
 const last9 = (phone) => phone.replace(/\D/g, '').slice(-9); // номер без коду країни, щоб +380 50... і 050... збігалися
 
 const bookTx = db.transaction(({ service, date, time, name, phone, comment, masterId, skipPhoneLimit = false, status = 'new' }) => {
+  // Знижка на перший візит: перевіряємо тут, у тій самій транзакції, щоб два одночасні записи не отримали її обидва
+  const q = firstQuote(db, service, phone);
   const samePhone = db
     .prepare("SELECT client_phone FROM appointments WHERE date >= ? AND status != 'cancelled'")
     .all(todayStr())
@@ -330,10 +334,16 @@ const bookTx = db.transaction(({ service, date, time, name, phone, comment, mast
   const end = toHHMM(toMin(time) + service.duration_min);
   const remindCode = 'r' + crypto.randomBytes(9).toString('base64url');
   const info = db
-    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code, client_comment, master_id, status, price_uah) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(service.id, date, time, end, name, phone, remindCode, comment ?? '', master, status, service.price_uah ?? null); // ціна на момент запису — для звіту
-  return { id: info.lastInsertRowid, remindCode, masterId: master };
+    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code, client_comment, master_id, status, price_uah, price_full_uah, discount_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(service.id, date, time, end, name, phone, remindCode, comment ?? '', master, status, q.final ?? service.price_uah ?? null, service.price_uah ?? null, q.eligible ? q.pct : 0); // ціна на момент запису — для звіту
+  return { id: info.lastInsertRowid, remindCode, masterId: master, price: q };
 });
+
+// Рядок про знижку для сповіщень персоналу
+function priceLine(q) {
+  if (!q.eligible) return '';
+  return q.full ? `\n🎁 Перший візит: знижка ${q.pct}% (${q.full} − ${q.discount} = ${q.final} грн)` : `\n🎁 Перший візит: знижка ${q.pct}% (суму рахує майстер)`;
+}
 
 // Особисте сповіщення майстру в його Telegram, якщо він підключив бота в адмінці
 function notifyMasterOf(masterId, text) {
@@ -348,6 +358,7 @@ function readChangeHours() {
   const n = Number(row?.value);
   return CHANGE_HOUR_OPTIONS.includes(n) ? n : DEFAULT_CHANGE_HOURS;
 }
+setupFirstDiscount({ app, db, makeLimiter });
 const accounts = setupAccounts({
   app, db, telegram, freeSlots, todayStr, isBookableDate, isTime,
   horizonDays: HORIZON_DAYS, makeLimiter, notifyMaster: (t) => telegram.notifyMaster(t), changeHours: readChangeHours, notifyMasterOf,
@@ -379,15 +390,15 @@ app.post('/api/appointments', (req, res) => {
     const cleanComment = String(comment ?? '').trim().slice(0, 500);
     const wantMaster = masterParam(masterId);
     if (wantMaster && !masterOffers(db, wantMaster, service.id)) return res.status(400).json({ error: 'Цей майстер не виконує обрану послугу' });
-    const { id, remindCode, masterId: assigned } = bookTx({ service, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, masterId: wantMaster });
+    const { id, remindCode, masterId: assigned, price } = bookTx({ service, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, masterId: wantMaster });
     const masterName = db.prepare('SELECT name FROM masters WHERE id = ?').get(assigned)?.name || '';
     const streak = noShowStreaks().get(last9(cleanPhone)) || 0;
     const warn = streak >= 2 ? `\n⚠️ Цей клієнт не прийшов ${streak} рази поспіль` : '';
-    notifyMasterOf(assigned, `🗓 Новий запис до вас\n${service.name}\n${date.split('-').reverse().join('.')} о ${time}\n${cleanName}, ${cleanPhone}${cleanComment ? '\nКоментар: ' + cleanComment : ''}${warn}`);
+    notifyMasterOf(assigned, `🗓 Новий запис до вас\n${service.name}\n${date.split('-').reverse().join('.')} о ${time}\n${cleanName}, ${cleanPhone}${cleanComment ? '\nКоментар: ' + cleanComment : ''}${priceLine(price)}${warn}`);
     bookingLimiter.hit(req.ip);
-    telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, master: masterName, warn });
+    telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, master: masterName, warn: priceLine(price) + warn });
     liveAppt('new', { id: Number(id), master_id: assigned, date, start_time: time, client_name: cleanName, service: service.name, master: masterName });
-    res.status(201).json({ id: Number(id), date, time, service: service.name, master: masterName, remindLink: telegram.remindLink(remindCode) });
+    res.status(201).json({ id: Number(id), date, time, service: service.name, master: masterName, remindLink: telegram.remindLink(remindCode), price: { full: price.full, pct: price.pct, discount: price.discount, final: price.final, note: service.price_note || '' } });
   } catch (e) {
     if (e.status) return res.status(e.status).json({ error: e.message });
     console.error(e);
@@ -564,6 +575,9 @@ app.put('/api/admin/studio', (req, res) => {
   if (!clean.name) return res.status(400).json({ error: 'Назва кабінету не може бути порожньою' });
   for (const k of ['stat_years', 'stat_clients']) {
     if (clean[k] && !/^\d{1,6}$/.test(clean[k])) return res.status(400).json({ error: 'Років досвіду й кількість клієнтів: лише ціле число' });
+  }
+  if (clean.first_discount_pct && (!/^\d{1,2}$/.test(clean.first_discount_pct) || Number(clean.first_discount_pct) > 90)) {
+    return res.status(400).json({ error: 'Знижка на перший візит: ціле число від 0 до 90 (0 — без знижки)' });
   }
   if (clean.site_url && !/^https?:\/\/[^\s/]+(\/\S*)?$/.test(clean.site_url)) {
     return res.status(400).json({ error: 'Адреса сайту має починатися з https:// (або http://)' });
@@ -984,16 +998,16 @@ app.put('/api/admin/appointments/:id/note', (req, res) => {
 });
 
 app.get('/api/admin/services', (req, res) => {
-  res.json(db.prepare('SELECT id, name, description, duration_min, price_uah, price_note, repeat_weeks, course_visits, course_interval_days, course_next_service_id, active FROM services ORDER BY id').all());
+  res.json(db.prepare('SELECT id, name, description, duration_min, price_uah, price_note, repeat_weeks, course_visits, course_interval_days, course_next_service_id, active, first_discount FROM services ORDER BY id').all());
 });
 
 app.post('/api/admin/services', (req, res) => {
   const v = validateService(req.body || {});
   if (v.error) return res.status(400).json({ error: v.error });
-  const d = { description: '', price_uah: 0, price_note: '', repeat_weeks: 0, active: 1, course_visits: 0, course_interval_days: 0, course_next_service_id: null, ...v.data };
+  const d = { description: '', price_uah: 0, price_note: '', repeat_weeks: 0, active: 1, first_discount: 0, course_visits: 0, course_interval_days: 0, course_next_service_id: null, ...v.data };
   const info = db
-    .prepare('INSERT INTO services (name, description, duration_min, price_uah, price_note, repeat_weeks, active, course_visits, course_interval_days, course_next_service_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(d.name, d.description, d.duration_min, d.price_uah, d.price_note, d.repeat_weeks, d.active, d.course_visits, d.course_interval_days, d.course_next_service_id);
+    .prepare('INSERT INTO services (name, description, duration_min, price_uah, price_note, repeat_weeks, active, course_visits, course_interval_days, course_next_service_id, first_discount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(d.name, d.description, d.duration_min, d.price_uah, d.price_note, d.repeat_weeks, d.active, d.course_visits, d.course_interval_days, d.course_next_service_id, d.first_discount);
   db.prepare("INSERT OR IGNORE INTO master_services (master_id, service_id) SELECT id, ? FROM masters WHERE status = 'active'").run(Number(info.lastInsertRowid));
   res.status(201).json({ id: Number(info.lastInsertRowid) });
 });

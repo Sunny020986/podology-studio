@@ -261,7 +261,50 @@
       ? `${s.name}${state.masterId ? ', майстер ' + masterName(state.masterId) : ''}, ${fmtDate(state.date)}, ${state.time}–${addMin(state.time, s.duration_min)} (триває ${durText(s.duration_min)})`
       : s ? `Процедура триває ${durText(s.duration_min)}. Оберіть час, щоб продовжити.` : 'Оберіть час, щоб продовжити.';
     $('#submitBtn').disabled = !state.time;
+    refreshQuote();
   }
+
+  // ----- Ціна й знижка на перший візит -----
+  // Знижку пропонуємо лише тому, хто ще не мав у нас записів: сервер перевіряє за номером телефону.
+  const quoteState = { key: '', data: null };
+  const phoneDigits = () => $('#phoneInput').value.replace(/\D/g, '');
+  const calcHtml = (q) => q.pct && q.full
+    ? `<div class="price-calc"><div class="pc-row"><span>Ціна за прайсом</span><span>${q.full} грн</span></div>
+       <div class="pc-row pc-disc"><span>Знижка на перший візит ${q.pct}%</span><span>− ${q.discount} грн</span></div>
+       <div class="pc-row pc-total"><span>До сплати</span><span>${q.final} грн</span></div></div>`
+    : q.pct
+      ? `<div class="price-calc"><div class="pc-row pc-disc"><span>Знижка на перший візит ${q.pct}%</span><span></span></div><div class="muted">Точну суму з урахуванням знижки назве майстер.</div></div>`
+      : '';
+  function renderPrice() {
+    const box = $('#priceBox');
+    if (!box) return;
+    const s = state.services.find((x) => x.id == state.serviceId);
+    if (!s) { box.innerHTML = ''; return; }
+    const q = quoteState.key === `${s.id}|${phoneDigits()}` ? quoteState.data : null;
+    if (q && q.eligible) { box.innerHTML = calcHtml(q); return; }
+    box.innerHTML = s.price_uah > 0 || s.price_note
+      ? `<div class="price-calc"><div class="pc-row pc-total"><span>Ціна</span><span>${esc(priceText(s))}</span></div></div>` : '';
+  }
+  let quoteTimer = null;
+  function refreshQuote() {
+    const s = state.services.find((x) => x.id == state.serviceId);
+    const d = phoneDigits();
+    clearTimeout(quoteTimer);
+    if (!s || d.length < 9 || !s.first_discount) { quoteState.key = ''; renderPrice(); return; }
+    const key = `${s.id}|${d}`;
+    if (quoteState.key === key) { renderPrice(); return; }
+    quoteTimer = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/first-discount?serviceId=${s.id}&phone=${encodeURIComponent(d)}`);
+        if (!r.ok) throw new Error();
+        const data = await r.json();
+        if (phoneDigits() !== d || state.serviceId != s.id) return; // поки чекали, клієнт змінив дані
+        quoteState.key = key; quoteState.data = data;
+      } catch { quoteState.key = ''; }
+      renderPrice();
+    }, 400);
+  }
+  $('#phoneInput').addEventListener('input', refreshQuote);
 
   $('#servicesList').addEventListener('click', (e) => {
     const card = e.target.closest('[data-id]');
@@ -380,12 +423,24 @@
     const svc = state.services.find((x) => x.name === data.service);
     const span = svc ? `${data.time}–${addMin(data.time, svc.duration_min)} (триває ${durText(svc.duration_min)})` : `о ${data.time}`;
     msg.textContent = `Дякуємо! Ви записані: ${data.service}${data.master && state.masters.length > 1 ? ', майстер ' + data.master : ''}, ${fmtDate(data.date)}, ${span}. Номер запису: ${data.id}.`;
+    const pr = data.price;
+    if (pr && pr.full) {
+      msg.textContent += pr.pct
+        ? ` Ціна: ${pr.full} грн − знижка ${pr.pct}% (${pr.discount} грн) = ${pr.final} грн.`
+        : ` Ціна: ${pr.full} грн.`;
+    } else if (pr && pr.pct) {
+      msg.textContent += ` Знижка ${pr.pct}% на перший візит: точну суму назве майстер.`;
+    } else if (pr && pr.note) {
+      msg.textContent += ` Ціна: ${pr.note}.`;
+    }
     if (data.remindLink) {
       $('#remindBtn').href = data.remindLink;
       $('#remindBtn').hidden = false;
     }
     $('#nameInput').value = '';
     $('#phoneInput').value = '';
+    quoteState.key = '';
+    renderPrice();
     document.dispatchEvent(new CustomEvent('booking:success'));
     refreshSlots();
   });

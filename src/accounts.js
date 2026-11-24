@@ -90,7 +90,7 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
   const canChange = (a) => a.status !== 'cancelled' && hoursUntil(a.date, a.start_time) >= changeHours();
 
   const accountPhoneAppts = (acc) => db.prepare(`
-      SELECT a.id, a.date, a.start_time, a.end_time, a.client_phone, a.status, a.master_id, m.name AS master, s.id AS service_id, s.name AS service, s.duration_min
+      SELECT a.id, a.date, a.start_time, a.end_time, a.client_phone, a.status, a.master_id, m.name AS master, s.id AS service_id, s.name AS service, s.duration_min, a.price_uah, a.price_full_uah, a.discount_pct
       FROM appointments a JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id ORDER BY a.date DESC, a.start_time DESC`)
     .all().filter((a) => last9(a.client_phone) === last9(acc.phone));
 
@@ -147,6 +147,7 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
     res.json(accountPhoneAppts(req.account).map((a) => ({
       id: a.id, service_id: a.service_id, master_id: a.master_id, master: a.master || '', date: a.date, start_time: a.start_time, end_time: a.end_time, status: a.status,
       service: a.service, upcoming: a.date >= today && a.status !== 'cancelled', canChange: canChange(a),
+      price: a.price_uah > 0 ? { full: a.price_full_uah || a.price_uah, pct: a.discount_pct || 0, final: a.price_uah } : null,
     })));
   });
 

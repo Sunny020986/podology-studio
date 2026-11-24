@@ -1673,6 +1673,7 @@ ${isSuper() ? `
         <label>послуга для повторних <select class="f-course-next"><option value="">та сама</option>${all.filter((x) => x.id !== s.id).map((x) => `<option value="${x.id}" ${x.id === s.course_next_service_id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
       </div>
     </td>
+    <td data-label="Знижка на перший візит" class="c-check"><label><input type="checkbox" class="f-first" ${s.first_discount ? 'checked' : ''}> <span class="m-only">Знижка для нових клієнтів</span></label></td>
     <td data-label="Активна" class="c-check"><label><input type="checkbox" class="f-active" ${s.active ? 'checked' : ''}> <span class="m-only">Показувати на сайті</span></label></td>
     <td class="c-wide"><button class="btn btn-ghost small" type="button" data-save-service="${s.id}">Зберегти</button></td>
   </tr>`;
@@ -1688,13 +1689,14 @@ ${isSuper() ? `
     course_interval_days: Number(row.querySelector('.f-course-interval').value || 0),
     course_next_service_id: row.querySelector('.f-course-next').value || null,
     active: row.querySelector('.f-active').checked ? 1 : 0,
+    first_discount: row.querySelector('.f-first').checked ? 1 : 0,
   });
 
   async function renderServices() {
     const list = await api('/api/admin/services');
     $('#view').innerHTML = `
       <table class="card-table svc-table">
-        <thead><tr><th>Назва</th><th>Опис</th><th>Хв</th><th>Ціна, грн</th><th>Орієнтовна ціна (текст)</th><th title="Через скільки тижнів бот нагадає про повторний візит. 0 — не нагадувати">Повтор, тижнів</th><th title="Наприклад: встановлення скоби, потім 4 корекції кожні 21 день. 0 — без курсу">Курс лікування</th><th>Активна</th><th></th></tr></thead>
+        <thead><tr><th>Назва</th><th>Опис</th><th>Хв</th><th>Ціна, грн</th><th>Орієнтовна ціна (текст)</th><th title="Через скільки тижнів бот нагадає про повторний візит. 0 — не нагадувати">Повтор, тижнів</th><th title="Наприклад: встановлення скоби, потім 4 корекції кожні 21 день. 0 — без курсу">Курс лікування</th><th title="Знижка для клієнта, який ще не мав у нас записів. Відсоток задається у вкладці «Кабінет»">Знижка на перший візит</th><th>Активна</th><th></th></tr></thead>
         <tbody>${list.map((x) => serviceRow(x, list)).join('')}</tbody>
       </table>
       <h3 style="margin-bottom:8px">Нова послуга</h3>
@@ -2227,6 +2229,11 @@ ${isSuper() ? `
         ${field('site_url', 'Адреса сайту, наприклад https://podology.example.ua', 200, 'Потрібна для посилань у Telegram: відгуки, повторний візит, список очікування')}
         ${field('review_url', 'Посилання «Залишити відгук у Google»', 300, 'Google Профіль компанії → «Попросити відгуки» → скопіювати посилання. Порожнє поле ховає кнопку.')}
         <h3 class="studio-group">Акції</h3>
+        <label class="studio-field">
+          <span>Відсоток знижки на перший візит (0 — без знижки)</span>
+          <input name="first_discount_pct" type="number" min="0" max="90" step="1" value="${esc(s.first_discount_pct)}" style="max-width:120px">
+          <small class="muted">Рахується сама: клієнт бачить ціну, знижку й суму до сплати, але лише якщо в нього ще не було записів, і лише на послуги з позначкою «Знижка на перший візит» у вкладці «Послуги». Текст акції нижче змінюйте разом із відсотком.</small>
+        </label>
         ${area('promo_first', 'Знижка на перший візит', 400, 3, PROMO_HINT + ' Заголовок також показується плашкою на початку сторінки.')}
         ${area('promo_friend', '«Приведи друга»', 400, 3, PROMO_HINT)}
         ${area('promo_gift', 'Подарункові сертифікати', 400, 3, PROMO_HINT)}

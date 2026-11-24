@@ -991,3 +991,17 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; -webkit-us
   .reply-form #replyInput { order: -1; flex: 1 1 100%; min-width: 0; }
   .reply-form .btn { flex: 1 1 0; }
 }
+
+/* Ціна й розрахунок знижки на перший візит */
+.price-calc { margin: 10px 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card, transparent); font-size: 15px; }
+.pc-row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
+.pc-disc { color: var(--ok); }
+.pc-total { font-weight: 700; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 7px; }
+.pc-row:only-child { border-top: 0; margin-top: 0; padding-top: 3px; }
+.acc-price { font-size: 14px; margin-top: 2px; }
+
+@media (min-width: 701px) {
+  .svc-table td.c-check + td.c-check { grid-column: 3 / 5; }
+  .svc-table td:last-child { grid-column: 1 / -1; }
+  .svc-table td:last-child .btn { max-width: 240px; }
+}

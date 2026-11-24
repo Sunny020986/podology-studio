@@ -174,7 +174,7 @@ a { color: inherit; text-decoration: none; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 16px; }
 th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 th { color: var(--muted); font-weight: 600; }
-td input[type="text"], td input[type="time"], td input[type="number"], td input:not([type]) {
+td input[type="text"], td input[type="time"], td input[type="number"], td input:not([type]), td textarea.visit-note {
   padding: 8px 10px; border-radius: 8px; border: 1px solid #C9C4B8; font: inherit; width: 100%;
 }
 .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; font-size: 14px; }
@@ -334,7 +334,7 @@ textarea.input { resize: vertical; min-height: 96px; }
 }
 
 /* Поля адмінки і вибраний діалог беруть кольори з теми */
-:root td input, :root td select, :root .toolbar input, :root .inline-form input, :root .inline-form select {
+:root td input, :root td select, :root td textarea, :root .toolbar input, :root .inline-form input, :root .inline-form select {
   background: var(--field); color: var(--ink); border-color: var(--field-line);
 }
 .conv { color: var(--ink); }
@@ -760,3 +760,6 @@ html, body { overflow-x: clip; }       /* страховка: нічого не 
 .privacy h2 { font-size: 19px; margin: 26px 0 8px; }
 .privacy ul { padding-left: 20px; margin: 0 0 8px; }
 .privacy li { margin-bottom: 6px; line-height: 1.55; }
+
+/* Нотатка до візиту: розтягується під текст */
+.visit-note { width: 100%; min-width: 0; min-height: 38px; resize: vertical; overflow: hidden; line-height: 1.45; font: inherit; }

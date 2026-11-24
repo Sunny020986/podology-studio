@@ -530,12 +530,22 @@
           <td>${a.start_time}–${a.end_time}</td>
           <td>${esc(a.service)}</td>
           <td>${STATUS[a.status] || esc(a.status)}</td>
-          <td><input type="text" maxlength="5000" value="${esc(a.note)}" placeholder="Що робили" aria-label="Нотатка до візиту ${fmtDate(a.date)}"></td>
+          <td><textarea class="visit-note" rows="1" maxlength="5000" placeholder="Що робили" aria-label="Нотатка до візиту ${fmtDate(a.date)}">${esc(a.note)}</textarea></td>
           <td><button class="btn btn-ghost small" type="button" data-save-visit-note="${a.id}">Зберегти</button></td>
         </tr>`).join('')}</tbody>
       </table>`;
+    // наступний кадр: на телефоні таблиця вже стала картками, ширина поля остаточна
+    requestAnimationFrame(() => document.querySelectorAll('.visit-note').forEach(fitNote));
     loadClientPhotos(key).catch((err) => { $('#cpList').innerHTML = '<span class="muted">' + esc(err.message) + '</span>'; });
   }
+
+  // Нотатка до візиту розтягується під весь текст, щоб її можна було прочитати повністю
+  function fitNote(el) {
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 2 + 'px';
+  }
+  $('#view').addEventListener('input', (e) => { if (e.target.classList.contains('visit-note')) fitNote(e.target); });
+  window.addEventListener('resize', () => document.querySelectorAll('.visit-note').forEach(fitNote));
 
   // Згода на фото: без неї додати фото не можна (сервер теж перевіряє)
   function applyConsent(c) {
@@ -1339,7 +1349,7 @@ ${isSuper() ? `
       }
 
       if (e.target.dataset.saveVisitNote) {
-        const input = e.target.closest('tr').querySelector('input');
+        const input = e.target.closest('tr').querySelector('.visit-note');
         await api(`/api/admin/appointments/${e.target.dataset.saveVisitNote}/note`, { method: 'PUT', body: { note: input.value } });
         return notify('Нотатку до візиту збережено');
       }

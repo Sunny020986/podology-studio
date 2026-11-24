@@ -16,7 +16,7 @@
 - `src/accounts.js` — кабінет клієнта (телефон + пароль, Telegram, скасування й перенесення).
 - `src/reviews.js`, `src/repeat.js`, `src/waitlist.js`, `src/stats.js`, `src/tips.js`, `src/seo.js` — відгуки, повторний візит, черга очікування, статистика, поради, SEO.
 - `src/telegram.js` — бот: сповіщення в чат кабінету, клієнтам і майстрам; посилання `t.me/<бот>?start=<код>`.
-- `public/` — `index.html`+`app.js` (сайт), `account.js` (кабінет), `effects.js` (ефекти, вимикаються при «зменшити рух»), `admin.html`+`admin.js` (адмінка), `review.html` (форма відгуку), `styles.css` (усі стилі, теми через CSS-змінні).
+- `public/` — `index.html`+`app.js` (сайт), `account.js` (кабінет), `effects.js` (ефекти, вимикаються при «зменшити рух»), `admin.html`+`admin.js` (адмінка), `review.html` (форма відгуку), `styles.css` (усі стилі, кольори через CSS-змінні; лише світла тема).
 - `scripts/backup.js` + `deploy/podology-backup.*` — щоденна резервна копія бази й фото.
 - `src/client-photos.js` — фото стану стоп клієнта (історія лікування). Файли в `data/private/client-photos/`, не в `public`; віддаються лише через `/api/admin/client-photos/:id/file` з перевіркою доступу.
 - `src/privacy.js` — сторінка `/privacy` (які дані збирає сайт і навіщо). Будується з налаштувань кабінету, ПІБ ФОП — поле `owner_legal`.

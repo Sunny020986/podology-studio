@@ -23,7 +23,6 @@ function setupPrivacy({ app, readStudio }) {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="/styles.css">
-<script src="/theme.js"></script>
 </head>
 <body>
 <main class="tip-page">

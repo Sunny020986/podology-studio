@@ -16,7 +16,7 @@
   --field: #FFFFFF;       /* тло полів введення */
   --field-line: #CFC7E3;  /* рамка полів і другорядних кнопок */
   --active-bg: #EEE9FA;   /* вибраний рядок у списку */
-  color-scheme: light;
+  color-scheme: light;     /* світлі системні елементи: календар, списки, прапорці */
   --radius: 20px;
 }
 
@@ -276,7 +276,6 @@ textarea.input { resize: vertical; min-height: 96px; }
 
 .confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; }
 
-/* ===== Темна тема (вмикає theme.js через атрибут data-theme на <html>) ===== */
 .remind-btn { margin-top: 10px; }
 #servicesList.collapsed .service:nth-child(n+7) { display: none; }
 .services-more { display: block; margin: 20px auto 0; }
@@ -309,48 +308,17 @@ textarea.input { resize: vertical; min-height: 96px; }
 .contacts-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 .map-wrap { border-radius: 16px; overflow: hidden; border: 1px solid var(--line); min-height: 300px; background: var(--card); }
 .map-wrap iframe { display: block; width: 100%; height: 100%; min-height: 300px; border: 0; }
-:root[data-theme="dark"] .map-wrap iframe { filter: invert(0.9) hue-rotate(180deg) brightness(0.95); }
 @media (max-width: 860px) { .contacts-grid { grid-template-columns: 1fr; } }
 
-:root[data-theme="dark"] {
-  --bg: #161422;
-  --card: #1F1C2E;
-  --line: #37324A;
-  --ink: #ECE9F6;
-  --muted: #ABA5C0;
-  --faint: #6E688A;
-  --accent: #8ED8C6;
-  --accent-ink: #13201D;
-  --accent-text: #8ED8C6;
-  --lilac: #C5B4F5;
-  --teal: #5FD6CF;
-  --teal-ink: #0E1F1D;
-  --danger: #F08A9B;
-  --ok: #8ED8C6;
-  --field: #161422;
-  --field-line: #4A4362;
-  --active-bg: #2A2640;
-  color-scheme: dark;     /* темні системні елементи: календар, списки, прапорці */
-}
-
-/* Поля адмінки і вибраний діалог беруть кольори з теми */
+/* Поля адмінки і вибраний діалог */
 :root td input, :root td select, :root td textarea, :root .toolbar input, :root .inline-form input, :root .inline-form select {
   background: var(--field); color: var(--ink); border-color: var(--field-line);
 }
 .conv { color: var(--ink); }
 .conv.active { background: var(--active-bg); }
 
-/* Перемикач теми */
+/* Кнопки в шапці */
 .nav-actions { display: flex; align-items: center; gap: 12px; }
-.theme-toggle {
-  width: 44px; height: 44px; padding: 0; border-radius: 10px; cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: transparent; color: var(--ink); border: 1px solid var(--field-line);
-}
-.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.theme-toggle .icon-sun { display: none; }
-:root[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
-:root[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
 
 /* Пошук послуги: список підказок під полем */
 .combo { position: relative; margin-bottom: 12px; }
@@ -421,7 +389,6 @@ html, body { overflow-x: clip; }       /* страховка: нічого не 
   .brand { font-size: 16px; flex: 1; }
   .nav-actions { gap: 8px; flex: none; }
   .nav-actions > a.btn-primary { display: none; } /* на телефоні запис є на головному екрані й у меню */
-  .theme-toggle { width: 40px; height: 40px; }
   .hero { padding: 24px 16px; border-radius: 18px; }
   .hero h1 { font-size: 30px; }
   .hero p { font-size: 16px; }

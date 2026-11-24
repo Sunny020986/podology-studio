@@ -1010,3 +1010,14 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; -webkit-us
   .svc-table td:last-child { grid-column: 1 / -1; }
   .svc-table td:last-child .btn { max-width: 240px; }
 }
+
+/* «Приведи друга» */
+.friend-card { margin: 14px 0; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--card, transparent); display: grid; gap: 10px; }
+.fr-title { font-weight: 700; font-size: 17px; }
+.fr-text, .fr-note { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 0; }
+.fr-form { display: grid; gap: 10px; }
+.fr-form .input { width: 100%; min-width: 0; }
+.fr-label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.fr-label .input { color: var(--ink); }
+.friend-card .btn { justify-self: start; }
+@media (max-width: 700px) { .friend-card .btn { justify-self: stretch; } }

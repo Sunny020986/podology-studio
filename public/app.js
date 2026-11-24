@@ -466,6 +466,9 @@
     } else if (pr && pr.note) {
       msg.textContent += ` Ціна: ${pr.note}.`;
     }
+    // «Приведи друга»: пропозиція лише тому, хто ще може запросити друга
+    if (data.friendInvite?.available && window.FriendInvite) window.FriendInvite.mount($('#friendBox'), { code: data.friendInvite.code });
+    else $('#friendBox').innerHTML = '';
     if (data.remindLink) {
       $('#remindBtn').href = data.remindLink;
       $('#remindBtn').hidden = false;

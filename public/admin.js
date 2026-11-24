@@ -2236,6 +2236,11 @@ ${isSuper() ? `
         </label>
         ${area('promo_first', 'Знижка на перший візит', 400, 3, PROMO_HINT + ' Заголовок також показується плашкою на початку сторінки.')}
         ${area('promo_friend', '«Приведи друга»', 400, 3, PROMO_HINT)}
+        <label class="studio-field">
+          <span>Скільки друзів клієнт може записати одночасно</span>
+          <input name="friend_max_open" type="number" min="1" max="5" step="1" value="${esc(s.friend_max_open || '1')}" style="max-width:120px">
+          <small class="muted">За замовчуванням 1: після запису друга клієнт може запросити наступного, коли цей друг прийде на візит (або запис скасують). Порожній текст акції вище вимикає «Приведи друга» на сайті.</small>
+        </label>
         ${area('promo_gift', 'Подарункові сертифікати', 400, 3, PROMO_HINT)}
         ${area('partners', 'Для лікарів і салонів (співпраця)', 600, 3, PROMO_HINT)}
         <h3 class="studio-group">Про майстра</h3>

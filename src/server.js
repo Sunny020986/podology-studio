@@ -29,7 +29,8 @@ const { setupReassign } = require('./reassign');
 const { setupHolidays } = require('./holidays');
 const { setupClientErase } = require('./client-erase');
 const { setupReminderButtons } = require('./reminder-buttons');
-const { setupFirstDiscount, quote: firstQuote } = require('./first-discount');
+const { setupFirstDiscount, quote: firstQuote, hasVisits } = require('./first-discount');
+const { setupFriendInvite } = require('./friend-invite');
 const { adminBySession: adminSessionLookup, setupAdminUsers } = require('./admin-users');
 const { setupAudit } = require('./audit');
 const { setupChatTemplates } = require('./chat-templates');
@@ -276,7 +277,7 @@ const STUDIO_FIELDS = {
   name: 80, tagline: 120, address: 200, phone: 40, city: 80, review_url: 300,
   promo_first: 400, promo_friend: 400, promo_gift: 400, partners: 600,
   master_name: 80, master_about: 2000, faq: 6000, stat_years: 6, stat_clients: 6, site_url: 200,
-  owner_legal: 120, first_discount_pct: 2,
+  owner_legal: 120, first_discount_pct: 2, friend_max_open: 1,
 };
 function readStudio() {
   const rows = db.prepare('SELECT key, value FROM settings').all();
@@ -372,6 +373,7 @@ function readChangeHours() {
   return CHANGE_HOUR_OPTIONS.includes(n) ? n : DEFAULT_CHANGE_HOURS;
 }
 setupFirstDiscount({ app, db, makeLimiter });
+const friendInvites = setupFriendInvite({ app, db, last9, publicBook, hasVisits, accountFromRequest: (req) => accounts.accountFromRequest(req), readStudio });
 const accounts = setupAccounts({
   app, db, telegram, freeSlots, todayStr, isBookableDate, isTime,
   horizonDays: HORIZON_DAYS, makeLimiter, notifyMaster: (t) => telegram.notifyMaster(t), changeHours: readChangeHours, notifyMasterOf,
@@ -379,44 +381,54 @@ const accounts = setupAccounts({
 });
 
 
-app.post('/api/appointments', (req, res) => {
-  const { serviceId, date, time, name, phone, comment, masterId } = req.body || {};
+// Запис клієнта з сайту. Повертає { status, body }. commentPrefix — службова позначка для персоналу (запис друга);
+// ownerCheck(cleanPhone) — додаткова перевірка перед записом (повертає текст помилки або null).
+function publicBook(body, ip, { commentPrefix = '', ownerCheck = null } = {}) {
+  const { serviceId, date, time, name, phone, comment, masterId } = body || {};
+  const fail = (status, error) => ({ status, body: { error } });
   const service = db.prepare('SELECT * FROM services WHERE id = ? AND active = 1').get(Number(serviceId));
-  if (!service) return res.status(400).json({ error: 'Невідома послуга' });
-  if (!isBookableDate(date, HORIZON_DAYS)) return res.status(400).json({ error: `Запис відкрито від сьогодні до ${maxDateStr(HORIZON_DAYS)}` });
-  if (!isTime(time)) return res.status(400).json({ error: 'Некоректний час' });
+  if (!service) return fail(400, 'Невідома послуга');
+  if (!isBookableDate(date, HORIZON_DAYS)) return fail(400, `Запис відкрито від сьогодні до ${maxDateStr(HORIZON_DAYS)}`);
+  if (!isTime(time)) return fail(400, 'Некоректний час');
 
   const cleanName = String(name ?? '').trim();
-  if (cleanName.length < 2 || cleanName.length > 60) return res.status(400).json({ error: "Вкажіть ім'я (від 2 до 60 символів)" });
+  if (cleanName.length < 2 || cleanName.length > 60) return fail(400, "Вкажіть ім'я (від 2 до 60 символів)");
 
   const cleanPhone = String(phone ?? '').trim();
   const digits = cleanPhone.replace(/\D/g, '');
-  if (!/^\+?[\d\s()-]+$/.test(cleanPhone) || digits.length < 9 || digits.length > 15) {
-    return res.status(400).json({ error: 'Вкажіть коректний телефон' });
-  }
+  if (!/^\+?[\d\s()-]+$/.test(cleanPhone) || digits.length < 9 || digits.length > 15) return fail(400, 'Вкажіть коректний телефон');
 
-  if (bookingLimiter.blocked(req.ip)) {
-    return res.status(429).json({ error: 'Забагато записів з вашої адреси за останню годину. Спробуйте пізніше або напишіть оператору в чат' });
-  }
+  if (bookingLimiter.blocked(ip)) return fail(429, 'Забагато записів з вашої адреси за останню годину. Спробуйте пізніше або напишіть оператору в чат');
+  const problem = ownerCheck && ownerCheck(cleanPhone);
+  if (problem) return fail(problem.status || 400, problem.error);
 
   try {
-    const cleanComment = String(comment ?? '').trim().slice(0, 500);
+    const cleanComment = (commentPrefix + String(comment ?? '').trim()).slice(0, 500);
     const wantMaster = masterParam(masterId);
-    if (wantMaster && !masterOffers(db, wantMaster, service.id)) return res.status(400).json({ error: 'Цей майстер не виконує обрану послугу' });
+    if (wantMaster && !masterOffers(db, wantMaster, service.id)) return fail(400, 'Цей майстер не виконує обрану послугу');
     const { id, remindCode, masterId: assigned, price } = bookTx({ service, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, masterId: wantMaster });
     const masterName = db.prepare('SELECT name FROM masters WHERE id = ?').get(assigned)?.name || '';
     const streak = noShowStreaks().get(last9(cleanPhone)) || 0;
     const warn = streak >= 2 ? `\n⚠️ Цей клієнт не прийшов ${streak} рази поспіль` : '';
     notifyMasterOf(assigned, `🗓 Новий запис до вас\n${service.name}\n${date.split('-').reverse().join('.')} о ${time}\n${cleanName}, ${cleanPhone}${cleanComment ? '\nКоментар: ' + cleanComment : ''}${priceLine(price)}${warn}`);
-    bookingLimiter.hit(req.ip);
+    bookingLimiter.hit(ip);
     telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, master: masterName, warn: priceLine(price) + warn });
     liveAppt('new', { id: Number(id), master_id: assigned, date, start_time: time, client_name: cleanName, service: service.name, master: masterName });
-    res.status(201).json({ id: Number(id), date, time, service: service.name, master: masterName, remindLink: telegram.remindLink(remindCode), price: { full: price.full, pct: price.pct, discount: price.discount, final: price.final, note: service.price_note || '' } });
+    return { status: 201, body: { id: Number(id), date, time, service: service.name, master: masterName, remindLink: telegram.remindLink(remindCode), price: { full: price.full, pct: price.pct, discount: price.discount, final: price.final, note: service.price_note || '' } }, remindCode, phone: cleanPhone, name: cleanName };
   } catch (e) {
-    if (e.status) return res.status(e.status).json({ error: e.message });
+    if (e.status) return fail(e.status, e.message);
     console.error(e);
-    res.status(500).json({ error: 'Помилка сервера' });
+    return fail(500, 'Помилка сервера');
   }
+}
+
+app.post('/api/appointments', (req, res) => {
+  const r = publicBook(req.body, req.ip);
+  if (r.status === 201) {
+    const offer = friendInvites.offerFor(r.remindCode, r.phone);
+    if (offer) r.body.friendInvite = offer;
+  }
+  res.status(r.status).json(r.body);
 });
 
 // ---------- Вхід майстра в адмінку ----------
@@ -591,6 +603,9 @@ app.put('/api/admin/studio', (req, res) => {
   }
   if (clean.first_discount_pct && (!/^\d{1,2}$/.test(clean.first_discount_pct) || Number(clean.first_discount_pct) > 90)) {
     return res.status(400).json({ error: 'Знижка на перший візит: ціле число від 0 до 90 (0 — без знижки)' });
+  }
+  if (clean.friend_max_open && !/^[1-5]$/.test(clean.friend_max_open)) {
+    return res.status(400).json({ error: 'Скільки друзів одночасно: число від 1 до 5' });
   }
   if (clean.site_url && !/^https?:\/\/[^\s/]+(\/\S*)?$/.test(clean.site_url)) {
     return res.status(400).json({ error: 'Адреса сайту має починатися з https:// (або http://)' });

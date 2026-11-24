@@ -9,6 +9,7 @@ const { createHolidayTable } = require('./holidays');
 const { createReportColumns } = require('./reports');
 const { createReminderColumns } = require('./reminder-buttons');
 const { createFirstDiscountColumns } = require('./first-discount');
+const { createFriendTables } = require('./friend-invite');
 const { createAdminUserTables } = require('./admin-users');
 const { createAuditTable } = require('./audit');
 const { createWaitlistTable } = require('./waitlist');
@@ -151,6 +152,7 @@ function openDb() {
   migrateServicesV2(db);
   addServicesOnce(db, 'services_v3', EXTRA_SERVICES_V3);
   setPriceNoteOnce(db);
+  createFriendTables(db);
   createFirstDiscountColumns(db); // після стартових послуг: позначає «первинні»
   createMasterTables(db); // після стартових даних: перший майстр отримує наявний розклад, послуги й записи
   return db;

@@ -8,6 +8,7 @@
 // Лише для суперадміна: маршрутів немає в MASTER_ROUTES. Для підтвердження потрібні останні 4 цифри телефону.
 const fs = require('fs');
 const path = require('path');
+const { eraseReferrer } = require('./friend-invite');
 
 function setupClientErase({ app, db, dataDir, todayStr, last9, notifyMasterOf, waitlistCheck, live = () => {} }) {
   const photoDir = path.join(dataDir, 'private', 'client-photos');
@@ -56,7 +57,9 @@ function setupClientErase({ app, db, dataDir, todayStr, last9, notifyMasterOf, w
 
     db.transaction(() => {
       const ids = appts.map((a) => a.id);
+      eraseReferrer(db, key);
       for (const id of ids) {
+        db.prepare('DELETE FROM friend_invites WHERE friend_appt_id = ?').run(id);
         db.prepare('DELETE FROM reviews WHERE appointment_id = ?').run(id);
         db.prepare('DELETE FROM course_reminders WHERE start_appt_id = ?').run(id);
         db.prepare('UPDATE material_moves SET appt_id = NULL WHERE appt_id = ?').run(id);

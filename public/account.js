@@ -135,8 +135,10 @@
           : '<p class="muted">Підключіть Telegram: нагадування про записи і код для відновлення пароля надходитимуть у бот.</p><button class="btn btn-ghost small" type="button" data-act="tg-link">Підключити Telegram</button>'}
         <p class="acc-msg" id="tgMsg" role="status"></p>
       </div>
+      <div id="accFriend"></div>
       <h3 class="acc-h">Мої записи</h3>
       <ul class="acc-list" id="apptList"><li class="muted">Завантажую…</li></ul>`;
+    if (window.FriendInvite) window.FriendInvite.mount($('#accFriend'), {});
     await loadAppointments();
   }
 

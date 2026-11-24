@@ -765,3 +765,27 @@ html, body { overflow-x: clip; }       /* страховка: нічого не 
 .qty-in { color: #2F7D6B; white-space: nowrap; }
 .qty-out { color: #A23B3B; white-space: nowrap; }
 tr.is-muted td { opacity: .6; }
+
+/* Сертифікати */
+.cert-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; }
+.cert-st { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.cert-active { background: #E3F5EF; color: #22715F; }
+.cert-used { background: #EEE9FA; color: #5A4FB0; }
+.cert-void, .cert-expired { background: #F3F1F6; color: #7A7488; }
+.cert-ok { color: #22715F; font-weight: 600; }
+.cert-bad { color: #A23B3B; font-weight: 600; }
+
+/* Друк: видно лише #printArea */
+#printArea { display: none; }
+@media print {
+  body.printing > *:not(#printArea) { display: none !important; }
+  body.printing #printArea { display: block; }
+  body.printing { background: #fff; }
+}
+.cert-print { width: 180mm; margin: 20mm auto; padding: 16mm 14mm; border: 2px solid #8ED8C6; outline: 6px solid #EEE9FA; border-radius: 10mm; text-align: center; color: #2B2738; font-family: Inter, system-ui, sans-serif; }
+.cert-studio { font-size: 16pt; font-weight: 600; color: #22715F; }
+.cert-title { font-size: 26pt; font-weight: 700; margin: 6mm 0 2mm; }
+.cert-amount { font-size: 40pt; font-weight: 700; color: #5A4FB0; margin: 4mm 0; }
+.cert-line { font-size: 13pt; margin: 2mm 0; }
+.cert-code-big { font-family: ui-monospace, Menlo, monospace; font-size: 24pt; letter-spacing: .12em; margin: 8mm auto 4mm; padding: 3mm 6mm; border: 1px dashed #B9A7EA; border-radius: 4mm; display: inline-block; }
+.cert-small { font-size: 10pt; color: #6E688A; margin-top: 6mm; line-height: 1.5; }

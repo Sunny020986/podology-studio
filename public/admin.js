@@ -169,6 +169,7 @@
     schedule: renderSchedule,
     services: renderServices,
     materials: renderMaterials,
+    certificates: renderCertificates,
     studio: renderStudio,
     reviews: renderReviews,
     stats: renderStats,
@@ -1066,6 +1067,92 @@ ${isSuper() ? `
     } catch (err) { notify(err.message, true); }
   });
 
+  // ----- Друк: вміст кладеться в #printArea, яку видно лише під час друку -----
+  function printHtml(html) {
+    const area = $('#printArea');
+    area.innerHTML = html;
+    document.body.classList.add('printing');
+    const done = () => { document.body.classList.remove('printing'); area.innerHTML = ''; window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    setTimeout(() => window.print(), 50);
+  }
+
+  // ----- Подарункові сертифікати (лише суперадмін) -----
+  const CERT_STATE = { active: 'Діє', used: 'Використано', void: 'Скасовано', expired: 'Термін минув' };
+  let certList = [];
+  async function renderCertificates() {
+    certList = await api('/api/admin/certificates');
+    $('#view').innerHTML = `
+      <h3 style="margin:0 0 8px">Перевірити код</h3>
+      <form class="inline-form" id="certCheck">
+        <input name="code" placeholder="Код, наприклад ABCD-2345" maxlength="12" required style="text-transform:uppercase;max-width:220px">
+        <button class="btn btn-ghost small" type="submit">Перевірити</button>
+        <span id="certCheckRes" class="muted"></span>
+      </form>
+      <h3 style="margin:18px 0 8px">Новий сертифікат</h3>
+      <form class="inline-form" id="certForm">
+        <input name="amount_uah" type="number" min="1" step="1" placeholder="Сума, грн" required style="max-width:140px">
+        <input name="recipient" maxlength="80" placeholder="Кому (необов'язково)">
+        <input name="buyer" maxlength="80" placeholder="Від кого (необов'язково)">
+        <label class="muted">Діє до <input name="expires_on" type="date" min="${today()}"></label>
+        <input name="note" maxlength="300" placeholder="Примітка (необов'язково)">
+        <button class="btn btn-primary small" type="submit">Створити</button>
+      </form>
+      <p class="muted" style="margin:-8px 0 14px">Без дати сертифікат безстроковий. Сертифікат одноразовий: використовується на всю суму.</p>
+      <table>
+        <thead><tr><th>Код</th><th>Сума</th><th>Кому</th><th>Від кого</th><th>Діє до</th><th>Стан</th><th></th></tr></thead>
+        <tbody>${certList.length ? certList.map((c) => `<tr>
+          <td><strong class="cert-code">${esc(c.code)}</strong></td>
+          <td>${c.amount_uah.toLocaleString('uk-UA')} грн</td>
+          <td>${esc(c.recipient || '—')}</td>
+          <td>${esc(c.buyer || '—')}</td>
+          <td>${c.expires_on ? fmtDate(c.expires_on) : 'безстроковий'}</td>
+          <td><span class="cert-st cert-${c.state}">${CERT_STATE[c.state]}</span>${c.state === 'used' && c.used_at ? `<br><small class="muted">${new Date(c.used_at.replace(' ', 'T') + 'Z').toLocaleDateString('uk-UA', { timeZone: 'Europe/Kyiv' })}${c.used_note ? ', ' + esc(c.used_note) : ''}</small>` : ''}</td>
+          <td><span class="toolbar" style="margin:0;flex-wrap:wrap">
+            <button class="btn btn-ghost small" type="button" data-cert-print="${c.id}">Друк</button>
+            ${c.state === 'active' ? `<button class="btn btn-primary small" type="button" data-cert-use="${c.id}">Використано</button>` : ''}
+            ${c.state === 'active' || c.state === 'expired' ? `<button class="btn btn-ghost small danger" type="button" data-cert-void="${c.id}">Скасувати</button>` : ''}
+          </span></td>
+        </tr>`).join('') : '<tr><td colspan="7" class="muted">Сертифікатів ще немає.</td></tr>'}</tbody>
+      </table>`;
+  }
+  async function printCertificate(c) {
+    const s = await api('/api/admin/studio');
+    const place = [s.city, s.address].filter(Boolean).join(', ');
+    printHtml(`<div class="cert-print">
+      <div class="cert-studio">${esc(s.name)}</div>
+      <div class="cert-title">Подарунковий сертифікат</div>
+      <div class="cert-amount">${c.amount_uah.toLocaleString('uk-UA')} грн</div>
+      ${c.recipient ? `<div class="cert-line">для: <strong>${esc(c.recipient)}</strong></div>` : ''}
+      ${c.buyer ? `<div class="cert-line">від: ${esc(c.buyer)}</div>` : ''}
+      <div class="cert-code-big">${esc(c.code)}</div>
+      <div class="cert-line">${c.expires_on ? 'Діє до ' + fmtDate(c.expires_on) : 'Безстроковий'} · одноразовий</div>
+      <div class="cert-small">Назвіть код під час запису або на прийомі.${place ? '<br>' + esc(place) : ''}${s.phone ? ' · ' + esc(s.phone) : ''}</div>
+    </div>`);
+  }
+  $('#view').addEventListener('submit', async (e) => {
+    if (e.target.id === 'certForm') {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      try {
+        const c = await api('/api/admin/certificates', { method: 'POST', body: {
+          amount_uah: Number(f.get('amount_uah')), recipient: f.get('recipient'), buyer: f.get('buyer'), expires_on: f.get('expires_on'), note: f.get('note'),
+        } });
+        notify('Сертифікат створено: ' + c.code);
+        await renderCertificates();
+      } catch (err) { notify(err.message, true); }
+    }
+    if (e.target.id === 'certCheck') {
+      e.preventDefault();
+      const out = $('#certCheckRes');
+      try {
+        const c = await api('/api/admin/certificates/check?code=' + encodeURIComponent(new FormData(e.target).get('code')));
+        out.textContent = `${c.code}: ${CERT_STATE[c.state]}, ${c.amount_uah.toLocaleString('uk-UA')} грн${c.expires_on ? ', діє до ' + fmtDate(c.expires_on) : ''}${c.recipient ? ', для ' + c.recipient : ''}`;
+        out.className = c.state === 'active' ? 'cert-ok' : 'cert-bad';
+      } catch (err) { out.textContent = err.message; out.className = 'cert-bad'; }
+    }
+  });
+
   // ----- Майстри (лише суперадмін) -----
   const M_STATUS = { active: 'Працює', blocked: 'Заблоковано' };
   let editingMaster = null; // null — список, 'new' — новий майстер, число — редагування
@@ -1517,6 +1604,25 @@ ${isSuper() ? `
         await api('/api/admin/clients/' + e.target.dataset.restore + '/restore', { method: 'POST' });
         notify('Клієнта повернуто з архіву');
         return await loadClients();
+      }
+
+      if (e.target.dataset.certPrint) {
+        const c = certList.find((x) => x.id === Number(e.target.dataset.certPrint));
+        if (c) await printCertificate(c);
+        return;
+      }
+      if (e.target.dataset.certUse) {
+        const note = prompt('Позначити сертифікат використаним. Примітка (необов\'язково), наприклад «медичний педикюр, Олена»:');
+        if (note === null) return;
+        await api('/api/admin/certificates/' + e.target.dataset.certUse + '/use', { method: 'POST', body: { note } });
+        notify('Сертифікат позначено використаним');
+        return await renderCertificates();
+      }
+      if (e.target.dataset.certVoid) {
+        if (!confirm('Скасувати сертифікат? Код перестане діяти.')) return;
+        await api('/api/admin/certificates/' + e.target.dataset.certVoid + '/void', { method: 'POST' });
+        notify('Сертифікат скасовано');
+        return await renderCertificates();
       }
 
       if (e.target.dataset.matIn || e.target.dataset.matOut) {

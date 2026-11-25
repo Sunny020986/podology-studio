@@ -40,6 +40,11 @@
     document.body.style.overflow = '';
   }
   $('#accountBtn').addEventListener('click', open);
+  // Відкрити кабінет на потрібній вкладці (чат, «Знижка за реєстрацію»)
+  document.addEventListener('account:open', (e) => {
+    if (e.detail && e.detail.tab) state.authTab = e.detail.tab;
+    open();
+  });
 
   // Кнопка в шапці: після входу на ній світиться ім'я клієнта
   function updateHeader() {

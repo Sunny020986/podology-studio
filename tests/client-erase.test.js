@@ -31,6 +31,10 @@ before(async () => {
     db.prepare("INSERT INTO material_moves (material_id, delta, reason, appt_id, note) VALUES (?, -1, 'visit', ?, 'візит')").run(mat.body.id, pastId);
     const acc = db.prepare("INSERT INTO accounts (phone, phone_key, name, pass_hash) VALUES ('+380671112233', ?, 'Ірина', 'x')").run(KEY).lastInsertRowid;
     db.prepare('INSERT INTO account_sessions (token_hash, account_id, expires_at) VALUES (?, ?, ?)').run('h-' + acc, acc, Date.now() + 1e9);
+    db.prepare("INSERT INTO conversations (id, account_id) VALUES ('chat-irina', ?)").run(acc); // чат з оператором з кабінету
+    db.prepare("INSERT INTO messages (conversation_id, sender, body) VALUES ('chat-irina', 'client', 'Чи можна перенести?')").run();
+    db.prepare("INSERT INTO conversations (id) VALUES ('chat-other')").run();
+    db.prepare("INSERT INTO messages (conversation_id, sender, body) VALUES ('chat-other', 'client', 'Чужий чат')").run();
     db.prepare("INSERT INTO account_codes (kind, key, value, expires_at) VALUES ('link', 'k1', ?, ?)").run(String(acc), Date.now() + 1e9);
     db.prepare("INSERT INTO account_codes (kind, key, value, expires_at) VALUES ('reset', ?, 'x', ?)").run(KEY, Date.now() + 1e9);
     db.prepare("INSERT INTO waitlist (service_id, date, name, phone, code) VALUES (?, ?, 'Ірина', '0671112233', 'w1')").run(serviceId, daysAgo(-5));
@@ -40,7 +44,7 @@ after(() => srv && srv.stop());
 
 test('попередній підрахунок показує, що буде видалено', async () => {
   const p = (await srv.req('GET', `/api/admin/clients/${KEY}/erase-preview`, { token: srv.ADMIN })).body;
-  assert.deepEqual({ ...p, name: undefined }, { name: undefined, appointments: 2, future: 1, reviews: 1, photos: 1, videos: 0, note: true, account: true, waitlist: 1 });
+  assert.deepEqual({ ...p, name: undefined }, { name: undefined, appointments: 2, future: 1, reviews: 1, photos: 1, videos: 0, note: true, account: true, chats: 1, waitlist: 1 });
 });
 
 test('без правильних 4 цифр і без прав — не видаляє', async () => {
@@ -67,8 +71,10 @@ test('видаляє все пов’язане, файл фото, лишає �
     codes: db.prepare("SELECT COUNT(*) AS n FROM account_codes WHERE kind IN ('link', 'reset')").get().n,
     waitlist: db.prepare('SELECT COUNT(*) AS n FROM waitlist').get().n,
     other: db.prepare('SELECT COUNT(*) AS n FROM appointments WHERE id = ?').get(otherId).n,
+    chats: db.prepare('SELECT id FROM conversations').all().map((c) => c.id),
+    chatMsgs: db.prepare('SELECT body FROM messages').all().map((m) => m.body),
   }));
-  assert.deepEqual(left, { appts: 0, reviews: 0, otherReview: 1, course: 0, moves: 1, movesLinked: 0, tables: [0, 0, 0, 0, 0], sessions: 0, codes: 0, waitlist: 0, other: 1 });
+  assert.deepEqual(left, { appts: 0, reviews: 0, otherReview: 1, course: 0, moves: 1, movesLinked: 0, tables: [0, 0, 0, 0, 0], sessions: 0, codes: 0, waitlist: 0, other: 1, chats: ['chat-other'], chatMsgs: ['Чужий чат'] });
   assert.equal(fs.existsSync(path.join(srv.dir, 'private', 'client-photos', photoFile)), false, 'файл фото видалено');
   assert.equal((await srv.req('GET', `/api/admin/clients/${KEY}`, { token: srv.ADMIN })).status, 404);
   assert.deepEqual((await srv.req('GET', '/api/admin/client-search?q=ірина', { token: srv.ADMIN })).body, []);

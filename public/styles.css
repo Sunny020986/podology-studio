@@ -1101,3 +1101,34 @@ tr.wait-new td { background: rgba(229, 57, 53, 0.06); }
 .extra-chip button:hover { background: rgba(0,0,0,0.06); color: var(--ink); }
 .extra-add { margin-top: 8px; }
 .extra-add select { width: 100%; }
+
+/* Чат клієнта: лише після входу; свої повідомлення можна змінити чи видалити 15 хв */
+.chat-locked { margin: auto 0; text-align: center; display: grid; gap: 8px; padding: 12px 4px; }
+.chat-locked p { margin: 0; }
+.chat-locked-btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 4px; }
+.bubble-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.bubble-edited { font-size: 11px; opacity: 0.7; margin-top: 2px; font-style: italic; }
+.bubble-tools { display: flex; gap: 4px; justify-content: flex-end; margin: 2px -6px -4px 0; }
+.bubble-tools button { border: 0; background: transparent; color: inherit; opacity: 0.7; font-size: 15px; min-width: 32px; min-height: 28px; border-radius: 8px; cursor: pointer; padding: 0 6px; }
+.bubble-tools button:hover, .bubble-tools button:focus-visible { opacity: 1; background: rgba(0,0,0,0.12); }
+.bubble-tools button.sure { font-size: 12px; opacity: 1; background: rgba(0,0,0,0.18); }
+.bubble-editform { display: grid; gap: 6px; min-width: min(240px, 60vw); }
+.bubble-editform textarea { width: 100%; resize: vertical; font: inherit; color: var(--ink, inherit); }
+.bubble-editbtns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* «Знижка за реєстрацію» в шапці та підказка біля ціни */
+.reg-promo { border: 1px solid var(--accent); background: transparent; color: var(--teal, var(--accent)); font: inherit; font-size: 14px; font-weight: 600; padding: 7px 14px; border-radius: 999px; cursor: pointer; white-space: nowrap; transition: background 0.25s, color 0.25s; }
+.reg-promo:hover, .reg-promo:focus-visible { background: var(--accent); color: var(--accent-ink); }
+.reg-note { margin-top: 8px; font-size: 14px; }
+.link-btn { border: 0; background: none; padding: 0; font: inherit; color: var(--teal, var(--accent)); text-decoration: underline; cursor: pointer; font-weight: 600; }
+@media (max-width: 560px) {
+  .reg-promo { font-size: 12px; padding: 6px 10px; white-space: normal; line-height: 1.15; max-width: 128px; text-align: center; }
+}
+
+/* «Питання й відповіді» на головному екрані, під кнопками */
+.hero-faq { margin-top: 6px; }
+.hero-faq h2 { font-size: 20px; margin: 0 0 10px; }
+.hero-faq .faq-list { grid-template-columns: 1fr; gap: 8px; max-width: 620px; }
+.hero-faq .faq-item { background: rgba(255, 255, 255, 0.82); padding: 0 16px; border-radius: 12px; }
+.hero-faq .faq-item summary { padding: 12px 0; font-size: 15px; }
+.hero-faq .faq-answer { font-size: 15px; padding-bottom: 12px; }

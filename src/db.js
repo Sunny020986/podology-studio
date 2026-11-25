@@ -138,6 +138,11 @@ function openDb() {
   if (!svcCols.includes('price_note')) db.exec("ALTER TABLE services ADD COLUMN price_note TEXT NOT NULL DEFAULT ''");
 
   createAccountTables(db);
+  // Чат лише для зареєстрованих: діалог прив'язаний до кабінету; клієнт може змінити повідомлення (позначка часу зміни)
+  const convCols = db.prepare('PRAGMA table_info(conversations)').all().map((c) => c.name);
+  if (!convCols.includes('account_id')) db.exec('ALTER TABLE conversations ADD COLUMN account_id INTEGER');
+  const msgCols = db.prepare('PRAGMA table_info(messages)').all().map((c) => c.name);
+  if (!msgCols.includes('edited_at')) db.exec('ALTER TABLE messages ADD COLUMN edited_at TEXT');
   createReviewTables(db);
   createRepeatColumns(db);
   createCourseColumns(db);

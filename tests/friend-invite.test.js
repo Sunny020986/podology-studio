@@ -111,7 +111,7 @@ test('лише контакт друга: список в адмінці, адм
   const friendPhone = phone();
   const r = await book(me, 'Марія Запрошує', { mode: 'lead', name: 'Друг Контакт', phone: friendPhone });
   assert.equal(r.status, 201, r.text);
-  assert.deepEqual(r.body.friends, [{ ok: true, mode: 'lead', name: 'Друг Контакт', pct: 40 }]); // 20% перший візит + 20% від друга
+  assert.deepEqual(r.body.friends, [{ ok: true, mode: 'lead', name: 'Друг Контакт', pct: 20, regPct: 20 }]); // 20% від друга; ще 20% на перший візит — якщо друг зареєструється
   let row = (await adminList()).find((x) => x.friend === 'Друг Контакт');
   assert.deepEqual({ kind: row.kind, referrer: row.referrer, came: row.came, reward: row.reward }, { kind: 'lead', referrer: 'Марія Запрошує', came: false, reward: 'none' });
 
@@ -160,7 +160,9 @@ test('друг лише за контактом: знижка на перший 
   const friendPhone = phone();
   const r = await book(phone(), 'Контакт Запрошує', { mode: 'lead', name: 'Друг Сам Запишеться', phone: friendPhone });
   assert.equal(r.status, 201, r.text);
-  assert.deepEqual({ k: (await q(friendPhone)).kind, f: (await q(friendPhone)).final }, { k: 'invited', f: 300 }); // 500 − (20% + 20%)
+  assert.deepEqual({ k: (await q(friendPhone)).kind, f: (await q(friendPhone)).final, r: (await q(friendPhone)).regPct }, { k: 'invited', f: 400, r: 20 }); // без кабінету: лише 20% від друга
+  await srv.register(friendPhone, 'Друг Сам Запишеться');
+  assert.deepEqual({ k: (await q(friendPhone)).kind, f: (await q(friendPhone)).final }, { k: 'invited', f: 300 }); // з кабінетом: 500 − (20% + 20%)
   // Друг записується сам на сайті — знижка в записі
   const s = (await srv.req('GET', `/api/next-slot?serviceId=${other.id}&masterId=${M.id}`)).body;
   const b = await srv.req('POST', '/api/appointments', { body: { serviceId: other.id, date: s.date, time: s.slots[0], name: 'Друг Сам Запишеться', phone: friendPhone, masterId: M.id } });
@@ -296,7 +298,9 @@ test('знижки разом: 10% на перший візит + 20% від д�
   const me = phone(), fr = phone();
   const r = await book(me, 'Привела Подругу', { mode: 'lead', name: 'Подруга', phone: fr });
   assert.equal(r.status, 201, r.text);
-  assert.equal(r.body.friends[0].pct, 30);
+  assert.equal(r.body.friends[0].pct, 20, 'подруга ще без кабінету: лише знижка від друга');
+  assert.equal(r.body.friends[0].regPct, 10);
+  await srv.register(fr, 'Подруга');
   const q1 = (await srv.req('GET', `/api/first-discount?serviceId=${svc}&phone=${fr}`)).body;
   assert.deepEqual({ k: q1.kind, p: q1.pct, a: q1.pctFirst, b: q1.pctFriend, f: q1.final }, { k: 'invited', p: 30, a: 10, b: 20, f: 700 });
   // Подруга прийшла → тій, хто привела, 20% на наступний запис

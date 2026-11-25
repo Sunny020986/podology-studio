@@ -32,6 +32,7 @@ function setupClientErase({ app, db, dataDir, todayStr, last9, notifyMasterOf, w
       videos: db.prepare('SELECT COUNT(*) AS n FROM client_videos WHERE phone_key = ?').get(key).n,
       note: !!db.prepare("SELECT 1 FROM client_notes WHERE phone_key = ? AND note != ''").get(key),
       account: !!db.prepare('SELECT 1 FROM accounts WHERE phone_key = ?').get(key),
+      chats: db.prepare('SELECT COUNT(*) AS n FROM conversations c JOIN accounts a ON a.id = c.account_id WHERE a.phone_key = ?').get(key).n,
       waitlist: waitOf(key).length,
     };
   }
@@ -73,6 +74,11 @@ function setupClientErase({ app, db, dataDir, todayStr, last9, notifyMasterOf, w
       }
       const acc = db.prepare('SELECT id FROM accounts WHERE phone_key = ?').get(key);
       if (acc) {
+        // Чат клієнта прив'язаний до кабінету — видаляємо разом із ним
+        for (const c of db.prepare('SELECT id FROM conversations WHERE account_id = ?').all(acc.id)) {
+          db.prepare('DELETE FROM messages WHERE conversation_id = ?').run(c.id);
+          db.prepare('DELETE FROM conversations WHERE id = ?').run(c.id);
+        }
         db.prepare('DELETE FROM account_sessions WHERE account_id = ?').run(acc.id);
         db.prepare("DELETE FROM account_codes WHERE kind = 'link' AND value = ?").run(String(acc.id));
         db.prepare('DELETE FROM accounts WHERE id = ?').run(acc.id);

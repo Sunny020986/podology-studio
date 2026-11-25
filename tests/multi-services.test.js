@@ -27,6 +27,7 @@ test('вільний час і ціна для двох послуг; запис
   assert.ok(next.date, 'є вільний час');
   const sl = (await srv.req('GET', `/api/slots?serviceId=${s1.id}&extra=${s2.id}&date=${next.date}&masterId=${A.id}`)).body;
   assert.equal(sl.duration, 45 + 60);
+  await srv.register('0671112001', 'Дві Послуги'); // знижка на перший візит — лише з кабінетом
   const q = (await srv.req('GET', `/api/first-discount?serviceId=${s1.id}&extra=${s2.id}&phone=0671112001`)).body;
   assert.deepEqual({ full: q.full, kind: q.kind, final: q.final }, { full: 2030, kind: 'first', final: 1965 }); // 10% лише від 650
 

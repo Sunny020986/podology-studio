@@ -9,8 +9,8 @@ before(async () => { srv = await startServer(); });
 after(() => srv && srv.stop());
 
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-function open(path) {
-  const ws = new WebSocket(srv.base.replace('http', 'ws') + path);
+function open(path, cookie) {
+  const ws = new WebSocket(srv.base.replace('http', 'ws') + path, cookie ? { headers: { Cookie: cookie } } : undefined);
   const c = { ws, msgs: [] };
   ws.on('message', (d) => c.msgs.push(JSON.parse(String(d))));
   ws.on('error', () => {});
@@ -23,7 +23,10 @@ async function waitFor(fn, what) {
 }
 
 test('адмін видаляє одне повідомлення: зникає в базі, у відвідувача й в адмінці', async () => {
-  const visitor = open('/ws');
+  // Чат — лише для зареєстрованих клієнтів
+  const reg = await srv.req('POST', '/api/account/register', { body: { name: 'Клієнтка Чат', phone: '+380671119901', password: 'cabinet-pass-1' } });
+  assert.equal(reg.status, 201, reg.text);
+  const visitor = open('/ws', (reg.headers.get('set-cookie') || '').split(';')[0]);
   await visitor.ready;
   visitor.ws.send(JSON.stringify({ type: 'message', body: 'Перше' }));
   const hello = await waitFor(() => visitor.msgs.find((m) => m.type === 'message'), 'перше повідомлення');

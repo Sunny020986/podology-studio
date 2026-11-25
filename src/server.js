@@ -1327,15 +1327,15 @@ app.delete('/api/admin/conversations/:id', (req, res) => {
 // ---------- Чат (WebSocket) ----------
 function listConversations() {
   return db
-    .prepare(`SELECT c.id, c.last_message_at,
+    .prepare(`SELECT c.id, c.last_message_at, acc.name AS client_name, acc.phone AS client_phone,
                      (SELECT body FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_body
-              FROM conversations c ORDER BY c.last_message_at DESC LIMIT 200`)
+              FROM conversations c LEFT JOIN accounts acc ON acc.id = c.account_id ORDER BY c.last_message_at DESC LIMIT 200`)
     .all();
 }
 
 function messagesOf(convId) {
   return db
-    .prepare('SELECT id, conversation_id, sender, body, created_at FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 50')
+    .prepare('SELECT id, conversation_id, sender, body, created_at, edited_at FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 50')
     .all(convId)
     .reverse();
 }
@@ -1343,7 +1343,7 @@ function messagesOf(convId) {
 function saveMessage(convId, sender, body) {
   const info = db.prepare('INSERT INTO messages (conversation_id, sender, body) VALUES (?, ?, ?)').run(convId, sender, body);
   db.prepare("UPDATE conversations SET last_message_at = datetime('now') WHERE id = ?").run(convId);
-  return db.prepare('SELECT id, conversation_id, sender, body, created_at FROM messages WHERE id = ?').get(info.lastInsertRowid);
+  return db.prepare('SELECT id, conversation_id, sender, body, created_at, edited_at FROM messages WHERE id = ?').get(info.lastInsertRowid);
 }
 
 // ---------- Помилки ----------
@@ -1424,7 +1424,9 @@ wss.on('connection', (ws, req) => {
     }
     ({ role, masterId, adminId, actor } = who);
   }
-  ws.meta = { role, masterId, adminId, actor, ip: wsIp(req), token: role === 'client' ? null : adminParam, conversationId: null, hits: [] };
+  // Відвідувач сайту: чат лише для тих, хто увійшов у кабінет (cookie сесії кабінету приходить разом із запитом)
+  const account = role === 'client' ? accounts.accountFromRequest(req) : null;
+  ws.meta = { role, masterId, adminId, actor, ip: wsIp(req), token: role === 'client' ? null : adminParam, conversationId: null, hits: [], accountId: account ? account.id : null };
 
   if (role === 'admin') {
     admins.add(ws);
@@ -1474,14 +1476,21 @@ setInterval(purgeEmptyConversations, 60 * 60 * 1000).unref();
 syncArchive();
 setInterval(syncArchive, 60 * 60 * 1000).unref();
 
+// Скільки хвилин клієнт може змінити чи видалити своє повідомлення
+const CHAT_EDIT_MIN = 15;
 function handleClient(ws, msg) {
+  const accId = ws.meta.accountId;
+  // Чат — лише для зареєстрованих: без входу в кабінет нічого не приймаємо
+  if (!accId || !db.prepare('SELECT 1 FROM accounts WHERE id = ?').get(accId)) {
+    if (msg.type === 'hello') return send(ws, { type: 'hello', auth: false, messages: [] });
+    return send(ws, { type: 'error', error: 'Чат з оператором — для зареєстрованих клієнтів. Увійдіть у кабінет' });
+  }
   if (msg.type === 'hello') {
-    // Діалог у базі створюється лише з першим повідомленням, тож просте відкриття сайту нічого не записує
-    let id = typeof msg.conversationId === 'string' && /^[a-f0-9-]{36}$/.test(msg.conversationId) ? msg.conversationId : null;
-    if (id && !db.prepare('SELECT 1 FROM conversations WHERE id = ?').get(id)) id = null;
+    // Діалог клієнта — за кабінетом; у базі створюється лише з першим повідомленням
+    const id = db.prepare('SELECT id FROM conversations WHERE account_id = ? ORDER BY last_message_at DESC LIMIT 1').get(accId)?.id || null;
     detach(ws);
     if (id) attach(ws, id);
-    send(ws, { type: 'hello', conversationId: id, messages: id ? messagesOf(id) : [] });
+    send(ws, { type: 'hello', auth: true, conversationId: id, messages: id ? messagesOf(id) : [], editMinutes: CHAT_EDIT_MIN });
     return;
   }
 
@@ -1499,14 +1508,38 @@ function handleClient(ws, msg) {
     let id = ws.meta.conversationId;
     if (!id) {
       id = crypto.randomUUID();
-      db.prepare('INSERT INTO conversations (id) VALUES (?)').run(id);
+      db.prepare('INSERT INTO conversations (id, account_id) VALUES (?, ?)').run(id, accId);
       attach(ws, id);
       send(ws, { type: 'conversation', conversationId: id });
     }
     const message = saveMessage(id, 'client', body);
-    send(ws, { type: 'message', message });
+    (clients.get(id) || new Set()).forEach((c) => send(c, { type: 'message', message })); // і в інших вкладках клієнта
     telegram.newChatMessage(id, body);
     notifyAdmins({ type: 'message', conversationId: id, message });
+    return;
+  }
+
+  // Змінити чи видалити своє повідомлення — лише протягом CHAT_EDIT_MIN хвилин після відправки
+  if (msg.type === 'edit' || msg.type === 'delete') {
+    const m = db.prepare(`SELECT m.* FROM messages m JOIN conversations c ON c.id = m.conversation_id
+      WHERE m.id = ? AND m.sender = 'client' AND c.account_id = ?`).get(Number(msg.id), accId);
+    if (!m) return send(ws, { type: 'error', error: 'Повідомлення не знайдено' });
+    if (!db.prepare('SELECT 1 FROM messages WHERE id = ? AND created_at >= datetime(\'now\', ?)').get(m.id, `-${CHAT_EDIT_MIN} minutes`)) {
+      return send(ws, { type: 'error', error: `Змінити чи видалити повідомлення можна протягом ${CHAT_EDIT_MIN} хв після відправки` });
+    }
+    const listeners = clients.get(m.conversation_id) || new Set();
+    if (msg.type === 'delete') {
+      db.prepare('DELETE FROM messages WHERE id = ?').run(m.id);
+      listeners.forEach((c) => send(c, { type: 'message_deleted', messageId: m.id }));
+      notifyAdmins({ type: 'message_deleted', conversationId: m.conversation_id, messageId: m.id });
+      return;
+    }
+    const body = String(msg.body ?? '').trim();
+    if (!body || body.length > 1000) return send(ws, { type: 'error', error: 'Повідомлення порожнє або довше 1000 символів' });
+    db.prepare("UPDATE messages SET body = ?, edited_at = datetime('now') WHERE id = ?").run(body, m.id);
+    const message = db.prepare('SELECT id, conversation_id, sender, body, created_at, edited_at FROM messages WHERE id = ?').get(m.id);
+    listeners.forEach((c) => send(c, { type: 'message_edited', message }));
+    notifyAdmins({ type: 'message_edited', conversationId: m.conversation_id, message });
   }
 }
 

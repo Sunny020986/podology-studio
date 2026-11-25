@@ -191,7 +191,8 @@ test('перенесення запису скидає позначки кліє
   await press('507', `c:${id}`);
   assert.ok(row(id).client_confirmed_at);
   let target = null;
-  for (let i = 1; i <= 20 && !target; i++) {
+  // Від післязавтра: перенесення на завтра може потрапити у вікно нагадування (24 год), і воно піде одразу
+  for (let i = 2; i <= 20 && !target; i++) {
     const date = local(new Date(Date.now() + i * 86400000));
     const r = await srv.req('GET', `/api/admin/slots?serviceId=${serviceId}&date=${date}&masterId=${A.id}&excludeId=${id}`, { token: srv.ADMIN });
     if (r.body?.slots?.length) target = { date, time: r.body.slots[0] };

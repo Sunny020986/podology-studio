@@ -1,4 +1,4 @@
-// Знижка на перший візит. Пропонується лише клієнтові, який ще не мав у нас жодного запису
+// Знижка на перший візит. Пропонується лише клієнтові з кабінетом на сайті, який ще не мав у нас жодного запису
 // (скасовані й «не прийшов» не рахуються), і лише на послуги з позначкою services.first_discount.
 // Відсоток — налаштування кабінету first_discount_pct (0 — знижки немає). Ціна в записі фіксується
 // в момент запису: price_full_uah (за прайсом), discount_pct і price_uah (до сплати).
@@ -37,6 +37,12 @@ const discountPct = (db) => {
   return Number.isInteger(n) && n > 0 && n <= 90 ? n : 0;
 };
 
+// Чи є в номера кабінет на сайті. Знижка на перший візит — лише зареєстрованим клієнтам («Знижка за реєстрацію»)
+function isRegistered(db, phone) {
+  const key = String(phone).replace(/\D/g, '').slice(-9);
+  return key.length === 9 && !!db.prepare('SELECT 1 FROM accounts WHERE phone_key = ?').get(key);
+}
+
 // Чи були в цього номера записи, окрім скасованих і «не прийшов»
 function hasVisits(db, phone) {
   const key = String(phone).replace(/\D/g, '').slice(-9);
@@ -68,7 +74,10 @@ function quote(db, service, phone) {
   if (!hasVisits(db, phone)) {
     const invited = isInvitedFriend(db, phone);
     const firstOn = list.filter((x) => x.first_discount || invited);
-    if (firstOn.length) { out.pctFirst = discountPct(db); baseFirst = firstOn.reduce((s, x) => s + (x.price_uah > 0 ? x.price_uah : 0), 0); }
+    out.registered = isRegistered(db, phone);
+    // Без кабінету знижки на перший візит немає; показуємо, скільки дала б реєстрація (regPct)
+    if (firstOn.length && !out.registered) out.regPct = discountPct(db);
+    if (firstOn.length && out.registered) { out.pctFirst = discountPct(db); baseFirst = firstOn.reduce((s, x) => s + (x.price_uah > 0 ? x.price_uah : 0), 0); }
     if (invited) out.pctFriend = friendPct(db);
     out.invited = invited;
     if (out.pctFirst || out.pctFriend) out.kind = invited && out.pctFriend ? 'invited' : 'first';
@@ -102,11 +111,11 @@ function setupFirstDiscount({ app, db, makeLimiter, friendState = () => null }) 
     if (digits.length < 9 || digits.length > 15) return res.json({ eligible: false, kind: null, pct: 0, full, discount: 0, final: full, friend: { available: false } });
     if (limiter.blocked(req.ip)) return res.status(429).json({ error: 'Забагато перевірок. Спробуйте пізніше' });
     limiter.hit(req.ip);
-    const { inviteId, ...q } = quote(db, all, digits);
+    const { inviteId, registered, ...q } = quote(db, all, digits);
     // Чи показувати у формі запису блок «Приведи друга» для цього номера (без подробиць)
     const fs = friendState(digits.slice(-9));
     res.json({ ...q, friend: { available: !!(fs && fs.available), left: fs ? fs.left : 0 } });
   });
 }
 
-module.exports = { createFirstDiscountColumns, setupFirstDiscount, quote, discountPct, friendPct, hasVisits };
+module.exports = { createFirstDiscountColumns, setupFirstDiscount, quote, discountPct, friendPct, hasVisits, isRegistered };

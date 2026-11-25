@@ -21,6 +21,7 @@ after(() => srv && srv.stop());
 
 test('ціна запам’ятовується на момент запису й не змінюється разом із прайсом', async () => {
   await setPrice(s1.id, 500);
+  await srv.register('+380631000001'); // знижка на перший візит — лише з кабінетом
   const a = await book(srv, { serviceId: s1.id, masterId: A.id, phone: '+380631000001' });
   await setPrice(s1.id, 600);
   // Перший візит: 500 грн мінус знижка 10% = 450; повна ціна за прайсом теж запам'ятана

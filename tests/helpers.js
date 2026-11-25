@@ -59,7 +59,16 @@ async function startServer(extraEnv = {}) {
     proc.once('exit', () => { fs.rmSync(dir, { recursive: true, force: true }); ok(); });
     proc.kill();
   });
-  return { base, req, stop, dir, log: () => log, ADMIN };
+  // Кабінет клієнта для номера (знижка на перший візит — лише зареєстрованим). Повторно — без помилки
+  const accounts = new Set();
+  async function register(phone, name = 'Клієнт Кабінет') {
+    const k = String(phone).replace(/\D/g, '').slice(-9);
+    if (accounts.has(k)) return;
+    const r = await req('POST', '/api/account/register', { body: { name, phone, password: 'cabinet-pass-1' } });
+    if (r.status !== 201 && r.status !== 409) throw new Error('Реєстрація: ' + r.text);
+    accounts.add(k);
+  }
+  return { base, req, stop, dir, log: () => log, ADMIN, register };
 }
 
 // Майстер з паролем і всіма послугами; повертає { id, token }

@@ -153,7 +153,9 @@ function setupFriendInvite({ app, db, publicBook, hasVisits, accountFromRequest,
       ins.run(key, ref.name, key9(phone), name, phone, 'lead', null);
       const msg = `🤝 Друг клієнта ${ref.name}: ${name}, ${phone}\nЗателефонуйте й запишіть (знижка на перший візит нарахується сама). Список: адмінка → «Записи» → «Друзі клієнтів»`;
       if (defer) defer.push(() => notifyStaff(msg)); else notifyStaff(msg);
-      return { status: 201, body: { mode: 'lead', name, pct: Math.min(90, discountPct(db) + friendPct(db)) } }; // знижка друга на перший візит
+      // Знижка друга на перший візит: за запрошення — завжди; ще знижка на перший візит — якщо в нього є кабінет на сайті
+      const reg = !!db.prepare('SELECT 1 FROM accounts WHERE phone_key = ?').get(key9(phone));
+      return { status: 201, body: { mode: 'lead', name, pct: Math.min(90, friendPct(db) + (reg ? discountPct(db) : 0)), regPct: reg ? 0 : discountPct(db) } };
     }
     // Запрошення записуємо ДО запису друга: тоді bookTx бачить, що це запрошений друг, і дає знижку на перший візит
     const inv = Number(ins.run(key, ref.name, key9(phone), name, phone, 'book', null).lastInsertRowid);

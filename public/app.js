@@ -41,6 +41,9 @@
     if (S.promo_first === undefined) return; // запасні дані з config.js: блоків ще немає
 
     state.promoFriend = S.promo_friend || '';
+    // «Знижка за реєстрацію» в шапці: лише якщо знижка на перший візит увімкнена і клієнт ще не увійшов у кабінет
+    state.regPct = Number(S.first_discount_pct) || 0;
+    updateRegPromo();
 
     // Лічильники: показуються лише заповнені числа з адмінки
     const plural = (n, one, few, many) => (n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many);
@@ -321,7 +324,9 @@
     if (!s) { box.innerHTML = ''; return; }
     const q = quoteState.key === quoteKey() ? quoteState.data : null;
     renderFriendInline(q);
-    if (q && q.eligible) { box.innerHTML = calcHtml(q) + unpricedNote(); return; }
+    // Знижка на перший візит — лише після реєстрації: незареєстрованому новому клієнтові підказуємо
+    const reg = q && q.regPct ? `<div class="reg-note">🎁 Зареєструйтеся на сайті — і на перший візит буде знижка ${q.regPct}%. <button class="link-btn" type="button" data-acc-open="register">Зареєструватися</button></div>` : '';
+    if (q && q.eligible) { box.innerHTML = calcHtml(q) + unpricedNote() + reg; return; }
     const list = selectedServices();
     if (list.length > 1) {
       // Кілька послуг: кожна окремим рядком і сума
@@ -332,12 +337,19 @@
       const total = !un.length ? (sum ? sum + ' грн' : 'ціна уточнюється')
         : mins.every((n) => n > 0) ? `від ${sum + mins.reduce((a, b) => a + b, 0)} грн` : sum ? `${sum} грн + уточнюється` : 'ціна уточнюється';
       box.innerHTML = `<div class="price-calc">${list.map((x) => `<div class="pc-row"><span>${esc(x.name)}</span><span>${esc(priceText(x))}</span></div>`).join('')}
-        <div class="pc-row pc-total"><span>Разом</span><span>${total}</span></div></div>` + unpricedNote();
+        <div class="pc-row pc-total"><span>Разом</span><span>${total}</span></div></div>` + unpricedNote() + reg;
       return;
     }
     box.innerHTML = s.price_uah > 0 || s.price_note
-      ? `<div class="price-calc"><div class="pc-row pc-total"><span>Ціна</span><span>${esc(priceText(s))}</span></div></div>` : '';
+      ? `<div class="price-calc"><div class="pc-row pc-total"><span>Ціна</span><span>${esc(priceText(s))}</span></div></div>` + reg : reg;
   }
+  // Кнопки, що відкривають кабінет на вкладці реєстрації («Знижка за реєстрацію» в шапці, підказка біля ціни)
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-acc-open]');
+    if (!b) return;
+    e.preventDefault();
+    document.dispatchEvent(new CustomEvent('account:open', { detail: { tab: b.dataset.accOpen } }));
+  });
   // «Приведи друга» прямо у формі: показуємо лише номеру, який ще може запросити друзів (сервер каже, скільки)
   let friendList = null;
   function renderFriendInline(q) {
@@ -494,8 +506,16 @@
   // Клієнт увійшов у кабінет (або щойно зареєструвався): його ім'я й телефон уже відомі, тож підставляємо їх у форму запису.
   // Те, що клієнт устиг ввести сам, не чіпаємо; після виходу прибираємо лише підставлене.
   let autoFilled = { name: '', phone: '' };
+  function updateRegPromo() {
+    const b = $('#regPromo');
+    if (!b) return;
+    b.hidden = !state.regPct || !!state.loggedIn;
+    b.title = state.regPct ? `Зареєструйтеся на сайті — і на перший візит знижка ${state.regPct}%` : '';
+  }
   document.addEventListener('account:me', (e) => {
     const me = e.detail, n = $('#nameInput'), p = $('#phoneInput');
+    state.loggedIn = !!me;
+    updateRegPromo();
     if (me) {
       if (!n.value || n.value === autoFilled.name) { n.value = me.name; autoFilled.name = me.name; }
       if (!p.value || p.value === autoFilled.phone) { p.value = me.phone; autoFilled.phone = me.phone; }
@@ -504,6 +524,7 @@
       if (p.value === autoFilled.phone) p.value = '';
       autoFilled = { name: '', phone: '' };
     }
+    quoteState.key = ''; // після реєстрації в номера з'являється знижка на перший візит — питаємо сервер заново
     p.dispatchEvent(new Event('input')); // перерахувати ціну зі знижкою для цього номера
   });
 
@@ -584,16 +605,39 @@
     refreshSlots();
   });
 
-  // ----- Чат з оператором -----
-  const chat = { ws: null, convId: localStorage.getItem('convId') };
+  // ----- Чат з оператором (лише для тих, хто увійшов у кабінет) -----
+  const chat = { ws: null, auth: false, editMin: 15, accKey: undefined, timer: null };
+  localStorage.removeItem('convId'); // старий спосіб пам'ятати діалог; тепер діалог прив'язаний до кабінету
 
-  function addMsg(m) {
-    const div = document.createElement('div');
+  // Чи ще можна змінити своє повідомлення (сервер перевіряє те саме)
+  const editable = (m) => m.sender === 'client' && Date.now() - new Date(m.created_at.replace(' ', 'T') + 'Z').getTime() < chat.editMin * 60000;
+
+  function fillMsg(div, m) {
     div.className = `bubble ${m.sender === 'client' ? 'mine' : 'theirs'}`;
     div.dataset.msg = m.id;
-    div.textContent = m.body;
+    div._m = m;
+    div.innerHTML = '';
+    const text = document.createElement('div');
+    text.className = 'bubble-text';
+    text.textContent = m.body;
+    div.appendChild(text);
+    if (m.edited_at) { const e = document.createElement('div'); e.className = 'bubble-edited'; e.textContent = 'змінено'; div.appendChild(e); }
+    if (editable(m)) {
+      const bar = document.createElement('div');
+      bar.className = 'bubble-tools';
+      bar.innerHTML = `<button type="button" data-act="edit" aria-label="Змінити повідомлення" title="Змінити (${chat.editMin} хв після відправки)">✎</button><button type="button" data-act="del" aria-label="Видалити повідомлення" title="Видалити">×</button>`;
+      div.appendChild(bar);
+    }
+  }
+  function addMsg(m) {
+    const div = document.createElement('div');
+    fillMsg(div, m);
     $('#chatBody').appendChild(div);
     $('#chatBody').scrollTop = 1e9;
+  }
+  // Кнопки ✎/× зникають, коли минуло 15 хвилин
+  function refreshTools() {
+    document.querySelectorAll('#chatBody .bubble.mine').forEach((d) => { if (d.querySelector('.bubble-tools') && !editable(d._m)) d.querySelector('.bubble-tools').remove(); });
   }
 
   function addSystem(text) {
@@ -601,38 +645,97 @@
     div.className = 'system';
     div.textContent = text;
     $('#chatBody').appendChild(div);
+    $('#chatBody').scrollTop = 1e9;
+  }
+
+  // Без входу: пояснення й кнопки «Увійти» / «Зареєструватися»
+  function showLocked() {
+    $('#chatBody').innerHTML = `<div class="chat-locked"><p>Чат з оператором — для зареєстрованих клієнтів.</p>
+      <p>Увійдіть у кабінет або зареєструйтеся, щоб написати питання.</p>
+      <div class="chat-locked-btns"><button class="btn btn-primary small" type="button" data-acc="login">Увійти</button><button class="btn btn-ghost small" type="button" data-acc="register">Зареєструватися</button></div></div>`;
+    $('#chatForm').hidden = true;
+  }
+  $('#chatBody').addEventListener('click', (e) => {
+    const acc = e.target.closest('[data-acc]');
+    if (acc) { openChat(false); document.dispatchEvent(new CustomEvent('account:open', { detail: { tab: acc.dataset.acc } })); return; }
+    const btn = e.target.closest('.bubble-tools button');
+    if (!btn || !chat.ws || chat.ws.readyState !== 1) return;
+    const div = btn.closest('.bubble');
+    const m = div._m;
+    if (btn.dataset.act === 'del') {
+      if (!confirmInline(btn)) return;
+      chat.ws.send(JSON.stringify({ type: 'delete', id: m.id }));
+      return;
+    }
+    startEdit(div, m);
+  });
+  // Видалення — другим натиском (без вікна браузера)
+  function confirmInline(btn) {
+    if (btn.dataset.sure) return true;
+    btn.dataset.sure = '1';
+    btn.textContent = 'Видалити?';
+    btn.classList.add('sure');
+    setTimeout(() => { if (btn.isConnected) { delete btn.dataset.sure; btn.textContent = '×'; btn.classList.remove('sure'); } }, 3000);
+    return false;
+  }
+  function startEdit(div, m) {
+    div.innerHTML = '';
+    const f = document.createElement('form');
+    f.className = 'bubble-editform';
+    f.innerHTML = '<textarea class="input" maxlength="1000" rows="2" aria-label="Новий текст повідомлення"></textarea><div class="bubble-editbtns"><button class="btn btn-primary small" type="submit">Зберегти</button><button class="btn btn-ghost small" type="button">Скасувати</button></div>';
+    f.querySelector('textarea').value = m.body;
+    div.appendChild(f);
+    f.querySelector('textarea').focus();
+    f.querySelector('button[type=button]').addEventListener('click', () => fillMsg(div, m));
+    f.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const body = f.querySelector('textarea').value.trim();
+      if (!body || body === m.body) return fillMsg(div, m);
+      chat.ws.send(JSON.stringify({ type: 'edit', id: m.id, body }));
+      fillMsg(div, { ...m, body }); // сервер надішле остаточний варіант
+    });
   }
 
   function connectChat() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    chat.ws = new WebSocket(`${proto}://${location.host}/ws`);
-    chat.ws.onopen = () => chat.ws.send(JSON.stringify({ type: 'hello', conversationId: chat.convId }));
-    chat.ws.onmessage = (ev) => {
+    const ws = new WebSocket(`${proto}://${location.host}/ws`);
+    chat.ws = ws;
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'hello' }));
+    ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
       if (m.type === 'hello') {
-        chat.convId = m.conversationId;
-        if (chat.convId) localStorage.setItem('convId', chat.convId);
-        else localStorage.removeItem('convId');
+        chat.auth = !!m.auth;
+        if (m.editMinutes) chat.editMin = m.editMinutes;
+        if (!chat.auth) return showLocked();
+        $('#chatForm').hidden = false;
         $('#chatBody').innerHTML = '';
         if (!m.messages.length) addSystem('Напишіть питання, і оператор відповість тут.');
         m.messages.forEach(addMsg);
       }
-      if (m.type === 'conversation') {
-        chat.convId = m.conversationId;
-        localStorage.setItem('convId', chat.convId);
-        const hint = $('#chatBody .system');
-        if (hint) hint.remove();
-      }
-      if (m.type === 'message') addMsg(m.message);
+      if (m.type === 'conversation') $('#chatBody .system')?.remove();
+      if (m.type === 'message' && !document.querySelector(`#chatBody [data-msg="${m.message.id}"]`)) addMsg(m.message);
+      if (m.type === 'message_edited') { const d = document.querySelector(`#chatBody [data-msg="${m.message.id}"]`); if (d && !d.querySelector('form')) fillMsg(d, m.message); else if (d) d._m = m.message; }
       if (m.type === 'message_deleted') document.querySelector(`#chatBody [data-msg="${m.messageId}"]`)?.remove();
       if (m.type === 'error') addSystem(m.error);
     };
-    chat.ws.onclose = () => setTimeout(connectChat, 3000);
+    ws.onclose = () => { if (chat.ws === ws) setTimeout(() => { if (chat.ws === ws) connectChat(); }, 3000); };
   }
+  // Увійшов чи вийшов з кабінету — перепідключаємо чат, щоб сервер побачив новий стан
+  document.addEventListener('account:me', (e) => {
+    const key = e.detail ? e.detail.id || e.detail.phone || 'in' : null;
+    if (key === chat.accKey) return;
+    const first = chat.accKey === undefined;
+    chat.accKey = key;
+    if (first && chat.ws) return;
+    const old = chat.ws;
+    chat.ws = null;
+    if (old) old.close();
+    connectChat();
+  });
 
   function openChat(open = true) {
     $('#chatPanel').hidden = !open;
-    if (open) $('#chatInput').focus();
+    if (open && chat.auth) $('#chatInput').focus();
   }
 
   $('#chatFab').addEventListener('click', () => openChat($('#chatPanel').hidden));
@@ -649,6 +752,7 @@
   });
 
   connectChat();
+  chat.timer = setInterval(refreshTools, 30000);
   // Опубліковані поради з догляду: кожна веде на окрему сторінку
   fetch('/api/tips').then((r) => r.json()).then((list) => {
     if (!Array.isArray(list) || !list.length) return;

@@ -7,8 +7,11 @@ const Database = require('better-sqlite3');
 const { startServer, makeMaster, nextSlot } = require('./helpers');
 
 let srv, M, svcDisc, svcPlain, svcNote;
-const quote = (id, phone) => srv.req('GET', `/api/first-discount?serviceId=${id}&phone=${encodeURIComponent(phone)}`);
+// Знижка на перший візит — лише клієнтам з кабінетом: номери в цих тестах спершу реєструємо
+const quote = async (id, phone) => { if (String(phone).replace(/\D/g, '').length >= 9) await srv.register(phone); return srv.req('GET', `/api/first-discount?serviceId=${id}&phone=${encodeURIComponent(phone)}`); };
+const rawQuote = (id, phone) => srv.req('GET', `/api/first-discount?serviceId=${id}&phone=${encodeURIComponent(phone)}`);
 const bookReq = async (serviceId, phone, name = 'Нова Клієнтка') => {
+  await srv.register(phone);
   const s = await nextSlot(srv, serviceId, M.id);
   return srv.req('POST', '/api/appointments', { body: { serviceId, date: s.date, time: s.time, name, phone, masterId: M.id } });
 };
@@ -42,6 +45,22 @@ test('новому клієнтові: ціна, знижка 10% і сума д
   assert.equal(noNum.final, null, 'без числової ціни суму не вигадуємо');
   assert.equal((await quote(svcDisc, '123')).body.eligible, false, 'неповний номер — без пропозиції');
   assert.equal((await srv.req('GET', '/api/first-discount?serviceId=99999&phone=+380671110001')).status, 400);
+});
+
+test('без кабінету знижки на перший візит немає: підказка «зареєструйтеся» з відсотком; після реєстрації — є', async () => {
+  const ph = '+380671110098';
+  const q = (await rawQuote(svcDisc, ph)).body;
+  assert.equal(q.eligible, false);
+  assert.equal(q.final, 1235);
+  assert.equal(q.regPct, 10, 'скільки дасть реєстрація');
+  assert.equal(q.registered, undefined, 'чи є кабінет — назовні не показуємо');
+  const plain = (await rawQuote(svcPlain, ph)).body;
+  assert.equal(plain.regPct, undefined, 'на непозначену послугу реєстрація знижки не дає');
+  await srv.register(ph);
+  const q2 = (await rawQuote(svcDisc, ph)).body;
+  assert.equal(q2.eligible, true);
+  assert.equal(q2.final, 1112);
+  assert.equal(q2.regPct, undefined);
 });
 
 test('запис: ціна зі знижкою у відповіді й у базі; другий запис того ж номера — вже за повною ціною', async () => {
@@ -86,10 +105,10 @@ test('відсоток 0 вимикає знижку; некоректний в�
 test('кабінет клієнта показує ціну зі знижкою', async () => {
   await srv.req('PUT', '/api/admin/studio', { token: srv.ADMIN, body: { ...(await srv.req('GET', '/api/settings')).body.studio, first_discount_pct: '10' } });
   const phone = '+380671110006';
-  const r = await bookReq(svcDisc, phone);
-  assert.equal(r.status, 201, r.text);
   const reg = await srv.req('POST', '/api/account/register', { body: { name: 'Нова Клієнтка', phone, password: 'cabinet-pass-1' } });
   assert.equal(reg.status, 201, reg.text);
+  const r = await bookReq(svcDisc, phone);
+  assert.equal(r.status, 201, r.text);
   const cookie = (reg.headers.getSetCookie?.() || []).map((c) => c.split(';')[0]).join('; ');
   const list = (await srv.req('GET', '/api/account/appointments', { headers: { Cookie: cookie } })).body;
   assert.deepEqual(list[0].price, { full: 1235, pct: 10, kind: 'first', final: 1112 });

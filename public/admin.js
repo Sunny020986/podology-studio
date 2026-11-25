@@ -1408,7 +1408,10 @@
     return d.toLocaleString('uk-UA', sameDay ? { hour: '2-digit', minute: '2-digit' }
       : { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   };
-  const bubbleHtml = (m) => `<div class="bubble ${m.sender === 'operator' ? 'mine' : 'theirs'}" data-msg="${m.id}"><div class="who"><span>${m.sender === 'operator' ? 'Ви' : 'Клієнт'} · ${esc(localTime(m.created_at))}</span><button class="bubble-del" type="button" data-del-msg="${m.id}" title="Видалити це повідомлення" aria-label="Видалити повідомлення">×</button></div>${esc(m.body)}</div>`;
+  const bubbleHtml = (m) => `<div class="bubble ${m.sender === 'operator' ? 'mine' : 'theirs'}" data-msg="${m.id}"><div class="who"><span>${m.sender === 'operator' ? 'Ви' : 'Клієнт'} · ${esc(localTime(m.created_at))}</span><button class="bubble-del" type="button" data-del-msg="${m.id}" title="Видалити це повідомлення" aria-label="Видалити повідомлення">×</button></div>${esc(m.body)}${m.edited_at ? `<div class="bubble-edited" title="Клієнт змінив повідомлення ${esc(localTime(m.edited_at))}">змінено</div>` : ''}</div>`;
+  // Назва діалогу: ім'я й телефон клієнта з кабінету (старі діалоги без кабінету — за номером діалогу)
+  const convName = (c) => (c.client_name ? `${c.client_name}${c.client_phone ? ' · ' + c.client_phone : ''}` : 'Діалог ' + c.id.slice(0, 6));
+  let convCache = [];
 
   async function renderChat() {
     $('#view').innerHTML = `
@@ -1488,10 +1491,11 @@
 
   async function refreshConvList() {
     const convs = await api('/api/admin/conversations');
+    convCache = convs;
     if (!$('#convList')) return;
     $('#convList').innerHTML = convs.length
       ? convs.map((c) => `<button class="conv ${c.id === currentConv ? 'active' : ''}" type="button" data-conv="${c.id}">
-          <b>Діалог ${esc(c.id.slice(0, 6))}</b><span>${esc(c.last_body || '')}</span></button>`).join('')
+          <b>${esc(convName(c))}</b><span>${esc(c.last_body || '')}</span></button>`).join('')
       : '<div class="muted" style="padding:12px">Звернень ще немає.</div>';
   }
 
@@ -1501,7 +1505,7 @@
     $('#threadBody').innerHTML = msgs.length ? msgs.map(bubbleHtml).join('') : '<div class="muted">Повідомлень ще немає.</div>';
     $('#replyForm').hidden = false;
     $('#threadHead').hidden = false;
-    $('#threadTitle').textContent = 'Діалог ' + id.slice(0, 6);
+    $('#threadTitle').textContent = convName(convCache.find((c) => c.id === id) || { id });
     document.querySelectorAll('.conv').forEach((b) => b.classList.toggle('active', b.dataset.conv === id));
     $('#threadBody').scrollTop = 1e9;
   }
@@ -1530,6 +1534,11 @@
           notify('Нове повідомлення в чаті');
         }
         // Новий діалог або нове повідомлення: оновлюємо список зліва, якщо вкладка чату відкрита
+        if ($('#convList')) refreshConvList().catch(() => {});
+      }
+      if (m.type === 'message_edited') {
+        const d = m.conversationId === currentConv && document.querySelector(`#threadBody [data-msg="${m.message.id}"]`);
+        if (d) d.outerHTML = bubbleHtml(m.message);
         if ($('#convList')) refreshConvList().catch(() => {});
       }
       if (m.type === 'message_deleted') {
@@ -2870,7 +2879,7 @@ ${isSuper() ? `
         const key = currentClient;
         const p = await api('/api/admin/clients/' + key + '/erase-preview');
         const parts = [`записів — ${p.appointments}` + (p.future ? ` (з них майбутніх — ${p.future})` : ''), `фото стоп — ${p.photos}`, p.videos ? `відео — ${p.videos}` : '',
-          `відгуків — ${p.reviews}`, `заявок у черзі — ${p.waitlist}`, p.account ? 'кабінет клієнта' : '', p.note ? 'нотатка' : ''].filter(Boolean);
+          `відгуків — ${p.reviews}`, `заявок у черзі — ${p.waitlist}`, p.account ? 'кабінет клієнта' : '', p.chats ? 'чат з оператором' : '', p.note ? 'нотатка' : ''].filter(Boolean);
         const typed = prompt(`Видалити всі дані клієнта «${p.name}»?\n\nБуде видалено: ${parts.join(', ')}.\n` +
           'Скасувати це неможливо. У резервних копіях дані зникнуть, коли старі копії видаляться (зазвичай через 30 днів). ' +
           'Анонімний чат на сайті й імена в сертифікатах видаляються окремо.\n\nЩоб підтвердити, введіть останні 4 цифри телефону клієнта:');

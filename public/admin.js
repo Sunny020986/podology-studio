@@ -69,7 +69,7 @@
   let apptMaster = '';       // «Записи»: фільтр за майстром ('' = усі)
   let schedMaster = null;    // «Розклад»: чий графік (години, перерви, блокування) редагуємо
   let statsMaster = '';      // «Статистика»: '' = увесь кабінет
-  const MASTER_TABS = ['appointments', 'clients', 'schedule'];
+  const MASTER_TABS = ['appointments', 'clients', 'videos', 'schedule'];
   const isSuper = () => me.role === 'super';
   // Майстер, чий графік показуємо: для майстра це він сам, для суперадміна — обраний (або перший)
   const schedMasterId = () => (isSuper() ? (schedMaster || masters.find((m) => m.status === 'active')?.id || masters[0]?.id) : me.master.id);
@@ -179,8 +179,66 @@
     connectWs(); // адміністратор: чат і записи наживо; майстер — лише події своїх записів
     renderMasterTg();
     renderMasterCal().catch(() => {});
+    updateVideoCount();
     show('appointments');
   }
+
+  // ----- Відео від клієнтів -----
+  // Клієнт надсилає відео стоп з кабінету; майстер дивиться (одноразове посилання на 10 хв) і відповідає текстом
+  const VIDEO_STATUS = { new: '🆕 Нове', seen: 'Переглянуто', answered: '✓ Відповідь надіслано' };
+  async function updateVideoCount() {
+    try {
+      const { count } = await api('/api/admin/client-videos/new-count');
+      const b = $('#videoCount');
+      if (b) { b.textContent = count; b.hidden = !count; }
+    } catch { /* не критично */ }
+  }
+  async function renderVideos() {
+    const list = await api('/api/admin/client-videos');
+    const mb = (n) => (n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + ' КБ' : (n / 1024 / 1024).toFixed(1).replace('.', ',') + ' МБ');
+    $('#view').innerHTML = `
+      <p class="muted">Відео стоп, які клієнти надіслали з кабінету, щоб майстер оцінив, чи можна це зробити. Відповідь клієнт побачить у кабінеті й отримає в Telegram, якщо підключив бота. Відео видаляється саме через 90 днів.${isSuper() ? '' : ' Тут — відео для вас і для «будь-якого майстра».'}</p>
+      ${list.length ? '<div class="video-list">' + list.map((v) => `
+        <div class="card video-item" data-video="${v.id}">
+          <div class="vi-head">
+            <div><b>${esc(v.name)}</b> · <a href="tel:${esc(v.phone.replace(/[^\d+]/g, ''))}">${esc(v.phone)}</a></div>
+            <span class="vi-status vi-${v.status}">${VIDEO_STATUS[v.status] || esc(v.status)}</span>
+          </div>
+          <div class="muted">${esc(new Date(String(v.created_at).replace(' ', 'T') + 'Z').toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }))} · ${v.master ? 'для майстра ' + esc(v.master) : 'будь-якому майстру'} · ${mb(v.size)} · видалиться ${fmtDate(v.expires_on)}</div>
+          ${v.comment ? `<p class="vi-comment">${esc(v.comment)}</p>` : ''}
+          <div class="vi-player"><button class="btn btn-ghost small" type="button" data-video-play="${v.id}">▶ Дивитися</button></div>
+          ${v.status === 'answered' ? `<div class="vi-reply"><b>Відповідь (${esc(v.reply_by)}):</b> ${esc(v.reply)}</div>` : ''}
+          <div class="vi-form">
+            <textarea class="input" rows="2" maxlength="1000" data-video-text="${v.id}" placeholder="${v.status === 'answered' ? 'Нова відповідь замінить попередню' : 'Відповідь клієнтові: чи можна це зробити, яка послуга, що підготувати'}"></textarea>
+            <div class="toolbar" style="margin:0">
+              <button class="btn btn-primary small" type="button" data-video-reply="${v.id}">Надіслати відповідь</button>
+              <button class="btn btn-ghost small danger" type="button" data-video-del="${v.id}">Видалити відео</button>
+            </div>
+          </div>
+        </div>`).join('') + '</div>' : '<p class="muted">Клієнти ще не надсилали відео.</p>'}`;
+    updateVideoCount();
+  }
+  $('#view').addEventListener('click', async (e) => {
+    const t = e.target;
+    try {
+      if (t.dataset.videoPlay) {
+        const { url } = await api(`/api/admin/client-videos/${t.dataset.videoPlay}/link`);
+        t.parentElement.innerHTML = `<video controls playsinline preload="metadata" src="${esc(url)}"></video>`;
+        updateVideoCount();
+      } else if (t.dataset.videoReply) {
+        const id = t.dataset.videoReply;
+        const reply = (document.querySelector(`[data-video-text="${id}"]`)?.value || '').trim();
+        const r = await api(`/api/admin/client-videos/${id}/reply`, { method: 'PUT', body: { reply } });
+        notify(r.telegram ? 'Відповідь надіслано: у кабінет і в Telegram клієнта' : 'Відповідь збережено: клієнт побачить її в кабінеті (Telegram не підключено — можна ще зателефонувати)');
+        await renderVideos();
+      } else if (t.dataset.videoDel) {
+        if (!confirm('Видалити це відео? Відновити його буде неможливо.')) return;
+        await api(`/api/admin/client-videos/${t.dataset.videoDel}`, { method: 'DELETE' });
+        notify('Відео видалено');
+        await renderVideos();
+      }
+    } catch (err) { notify(err.message, true); }
+  });
 
   // ----- Вкладки -----
   const views = {
@@ -188,6 +246,7 @@
     clients: renderClients,
     chat: renderChat,
     schedule: renderSchedule,
+    videos: renderVideos,
     services: renderServices,
     materials: renderMaterials,
     certificates: renderCertificates,
@@ -2726,7 +2785,7 @@ ${isSuper() ? `
       if (e.target.id === 'clientErase' && currentClient) {
         const key = currentClient;
         const p = await api('/api/admin/clients/' + key + '/erase-preview');
-        const parts = [`записів — ${p.appointments}` + (p.future ? ` (з них майбутніх — ${p.future})` : ''), `фото стоп — ${p.photos}`,
+        const parts = [`записів — ${p.appointments}` + (p.future ? ` (з них майбутніх — ${p.future})` : ''), `фото стоп — ${p.photos}`, p.videos ? `відео — ${p.videos}` : '',
           `відгуків — ${p.reviews}`, `заявок у черзі — ${p.waitlist}`, p.account ? 'кабінет клієнта' : '', p.note ? 'нотатка' : ''].filter(Boolean);
         const typed = prompt(`Видалити всі дані клієнта «${p.name}»?\n\nБуде видалено: ${parts.join(', ')}.\n` +
           'Скасувати це неможливо. У резервних копіях дані зникнуть, коли старі копії видаляться (зазвичай через 30 днів). ' +

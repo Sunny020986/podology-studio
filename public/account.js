@@ -138,10 +138,89 @@
         <p class="acc-msg" id="tgMsg" role="status"></p>
       </div>
       <div id="accFriend"></div>
+      <h3 class="acc-h">Відео для майстра</h3>
+      <div id="accVideos"><p class="muted">Завантажую…</p></div>
       <h3 class="acc-h">Мої записи</h3>
       <ul class="acc-list" id="apptList"><li class="muted">Завантажую…</li></ul>`;
     if (window.FriendInvite) window.FriendInvite.mount($('#accFriend'), {});
+    loadVideos();
     await loadAppointments();
+  }
+
+  // ----- Відео для майстра: клієнт надсилає відео стоп, майстер відповідає, чи можна це зробити -----
+  const VIDEO_MAX_MB = 150;
+  const VSTATUS = { new: 'надіслано, майстер ще не дивився', seen: 'майстер переглянув', answered: 'є відповідь' };
+  async function loadVideos() {
+    const box = $('#accVideos');
+    if (!box) return;
+    let list = [], masters = [];
+    try { [list, masters] = await Promise.all([api('/api/account/videos'), api('/api/masters').catch(() => [])]); } catch (e) { box.innerHTML = `<p class="acc-msg">${esc(e.message)}</p>`; return; }
+    box.innerHTML = `
+      <p class="muted">Зніміть на телефон, що турбує (ніготь, шкіра стопи), до 1 хвилини — майстер подивиться й напише, чи можна це зробити і яку послугу обрати.</p>
+      ${list.map((v) => `<div class="acc-video">
+        <div><b>${fmt(v.created_at.slice(0, 10))}</b> · ${VSTATUS[v.status] || esc(v.status)}${v.master ? ' · для майстра ' + esc(v.master) : ''}</div>
+        ${v.comment ? `<div class="muted">${esc(v.comment)}</div>` : ''}
+        ${v.status === 'answered' ? `<div class="vi-reply"><b>${esc(v.reply_by)}:</b> ${esc(v.reply)}</div>` : ''}
+        <div class="muted">Відео видалиться ${fmt(v.expires_on)}.
+          <button class="link" type="button" data-vplay="${v.id}">Подивитися</button> ·
+          <button class="link" type="button" data-vdel="${v.id}">Видалити</button></div>
+      </div>`).join('')}
+      <button class="btn btn-primary small" type="button" data-act="video-open">${list.length ? 'Надіслати ще відео' : 'Надіслати відео майстру'}</button>
+      <div id="vuBox"></div>`;
+    box.querySelector('[data-act="video-open"]').addEventListener('click', (e) => { e.target.hidden = true; openVideoForm(masters); });
+    box.querySelectorAll('[data-vplay]').forEach((b) => b.addEventListener('click', () => {
+      b.closest('.acc-video').insertAdjacentHTML('beforeend', `<video controls playsinline preload="metadata" src="/api/account/videos/${b.dataset.vplay}/file"></video>`);
+      b.remove();
+    }));
+    box.querySelectorAll('[data-vdel]').forEach((b) => b.addEventListener('click', async () => {
+      if (!confirm('Видалити це відео? Майстер його більше не побачить.')) return;
+      try { await api(`/api/account/videos/${b.dataset.vdel}`, { method: 'DELETE' }); loadVideos(); } catch (e) { alert(e.message); }
+    }));
+  }
+  function openVideoForm(masters) {
+    const box = $('#vuBox');
+    box.innerHTML = `<div class="vu-form">
+      <input class="input" type="file" id="vuFile" accept="video/*">
+      <div class="vu-preview" id="vuPreview"></div>
+      ${masters.length > 1 ? `<label class="step-label" for="vuMaster">Кому</label><select class="input" id="vuMaster"><option value="">Будь-якому майстру</option>${masters.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>` : ''}
+      <textarea class="input" id="vuComment" rows="2" maxlength="500" placeholder="Що турбує і як давно (необов'язково)"></textarea>
+      <label class="consent-check"><input type="checkbox" id="vuConsent"> Погоджуюсь, що працівники кабінету переглянуть це відео моїх стоп. Відео видалиться через 90 днів.</label>
+      <progress class="vu-progress" id="vuProgress" max="100" value="0" hidden></progress>
+      <p class="acc-msg" id="vuMsg" role="status"></p>
+      <button class="btn btn-primary" type="button" id="vuSend">Надіслати</button>
+    </div>`;
+    const msg = (t, ok = false) => { const m = $('#vuMsg'); m.textContent = t; m.classList.toggle('ok', ok); };
+    $('#vuFile').addEventListener('change', () => {
+      const f = $('#vuFile').files[0];
+      $('#vuPreview').innerHTML = '';
+      msg('');
+      if (!f) return;
+      if (f.size > VIDEO_MAX_MB * 1024 * 1024) { msg(`Відео завелике (${Math.round(f.size / 1024 / 1024)} МБ). Можна до ${VIDEO_MAX_MB} МБ: зніміть коротше, до 1 хвилини.`); return; }
+      $('#vuPreview').innerHTML = `<video controls playsinline muted src="${URL.createObjectURL(f)}"></video>`;
+    });
+    $('#vuSend').addEventListener('click', () => {
+      const f = $('#vuFile').files[0];
+      if (!f) return msg('Оберіть відео з телефона');
+      if (f.size > VIDEO_MAX_MB * 1024 * 1024) return msg(`Відео завелике: до ${VIDEO_MAX_MB} МБ`);
+      if (!$('#vuConsent').checked) return msg('Позначте згоду на перегляд відео');
+      const q = new URLSearchParams({ consent: '1', comment: $('#vuComment').value.trim(), masterId: $('#vuMaster')?.value || '' });
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/account/videos?' + q);
+      xhr.setRequestHeader('Content-Type', f.type || 'video/mp4');
+      const bar = $('#vuProgress');
+      bar.hidden = false;
+      $('#vuSend').disabled = true;
+      msg('Завантажую…');
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable) { bar.value = Math.round((e.loaded / e.total) * 100); msg(`Завантажую… ${bar.value}%`); } };
+      xhr.onload = () => {
+        let data = {};
+        try { data = JSON.parse(xhr.responseText); } catch { /* не JSON */ }
+        if (xhr.status === 201) { msg('Відео надіслано. Майстер подивиться й відповість тут і в Telegram, якщо його підключено.', true); setTimeout(loadVideos, 1500); }
+        else { msg(data.error || 'Не вдалося надіслати. Спробуйте ще раз'); $('#vuSend').disabled = false; bar.hidden = true; }
+      };
+      xhr.onerror = () => { msg('Зв\'язок перервався. Спробуйте ще раз'); $('#vuSend').disabled = false; bar.hidden = true; };
+      xhr.send(f);
+    });
   }
 
   async function loadAppointments() {

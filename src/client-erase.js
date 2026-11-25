@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const { eraseClient: eraseFriendInvites } = require('./friend-invite');
+const { eraseClientVideos } = require('./client-videos');
 
 function setupClientErase({ app, db, dataDir, todayStr, last9, notifyMasterOf, waitlistCheck, live = () => {} }) {
   const photoDir = path.join(dataDir, 'private', 'client-photos');
@@ -28,6 +29,7 @@ function setupClientErase({ app, db, dataDir, todayStr, last9, notifyMasterOf, w
       future: appts.filter((a) => a.date >= today && ['new', 'confirmed'].includes(a.status)).length,
       reviews: db.prepare(`SELECT COUNT(*) AS n FROM reviews WHERE appointment_id IN ${inIds}`).get(...ids).n,
       photos: db.prepare('SELECT COUNT(*) AS n FROM client_photos WHERE phone_key = ?').get(key).n,
+      videos: db.prepare('SELECT COUNT(*) AS n FROM client_videos WHERE phone_key = ?').get(key).n,
       note: !!db.prepare("SELECT 1 FROM client_notes WHERE phone_key = ? AND note != ''").get(key),
       account: !!db.prepare('SELECT 1 FROM accounts WHERE phone_key = ?').get(key),
       waitlist: waitOf(key).length,
@@ -38,7 +40,7 @@ function setupClientErase({ app, db, dataDir, todayStr, last9, notifyMasterOf, w
     const key = req.params.key;
     if (!isKey(key)) return res.status(400).json({ error: 'Некоректний клієнт' });
     const p = preview(key);
-    if (!p.appointments && !p.account && !p.waitlist && !p.photos && !p.note) return res.status(404).json({ error: 'Клієнта не знайдено' });
+    if (!p.appointments && !p.account && !p.waitlist && !p.photos && !p.videos && !p.note) return res.status(404).json({ error: 'Клієнта не знайдено' });
     res.json(p);
   });
 
@@ -49,7 +51,7 @@ function setupClientErase({ app, db, dataDir, todayStr, last9, notifyMasterOf, w
       return res.status(400).json({ error: 'Для підтвердження вкажіть останні 4 цифри телефону клієнта' });
     }
     const p = preview(key);
-    if (!p.appointments && !p.account && !p.waitlist && !p.photos && !p.note) return res.status(404).json({ error: 'Клієнта не знайдено' });
+    if (!p.appointments && !p.account && !p.waitlist && !p.photos && !p.videos && !p.note) return res.status(404).json({ error: 'Клієнта не знайдено' });
     const appts = apptsOf(key);
     const today = todayStr();
     const futureAppts = appts.filter((a) => a.date >= today && ['new', 'confirmed'].includes(a.status));
@@ -65,6 +67,7 @@ function setupClientErase({ app, db, dataDir, todayStr, last9, notifyMasterOf, w
         db.prepare('DELETE FROM appointments WHERE id = ?').run(id);
       }
       for (const w of waitOf(key)) db.prepare('DELETE FROM waitlist WHERE id = ?').run(w.id);
+      eraseClientVideos(db, dataDir, key);
       for (const t of ['client_notes', 'client_archive', 'client_photo_consent', 'client_photos']) {
         db.prepare(`DELETE FROM ${t} WHERE phone_key = ?`).run(key);
       }

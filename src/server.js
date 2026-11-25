@@ -31,6 +31,7 @@ const { setupClientErase } = require('./client-erase');
 const { setupReminderButtons } = require('./reminder-buttons');
 const { setupFirstDiscount, quote: firstQuote, hasVisits, discountPct } = require('./first-discount');
 const { setupFriendInvite, useReward } = require('./friend-invite');
+const { setupClientVideos } = require('./client-videos');
 const { adminBySession: adminSessionLookup, setupAdminUsers } = require('./admin-users');
 const { setupAudit } = require('./audit');
 const { setupChatTemplates } = require('./chat-templates');
@@ -379,6 +380,13 @@ function readChangeHours() {
 setupFirstDiscount({ app, db, makeLimiter, friendState: (key) => friendInvites.state(key) });
 const friendInvites = setupFriendInvite({ app, db, publicBook, hasVisits, accountFromRequest: (req) => accounts.accountFromRequest(req), readStudio,
   notifyStaff: (t) => telegram.notifyMaster(t), discountPct });
+// Відео від клієнтів (кабінет → майстер): публічні маршрути кабінету тут, адмінські — після перевірки входу
+const clientVideos = setupClientVideos({
+  app, db, dataDir: DATA_DIR, telegram,
+  accountFromRequest: (req) => accounts.accountFromRequest(req),
+  notifyStaff: (t, masterId) => { telegram.notifyMaster(t); if (masterId) notifyMasterOf(masterId, t); },
+  staffName: (req) => (req.actor && req.actor.kind !== 'owner' ? req.actor.name : 'Адміністратор'),
+});
 const accounts = setupAccounts({
   app, db, telegram, freeSlots, todayStr, isBookableDate, isTime,
   horizonDays: HORIZON_DAYS, makeLimiter, notifyMaster: (t) => telegram.notifyMaster(t), changeHours: readChangeHours, notifyMasterOf,
@@ -495,7 +503,8 @@ const MASTER_ROUTES = [
   /^GET \/appointments$/, /^PATCH \/appointments\/\d+$/, /^PUT \/appointments\/\d+\/note$/, /^GET \/appointments\/\d+\/review-link$/,
   /^GET \/clients$/, /^GET \/clients\/\d{9}$/, /^PUT \/clients\/\d{9}\/note$/, /^GET \/client-search$/,
   /^GET \/clients\/\d{9}\/course$/, /^GET \/clients\/\d{9}\/photos$/, /^POST \/clients\/\d{9}\/photos$/, /^GET \/clients\/\d{9}\/photo-consent$/, /^PUT \/clients\/\d{9}\/photo-consent$/, /^GET \/client-photos\/\d+\/file$/, /^DELETE \/client-photos\/\d+$/,
-  /^GET \/schedule$/, /^PUT \/schedule\/\d$/, /^GET \/booking-limits$/, /^PUT \/booking-limits$/, /^GET \/breaks$/, /^POST \/breaks$/, /^DELETE \/breaks\/\d+$/,
+  /^GET \/schedule$/, /^PUT \/schedule\/\d$/, /^GET \/booking-limits$/, /^PUT \/booking-limits$/,
+  /^GET \/client-videos$/, /^GET \/client-videos\/new-count$/, /^GET \/client-videos\/\d+\/link$/, /^PUT \/client-videos\/\d+\/reply$/, /^DELETE \/client-videos\/\d+$/, /^GET \/breaks$/, /^POST \/breaks$/, /^DELETE \/breaks\/\d+$/,
   /^GET \/blocks$/, /^POST \/blocks$/, /^DELETE \/blocks\/\d+$/, /^GET \/waitlist$/, /^DELETE \/waitlist\/\d+$/,
   /^POST \/appointments$/, /^PATCH \/appointments\/\d+\/move$/, /^GET \/slots$/, /^GET \/calendar$/,
   /^POST \/me\/telegram$/, /^DELETE \/me\/telegram$/,
@@ -513,6 +522,7 @@ setupAdminUsers({
   onRevoke: () => { for (const s of staffSockets) staffStillValid(s); }, // закрити канали заблокованих
 });
 friendInvites.registerAdmin(); // «Друзі клієнтів» — після перевірки входу
+clientVideos.registerAdmin(); // «Відео» — після перевірки входу
 
 // Який майстер у запиті: майстер — завжди він сам; суперадмін — обраний через masterId (або всі, якщо не обрано)
 const scopeMaster = (req) => {

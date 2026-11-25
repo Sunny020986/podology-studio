@@ -47,7 +47,8 @@ async function main() {
   // Фото стану стоп (медичні дані) лежать у data/private: без них історія лікування неповна
   const priv = path.join(path.dirname(DB_PATH), 'private');
   if (fs.existsSync(priv)) {
-    fs.cpSync(priv, path.join(BACKUP_DIR, 'private'), { recursive: true });
+    // Відео від клієнтів (client-videos) не копіюємо: вони тимчасові (90 днів) і важкі
+    fs.cpSync(priv, path.join(BACKUP_DIR, 'private'), { recursive: true, filter: (src) => !src.includes(`${path.sep}client-videos`) });
     console.log(`Приватні фото скопійовано: ${path.join(BACKUP_DIR, 'private')}`);
   }
 

@@ -10,6 +10,7 @@ const { createReportColumns } = require('./reports');
 const { createReminderColumns } = require('./reminder-buttons');
 const { createFirstDiscountColumns } = require('./first-discount');
 const { createFriendTables } = require('./friend-invite');
+const { createClientVideoTable } = require('./client-videos');
 const { createAdminUserTables } = require('./admin-users');
 const { createAuditTable } = require('./audit');
 const { createWaitlistTable } = require('./waitlist');
@@ -153,6 +154,7 @@ function openDb() {
   addServicesOnce(db, 'services_v3', EXTRA_SERVICES_V3);
   setPriceNoteOnce(db);
   createFriendTables(db);
+  createClientVideoTable(db);
   createFirstDiscountColumns(db); // після стартових послуг: позначає «первинні»
   createMasterTables(db); // після стартових даних: перший майстр отримує наявний розклад, послуги й записи
   return db;

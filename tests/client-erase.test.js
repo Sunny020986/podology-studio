@@ -40,7 +40,7 @@ after(() => srv && srv.stop());
 
 test('попередній підрахунок показує, що буде видалено', async () => {
   const p = (await srv.req('GET', `/api/admin/clients/${KEY}/erase-preview`, { token: srv.ADMIN })).body;
-  assert.deepEqual({ ...p, name: undefined }, { name: undefined, appointments: 2, future: 1, reviews: 1, photos: 1, note: true, account: true, waitlist: 1 });
+  assert.deepEqual({ ...p, name: undefined }, { name: undefined, appointments: 2, future: 1, reviews: 1, photos: 1, videos: 0, note: true, account: true, waitlist: 1 });
 });
 
 test('без правильних 4 цифр і без прав — не видаляє', async () => {

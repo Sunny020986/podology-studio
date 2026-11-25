@@ -32,6 +32,8 @@ function securityHeaders(req, res, next) {
     "font-src 'self' https://fonts.gstatic.com",
     // blob: — попередній перегляд фото майстра і файл CSV
     "img-src 'self' data: blob:",
+    // відео від клієнта: перегляд у кабінеті й адмінці, попередній перегляд вибраного файлу (blob:)
+    "media-src 'self' blob:",
     // карта Google на сайті
     'frame-src https://www.google.com https://maps.google.com',
     `connect-src 'self'${ws}`,

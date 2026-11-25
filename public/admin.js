@@ -1103,6 +1103,20 @@
   // ----- Порівняння фото «до і після» -----
   let currentPhotos = [];
   let cmpPicked = [];
+  // «Запис клієнтів онлайн» у «Розкладі»: зберігається одразу при зміні
+  $('#view').addEventListener('change', async (e) => {
+    if (e.target.id !== 'leadHours' && e.target.id !== 'closedToday') return;
+    const body = e.target.id === 'leadHours' ? { lead_hours: Number(e.target.value) } : { closed_today: e.target.checked };
+    try {
+      const r = await api('/api/admin/booking-limits?' + schedQ(), { method: 'PUT', body });
+      if (e.target.id === 'leadHours') notify(`Збережено: клієнти записуються щонайменше за ${r.lead_hours === 24 ? '1 день' : r.lead_hours + ' год'}`);
+      else {
+        notify(r.closed_today ? 'Онлайн-запис на сьогодні закрито' : 'Онлайн-запис на сьогодні знову відкрито');
+        const n = $('#leadNote');
+        if (n) n.textContent = r.closed_today ? 'Сьогодні клієнти вже не можуть записатися онлайн. Завтра запис відкриється сам.' : '';
+      }
+    } catch (err) { notify(err.message, true); }
+  });
   $('#view').addEventListener('change', (e) => {
     if (!e.target.dataset || !e.target.dataset.cmp) return;
     const id = Number(e.target.dataset.cmp);
@@ -1537,6 +1551,8 @@
   // ----- Розклад -----
   async function renderSchedule() {
     const rows = await api('/api/admin/schedule?' + schedQ());
+    const lim = await api('/api/admin/booking-limits?' + schedQ());
+    const leadLabel = (h) => (h === 1 ? '1 год (як зараз)' : h === 24 ? '1 день (24 год)' : h + ' год');
     const { minutes: bufferMin } = isSuper() ? await api('/api/admin/buffer') : { minutes: 0 };
     const { hours: changeHours, options: changeOptions } = isSuper() ? await api('/api/admin/change-hours') : { hours: 0, options: [] };
     const changeOpts = changeOptions.map((h) => `<option value="${h}" ${h === changeHours ? 'selected' : ''}>${h} год</option>`).join('');
@@ -1553,6 +1569,14 @@
         </tr>`).join('')}</tbody>
       </table>
       <button class="btn btn-primary" id="saveSchedule" type="button">Зберегти розклад</button>
+
+      <h3 style="margin:32px 0 6px">Запис клієнтів онлайн</h3>
+      <div class="muted">Щоб не чекати в кабінеті: клієнт може записатися з сайту чи кабінету лише на час, до якого лишилось щонайменше стільки годин. Наприклад, при 3 год о 15:00 вже не можна записатися на 17:00. Записати вручну в адмінці можна будь-коли.</div>
+      <div class="inline-form lead-form">
+        <label>Щонайменше за <select id="leadHours">${lim.options.map((h) => `<option value="${h}" ${h === lim.lead_hours ? 'selected' : ''}>${leadLabel(h)}</option>`).join('')}</select></label>
+        <label class="lead-close"><input type="checkbox" id="closedToday" ${lim.closed_today ? 'checked' : ''}> Закрити онлайн-запис до кінця сьогодні</label>
+      </div>
+      <div class="muted" id="leadNote">${lim.closed_today ? 'Сьогодні клієнти вже не можуть записатися онлайн. Завтра запис відкриється сам.' : ''}</div>
 ${isSuper() ? `
       <h3 style="margin:32px 0 6px">Прибирання між клієнтами</h3>
       <div class="muted">Цей час резервується після кожного візиту, щоб лишився час прибрати робоче місце. Клієнти на нього не запишуться.</div>

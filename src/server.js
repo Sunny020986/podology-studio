@@ -15,7 +15,7 @@ const { setupTips } = require('./tips');
 const { setupAdminAppointments } = require('./admin-appointments');
 const { activeMasters, masterOffers, checkPassword: checkMasterPassword, hashPassword: hashStaffPassword, sha, setupMasterAdmin } = require('./masters');
 const { localBusinessJsonLd, setupSeo } = require('./seo');
-const { nowMin, candidateMasters, freeSlots, masterFreeSlots, masterFreeAt, workHours, pickMaster, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
+const { LEAD_HOURS, clientEarliest, nowMin, candidateMasters, freeSlots, masterFreeSlots, masterFreeAt, workHours, pickMaster, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays } = require('./slots');
 
 const PORT = Number(process.env.PORT) || 3000;
 const { securityHeaders, setupHealth } = require('./security');
@@ -294,7 +294,7 @@ app.get('/api/slots', (req, res) => {
   const date = String(req.query.date || '');
   if (!service) return res.status(400).json({ error: 'Невідома послуга' });
   if (!isBookableDate(date, HORIZON_DAYS)) return res.status(400).json({ error: `Запис відкрито від сьогодні до ${maxDateStr(HORIZON_DAYS)}` });
-  res.json({ date, slots: freeSlots(db, date, service.duration_min, { masterId: masterParam(req.query.masterId), serviceId: service.id }) });
+  res.json({ date, slots: freeSlots(db, date, service.duration_min, { masterId: masterParam(req.query.masterId), serviceId: service.id, client: true }) });
 });
 
 // Дні, коли для послуги (і майстра) ніхто не працює: вихідні майстрів і свята кабінету. Сайт не пропонує їх для запису.
@@ -305,7 +305,8 @@ app.get('/api/days-off', (req, res) => {
   for (let i = 0; i <= HORIZON_DAYS; i++) {
     const date = addDays(todayStr(), i);
     if (!isBookableDate(date, HORIZON_DAYS)) break;
-    if (!ids.some((id) => workHours(db, date, id))) off.push(date);
+    // вихідний для всіх, або сьогодні всі, хто працює, закрили онлайн-запис до кінця дня
+    if (!ids.some((id) => workHours(db, date, id) && clientEarliest(db, date, id) !== Infinity)) off.push(date);
   }
   res.json({ off });
 });
@@ -314,7 +315,7 @@ app.get('/api/days-off', (req, res) => {
 app.get('/api/next-slot', (req, res) => {
   const service = db.prepare('SELECT id, duration_min FROM services WHERE id = ? AND active = 1').get(Number(req.query.serviceId));
   if (!service) return res.status(400).json({ error: 'Невідома послуга' });
-  const opts = { masterId: masterParam(req.query.masterId), serviceId: service.id };
+  const opts = { masterId: masterParam(req.query.masterId), serviceId: service.id, client: true };
   for (let i = 0; i <= HORIZON_DAYS; i++) {
     const date = addDays(todayStr(), i);
     if (!isBookableDate(date, HORIZON_DAYS)) break;
@@ -341,7 +342,8 @@ const bookTx = db.transaction(({ service, date, time, name, phone, comment, mast
     );
   }
   // Конкретний майстер або, для «будь-кого», вільний майстер з найменшою кількістю записів цього дня
-  const master = pickMaster(db, date, service.duration_min, time, { masterId, serviceId: service.id });
+  // Клієнтський запис (з сайту) — з обмеженнями майстра; ручний запис в адмінці (skipPhoneLimit) — без них
+  const master = pickMaster(db, date, service.duration_min, time, { masterId, serviceId: service.id, client: !skipPhoneLimit });
   if (!master) {
     throw Object.assign(new Error('Цей час уже недоступний, оберіть інший'), { status: 409 });
   }
@@ -493,7 +495,7 @@ const MASTER_ROUTES = [
   /^GET \/appointments$/, /^PATCH \/appointments\/\d+$/, /^PUT \/appointments\/\d+\/note$/, /^GET \/appointments\/\d+\/review-link$/,
   /^GET \/clients$/, /^GET \/clients\/\d{9}$/, /^PUT \/clients\/\d{9}\/note$/, /^GET \/client-search$/,
   /^GET \/clients\/\d{9}\/course$/, /^GET \/clients\/\d{9}\/photos$/, /^POST \/clients\/\d{9}\/photos$/, /^GET \/clients\/\d{9}\/photo-consent$/, /^PUT \/clients\/\d{9}\/photo-consent$/, /^GET \/client-photos\/\d+\/file$/, /^DELETE \/client-photos\/\d+$/,
-  /^GET \/schedule$/, /^PUT \/schedule\/\d$/, /^GET \/breaks$/, /^POST \/breaks$/, /^DELETE \/breaks\/\d+$/,
+  /^GET \/schedule$/, /^PUT \/schedule\/\d$/, /^GET \/booking-limits$/, /^PUT \/booking-limits$/, /^GET \/breaks$/, /^POST \/breaks$/, /^DELETE \/breaks\/\d+$/,
   /^GET \/blocks$/, /^POST \/blocks$/, /^DELETE \/blocks\/\d+$/, /^GET \/waitlist$/, /^DELETE \/waitlist\/\d+$/,
   /^POST \/appointments$/, /^PATCH \/appointments\/\d+\/move$/, /^GET \/slots$/, /^GET \/calendar$/,
   /^POST \/me\/telegram$/, /^DELETE \/me\/telegram$/,
@@ -1111,6 +1113,28 @@ app.put('/api/admin/buffer', (req, res) => {
   if (!Number.isInteger(n) || n < 0 || n > 120) return res.status(400).json({ error: 'Прибирання: від 0 до 120 хвилин' });
   db.prepare("INSERT INTO settings (key, value) VALUES ('buffer_min', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(n));
   res.json({ minutes: n });
+});
+
+// Запис клієнтів до майстра: щонайменше за скільки годин і «закрити запис до кінця сьогодні».
+// Майстер — для себе, суперадмін — для обраного майстра. Ручні записи в адмінці ці обмеження не зачіпають.
+app.get('/api/admin/booking-limits', (req, res) => {
+  const mid = scheduleMaster(req, res);
+  if (!mid) return;
+  const m = db.prepare('SELECT lead_hours, closed_date FROM masters WHERE id = ?').get(mid);
+  res.json({ lead_hours: LEAD_HOURS.includes(m.lead_hours) ? m.lead_hours : 1, closed_today: m.closed_date === todayStr(), options: LEAD_HOURS });
+});
+app.put('/api/admin/booking-limits', (req, res) => {
+  const mid = scheduleMaster(req, res);
+  if (!mid) return;
+  const b = req.body || {};
+  if (b.lead_hours !== undefined) {
+    const h = Number(b.lead_hours);
+    if (!LEAD_HOURS.includes(h)) return res.status(400).json({ error: `Можна обрати: ${LEAD_HOURS.join(', ')} год` });
+    db.prepare('UPDATE masters SET lead_hours = ? WHERE id = ?').run(h, mid);
+  }
+  if (b.closed_today !== undefined) db.prepare('UPDATE masters SET closed_date = ? WHERE id = ?').run(b.closed_today ? todayStr() : null, mid);
+  const m = db.prepare('SELECT lead_hours, closed_date FROM masters WHERE id = ?').get(mid);
+  res.json({ lead_hours: m.lead_hours, closed_today: m.closed_date === todayStr() });
 });
 
 app.get('/api/admin/schedule', (req, res) => {

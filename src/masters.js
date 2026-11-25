@@ -81,6 +81,9 @@ function createMasterTables(db) {
   if (!mcols.includes('tg_chat_id')) db.exec('ALTER TABLE masters ADD COLUMN tg_chat_id TEXT');
   if (!mcols.includes('bio')) db.exec("ALTER TABLE masters ADD COLUMN bio TEXT NOT NULL DEFAULT ''");
   if (!mcols.includes('photo')) db.exec("ALTER TABLE masters ADD COLUMN photo TEXT NOT NULL DEFAULT ''");
+  // Запис клієнтів: щонайменше за скільки годин (1 = як було, 60 хв) і «закрито до кінця дня» (дата) — src/slots.js clientEarliest
+  if (!mcols.includes('lead_hours')) db.exec('ALTER TABLE masters ADD COLUMN lead_hours INTEGER NOT NULL DEFAULT 1');
+  if (!mcols.includes('closed_date')) db.exec('ALTER TABLE masters ADD COLUMN closed_date TEXT');
 }
 
 // ----- Допоміжні запити -----

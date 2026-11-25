@@ -13,14 +13,25 @@ const count = () => dbRun((db) => db.prepare('SELECT COUNT(*) AS n FROM appointm
 const phone = () => '+38067444' + String(++n).padStart(4, '0');
 
 // Два різні вільні часи в майстра (для клієнта й друга)
+// Час для друга не перетинається з часом клієнта (щонайменше на 60 хв пізніше); якщо такого сьогодні немає — наступний день
+const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
 async function twoSlots() {
   const first = (await srv.req('GET', `/api/next-slot?serviceId=${svc}&masterId=${M.id}`)).body;
-  return { date: first.date, a: first.slots[0], b: first.slots[first.slots.length - 1] }; // перший і останній — не перетинаються
+  const a = first.slots[0];
+  const later = first.slots.find((t) => toMin(t) >= toMin(a) + 60);
+  if (later) return { date: first.date, a, bDate: first.date, b: later };
+  for (let i = 1; i <= 14; i++) {
+    const d = new Date(first.date + 'T12:00:00'); d.setDate(d.getDate() + i);
+    const ds = [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+    const sl = (await srv.req('GET', `/api/slots?serviceId=${svc}&date=${ds}&masterId=${M.id}`)).body.slots || [];
+    if (sl.length) return { date: first.date, a, bDate: ds, b: sl[0] };
+  }
+  throw new Error('Немає часу для друга');
 }
 async function book(p, name, friend) {
   const s = await twoSlots();
   const body = { serviceId: svc, date: s.date, time: s.a, name, phone: p, masterId: M.id };
-  const withSlot = (f) => (f.mode === 'book' ? { serviceId: svc, date: s.date, time: s.b, masterId: M.id, ...f } : f);
+  const withSlot = (f) => (f.mode === 'book' ? { serviceId: svc, date: s.bDate, time: s.b, masterId: M.id, ...f } : f);
   if (Array.isArray(friend)) body.friends = friend.map(withSlot);
   else if (friend) body.friend = withSlot(friend);
   return srv.req('POST', '/api/appointments', { body });

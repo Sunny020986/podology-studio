@@ -1044,3 +1044,9 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; -webkit-us
 .fr-reward { margin: 0; font-weight: 600; color: var(--ok); }
 .fr-more { justify-self: start; }
 @media (max-width: 480px) { .fr-row { grid-template-columns: minmax(0, 1fr); } }
+
+/* «Розклад» → «Запис клієнтів онлайн» */
+.lead-form { flex-wrap: wrap; gap: 10px 20px; align-items: center; }
+.lead-close { display: inline-flex; gap: 8px; align-items: center; min-height: 40px; }
+.lead-close input { width: 18px; height: 18px; }
+@media (max-width: 700px) { .lead-form label { flex: 1 1 100%; } .lead-form select { width: 100%; } }

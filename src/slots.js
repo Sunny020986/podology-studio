@@ -78,15 +78,30 @@ function busyIntervals(db, dateStr, masterId, excludeId = 0) {
   ].map((r) => ({ s: toMin(r.s), e: toMin(r.e) }));
 }
 
-// Вільний час одного майстра на дату: його робочі години мінус записи (з прибиранням), блокування й перерви
-function masterFreeSlots(db, dateStr, durationMin, masterId, excludeId = 0) {
+// Обмеження майстра для запису клієнтами (не для адмінки):
+//   lead_hours — щонайменше за скільки годин до візиту клієнт може записатися (1 — як було: 60 хв; до 24 — за добу);
+//   closed_date — майстер закрив онлайн-запис до кінця цього дня (галочка «Закрити запис до кінця сьогодні»).
+// Повертає найраніший час (хв від початку дня dateStr), з якого клієнт може записатися; Infinity — у цей день не можна.
+const LEAD_HOURS = [1, 2, 3, 4, 6, 12, 24];
+function clientEarliest(db, dateStr, masterId) {
+  const m = db.prepare('SELECT lead_hours, closed_date FROM masters WHERE id = ?').get(masterId) || {};
+  const today = todayStr();
+  if (dateStr === today && m.closed_date === today) return Infinity;
+  const leadMin = LEAD_HOURS.includes(m.lead_hours) ? m.lead_hours * 60 : MIN_LEAD_MIN;
+  const daysAhead = Math.round((Date.parse(dateStr + 'T00:00:00Z') - Date.parse(today + 'T00:00:00Z')) / 86400000);
+  return nowMin() + leadMin - daysAhead * 1440;
+}
+
+// Вільний час одного майстра на дату: його робочі години мінус записи (з прибиранням), блокування й перерви.
+// client = true — для запису клієнтами: діють обмеження майстра (clientEarliest). Для адмінки — лише «не раніше ніж за 60 хв».
+function masterFreeSlots(db, dateStr, durationMin, masterId, excludeId = 0, client = false) {
   const hours = workHours(db, dateStr, masterId);
   if (!hours) return [];
   const dayStart = hours.start;
   const dayEnd = hours.end;
   const busy = busyIntervals(db, dateStr, masterId, excludeId);
 
-  const earliest = dateStr === todayStr() ? nowMin() + MIN_LEAD_MIN : 0;
+  const earliest = client ? clientEarliest(db, dateStr, masterId) : dateStr === todayStr() ? nowMin() + MIN_LEAD_MIN : 0;
 
   const slots = [];
   for (let t = dayStart; t + durationMin <= dayEnd; t += STEP_MIN) {
@@ -123,18 +138,18 @@ function candidateMasters(db, masterId, serviceId) {
 }
 
 // Вільний час для клієнта. masterId порожній = «будь-який вільний майстер»: об'єднання часу всіх, хто робить послугу.
-function freeSlots(db, dateStr, durationMin, { masterId = null, serviceId = null, excludeId = 0 } = {}) {
+function freeSlots(db, dateStr, durationMin, { masterId = null, serviceId = null, excludeId = 0, client = false } = {}) {
   const set = new Set();
   for (const id of candidateMasters(db, masterId, serviceId)) {
-    for (const t of masterFreeSlots(db, dateStr, durationMin, id, excludeId)) set.add(t);
+    for (const t of masterFreeSlots(db, dateStr, durationMin, id, excludeId, client)) set.add(t);
   }
   return [...set].sort();
 }
 
 // Кому віддати запис на конкретний час. Для «будь-кого» обираємо вільного майстра з найменшою кількістю записів цього дня.
-function pickMaster(db, dateStr, durationMin, time, { masterId = null, serviceId = null, excludeId = 0 } = {}) {
+function pickMaster(db, dateStr, durationMin, time, { masterId = null, serviceId = null, excludeId = 0, client = false } = {}) {
   const free = candidateMasters(db, masterId, serviceId)
-    .filter((id) => masterFreeSlots(db, dateStr, durationMin, id, excludeId).includes(time));
+    .filter((id) => masterFreeSlots(db, dateStr, durationMin, id, excludeId, client).includes(time));
   if (!free.length) return null;
   const load = (id) => db.prepare("SELECT COUNT(*) AS n FROM appointments WHERE master_id = ? AND date = ? AND status != 'cancelled'").get(id, dateStr).n;
   return free.sort((a, b) => load(a) - load(b) || a - b)[0];
@@ -146,4 +161,4 @@ function addDays(dateStr, n) {
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
 
-module.exports = { nowMin, freeSlots, masterFreeSlots, masterFreeAt, workHours, busyIntervals, pickMaster, candidateMasters, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays, STEP_MIN };
+module.exports = { LEAD_HOURS, clientEarliest, nowMin, freeSlots, masterFreeSlots, masterFreeAt, workHours, busyIntervals, pickMaster, candidateMasters, bufferMin, isValidDate, isBookableDate, maxDateStr, todayStr, toMin, toHHMM, weekdayOf, addDays, STEP_MIN };

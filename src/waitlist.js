@@ -71,7 +71,7 @@ function setupWaitlist({ app, db, telegram, freeSlots, isBookableDate, horizonDa
       if (recent && Date.now() - recent < NEXT_AFTER_MS) continue; // попередній у черзі ще має час записатися
       const queue = db.prepare(`SELECT w.*, s.name AS service, s.duration_min FROM waitlist w JOIN services s ON s.id = w.service_id
         WHERE w.date = ? AND w.status = 'waiting' ORDER BY w.id`).all(date);
-      const first = queue.find((w) => freeSlots(db, date, w.duration_min, { masterId: w.master_id, serviceId: w.service_id }).length > 0);
+      const first = queue.find((w) => freeSlots(db, date, w.duration_min, { masterId: w.master_id, serviceId: w.service_id, client: true }).length > 0);
       if (!first) continue;
       db.prepare("UPDATE waitlist SET status = 'notified', notified_at = ? WHERE id = ?").run(Date.now(), first.id);
       const where = base ? `${base.replace(/\/+$/, '')}/#booking` : 'на сайті';

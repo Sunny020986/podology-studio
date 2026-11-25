@@ -171,7 +171,7 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
     if (!isBookableDate(date, horizonDays)) return res.status(400).json({ error: 'Некоректна дата' });
     if (!isTime(time)) return res.status(400).json({ error: 'Некоректний час' });
     // Перенесення до того самого майстра; власний запис не рахується як зайнятий
-    const free = freeSlots(db, date, a.duration_min, { masterId: a.master_id, excludeId: a.id });
+    const free = freeSlots(db, date, a.duration_min, { masterId: a.master_id, excludeId: a.id, client: true });
     if (!free.includes(time)) return res.status(409).json({ error: 'Цей час уже недоступний, оберіть інший' });
     const toMinutes = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
     const endMin = toMinutes(time) + a.duration_min;

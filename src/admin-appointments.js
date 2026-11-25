@@ -12,6 +12,13 @@ function setupAdminAppointments(ctx) {
   const inRange = (date) => isValidDate(date) && date >= todayStr() && date <= addDays(todayStr(), ADMIN_HORIZON_DAYS);
   const masterName = (id) => db.prepare('SELECT name FROM masters WHERE id = ?').get(id)?.name || '';
 
+  // Додаткові послуги того самого візиту: масив id або рядок «2,3». null — якщо якоїсь послуги немає або вона вимкнена.
+  function extraOf(raw, mainId) {
+    const ids = [...new Set((Array.isArray(raw) ? raw : String(raw ?? '').split(',')).map(Number).filter((n) => Number.isInteger(n) && n > 0 && n !== mainId))];
+    const list = ids.map((id) => db.prepare('SELECT * FROM services WHERE id = ? AND active = 1').get(id));
+    return list.some((x) => !x) ? null : list;
+  }
+
   // Вільний час для форм адмінки; excludeId — запис, який переносимо (його власний час не зайнятий)
   app.get('/api/admin/slots', (req, res) => {
     const service = db.prepare('SELECT id, duration_min FROM services WHERE id = ?').get(Number(req.query.serviceId));
@@ -22,8 +29,11 @@ function setupAdminAppointments(ctx) {
     const excludeId = Number(req.query.excludeId) || 0;
     // Перенесення: тривалість — самого запису (кілька послуг в одному візиті тривають довше за основну)
     const moving = excludeId ? db.prepare('SELECT start_time, end_time, service_id, extra_services FROM appointments WHERE id = ?').get(excludeId) : null;
-    const duration = moving ? toMin(moving.end_time) - toMin(moving.start_time) : service.duration_min;
-    let ids = [service.id];
+    // Новий запис з кількома послугами: extra=2,3 — тривалість і майстри для всіх послуг разом
+    const extras = moving ? [] : extraOf(req.query.extra, service.id);
+    if (extras === null) return res.status(400).json({ error: 'Одна з додаткових послуг недоступна' });
+    const duration = moving ? toMin(moving.end_time) - toMin(moving.start_time) : service.duration_min + extras.reduce((s, x) => s + x.duration_min, 0);
+    let ids = [service.id, ...extras.map((x) => x.id)];
     if (moving) { try { ids = [moving.service_id, ...JSON.parse(moving.extra_services || '[]')]; } catch { /* старий запис */ } }
     res.json({ date, slots: freeSlots(db, date, duration, { masterId, serviceId: ids, excludeId }) });
   });
@@ -40,18 +50,24 @@ function setupAdminAppointments(ctx) {
     const phone = String(b.phone ?? '').trim();
     const digits = phone.replace(/\D/g, '');
     if (!/^\+?[\d\s()-]+$/.test(phone) || digits.length < 9 || digits.length > 15) return res.status(400).json({ error: 'Вкажіть коректний телефон' });
+    const extras = extraOf(b.extraServiceIds, service.id);
+    if (extras === null) return res.status(400).json({ error: 'Одна з додаткових послуг недоступна' });
+    if (extras.length > 4) return res.status(400).json({ error: 'До однієї послуги можна додати не більше 4 інших' });
     const masterId = req.role === 'master' ? req.masterId : masterParam(b.masterId);
-    if (masterId && !masterOffers(db, masterId, service.id)) return res.status(400).json({ error: 'Цей майстер не виконує обрану послугу або заблокований' });
+    if (masterId && [service, ...extras].some((x) => !masterOffers(db, masterId, x.id))) {
+      return res.status(400).json({ error: extras.length ? 'Цей майстер не виконує всі обрані послуги або заблокований' : 'Цей майстер не виконує обрану послугу або заблокований' });
+    }
     try {
       const r = bookTx({
-        service, date: b.date, time: b.time, name, phone, comment: String(b.comment ?? '').trim().slice(0, 500),
+        service, extras, date: b.date, time: b.time, name, phone, comment: String(b.comment ?? '').trim().slice(0, 500),
         masterId, skipPhoneLimit: true, status: 'confirmed',
       });
       const mName = masterName(r.masterId);
-      telegram.notifyMaster(`🗓 Запис додано в адмінці\n${service.name} · майстер: ${mName}\n${fmt(b.date)} о ${b.time}\n${name}, ${phone}`);
-      if (req.role !== 'master') notifyMasterOf(r.masterId, `🗓 Новий запис до вас\n${service.name}\n${fmt(b.date)} о ${b.time}\n${name}, ${phone}`);
-      live('changed', { id: Number(r.id), master_id: r.masterId, date: b.date, start_time: b.time, client_name: name, service: service.name, master: mName });
-      res.status(201).json({ id: Number(r.id), master: mName });
+      const svcName = [service, ...extras].map((x) => x.name).join(' + ');
+      telegram.notifyMaster(`🗓 Запис додано в адмінці\n${svcName} · майстер: ${mName}\n${fmt(b.date)} о ${b.time}\n${name}, ${phone}`);
+      if (req.role !== 'master') notifyMasterOf(r.masterId, `🗓 Новий запис до вас\n${svcName}\n${fmt(b.date)} о ${b.time}\n${name}, ${phone}`);
+      live('changed', { id: Number(r.id), master_id: r.masterId, date: b.date, start_time: b.time, client_name: name, service: svcName, master: mName });
+      res.status(201).json({ id: Number(r.id), master: mName, service: svcName, price: r.price ? { full: r.price.full, final: r.price.final, pct: r.price.pct, kind: r.price.kind } : null });
     } catch (e) {
       if (e.status) return res.status(e.status).json({ error: e.message });
       throw e;

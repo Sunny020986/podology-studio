@@ -558,8 +558,32 @@
     afData = { services: own ? services.filter((s) => own.services.includes(s.id)) : services, masters: mastersPub };
   }
 
+  // Кілька послуг в одному візиті (новий запис): додаткові послуги, разом — тривалість і ціна
+  let afExtra = [];
+  const afSvc = (id) => afData.services.find((x) => x.id === Number(id));
+  const afAll = () => [Number($('#afService')?.value), ...afExtra].map(afSvc).filter(Boolean);
+  const afExtraQ = () => (afExtra.length ? '&extra=' + afExtra.join(',') : '');
+  function renderAfExtras() {
+    const box = $('#afExtras');
+    if (!box) return;
+    const main = Number($('#afService').value);
+    afExtra = afExtra.filter((id) => id !== main);
+    box.innerHTML = afExtra.map((id) => { const x = afSvc(id); return x ? `<span class="extra-chip">+ ${esc(x.name)} <button type="button" data-af-del-extra="${x.id}" aria-label="Прибрати ${esc(x.name)}">×</button></span>` : ''; }).join('');
+    const left = afData.services.filter((x) => x.id !== main && !afExtra.includes(x.id));
+    $('#afAddSvc').hidden = !left.length || afExtra.length >= 4;
+    $('#afAddSel').hidden = true;
+    const all = afAll();
+    const dur = all.reduce((t, x) => t + x.duration_min, 0);
+    const sum = all.reduce((t, x) => t + (x.price_uah > 0 ? x.price_uah : 0), 0);
+    const un = all.filter((x) => !(x.price_uah > 0)).map((x) => x.name + (x.price_note ? ' (' + x.price_note + ')' : ''));
+    $('#afTotal').textContent = afExtra.length
+      ? `Разом: ${Math.floor(dur / 60) ? Math.floor(dur / 60) + ' год ' : ''}${dur % 60 ? dur % 60 + ' хв' : ''} · ${sum ? sum + ' грн' : 'ціна уточнюється'}${un.length && sum ? ' + ' + un.join(', ') : ''}`
+      : '';
+  }
+
   async function renderApptForm() {
     await loadFormData();
+    afExtra = [];
     const move = apptForm.mode === 'move';
     const a = move ? apptForm.appt : null;
     const preset = apptForm.preset || {};
@@ -574,7 +598,11 @@
       '<h3>' + (move ? 'Перенести запис' : 'Новий запис') + '</h3>' +
       (move ? '<p class="muted">' + esc(a.client_name) + ', ' + esc(a.client_phone) + ' · ' + esc(a.service) + ' · зараз: ' + fmtDate(a.date) + ' о ' + a.start_time + (a.master ? ', майстер ' + esc(a.master) : '') + '</p>' : '') +
       (move ? '<input type="hidden" id="afService" value="' + serviceId + '">'
-        : '<label class="step-label" for="afService">Послуга</label><select class="input" id="afService">' + svcOptions + '</select>') +
+        : '<label class="step-label" for="afService">Послуга</label><select class="input" id="afService">' + svcOptions + '</select>' +
+          '<div class="extra-svcs" id="afExtras"></div>' +
+          '<div class="extra-add"><button type="button" class="btn btn-ghost small" id="afAddSvc">+ Додати ще послугу</button>' +
+          '<select class="input" id="afAddSel" hidden aria-label="Додати послугу до цього візиту"></select></div>' +
+          '<div class="muted" id="afTotal"></div>') +
       (isSuper() ? '<label class="step-label" for="afMaster">Майстер</label><select class="input" id="afMaster"></select>' : '') +
       '<label class="step-label" for="afDate">Дата</label><input class="input" type="date" id="afDate" min="' + today() + '" value="' + date + '">' +
       '<div class="step-label">Вільний час</div><div class="slots-grid" id="afSlots"></div>' +
@@ -591,7 +619,7 @@
       '<div class="toolbar"><button class="btn btn-primary" type="submit">' + (move ? 'Перенести' : 'Записати') + '</button></div>' +
       '</form>';
     fillMasterOptions(masterId);
-    if (!move) setupClientFind();
+    if (!move) { setupClientFind(); renderAfExtras(); }
     await loadFormSlots();
   }
 
@@ -674,11 +702,12 @@
       $('#afPicked').hidden = true;
       clearTimeout(phoneTimer);
       phoneTimer = setTimeout(async () => {
+        if (!$('#afPhone')) return; // форму вже закрили (запис зроблено)
         const d = $('#afPhone').value.replace(/\D/g, '');
         if (d.length < 9 || $('#afName').value.trim()) return;
         const r = await api('/api/admin/client-search?q=' + encodeURIComponent(d)).catch(() => []);
         const exact = r.filter((c) => c.key === d.slice(-9));
-        if (exact.length === 1 && !$('#afName').value.trim()) { $('#afName').value = exact[0].name; showPicked(exact[0]); }
+        if (exact.length === 1 && $('#afName') && !$('#afName').value.trim()) { $('#afName').value = exact[0].name; showPicked(exact[0]); }
       }, 300);
     });
     $('#afName').addEventListener('input', () => { $('#afPicked').hidden = true; });
@@ -688,7 +717,8 @@
     const sel = $('#afMaster');
     if (!sel) return;
     const sid = Number($('#afService').value);
-    const list = afData.masters.filter((m) => m.services.includes(sid));
+    const want = apptForm.mode === 'move' ? [sid] : [sid, ...afExtra];
+    const list = afData.masters.filter((m) => want.every((id) => m.services.includes(id)));
     const move = apptForm.mode === 'move';
     sel.innerHTML = (move ? '' : '<option value="">Будь-який вільний</option>') +
       list.map((m) => '<option value="' + m.id + '"' + (String(m.id) === String(selected) ? ' selected' : '') + '>' + esc(m.name) + '</option>').join('');
@@ -703,7 +733,7 @@
     const ex = apptForm.mode === 'move' ? '&excludeId=' + apptForm.appt.id : '';
     box.innerHTML = '<span class="muted">Завантажую…</span>';
     try {
-      const r = await api('/api/admin/slots?serviceId=' + sid + '&date=' + date + (mid ? '&masterId=' + mid : '') + ex);
+      const r = await api('/api/admin/slots?serviceId=' + sid + '&date=' + date + (mid ? '&masterId=' + mid : '') + ex + (apptForm.mode === 'move' ? '' : afExtraQ()));
       if (afTime && !r.slots.includes(afTime)) afTime = null;
       box.innerHTML = r.slots.length
         ? r.slots.map((t) => '<button type="button" class="slot' + (t === afTime ? ' selected' : '') + '" data-af-time="' + t + '">' + t + '</button>').join('')
@@ -728,8 +758,9 @@
         const r = await api('/api/admin/appointments', { method: 'POST', body: {
           serviceId: Number($('#afService').value), masterId: mid ? Number(mid) : undefined, date: $('#afDate').value, time: afTime,
           name: $('#afName').value, phone: $('#afPhone').value, comment: $('#afComment').value,
+          extraServiceIds: afExtra.length ? afExtra : undefined,
         } });
-        notify('Запис додано' + (isSuper() ? ', майстер ' + r.master : ''));
+        notify('Запис додано' + (afExtra.length ? ': ' + r.service : '') + (isSuper() ? ', майстер ' + r.master : '') + (r.price && r.price.final ? ` · ${r.price.final} грн` : ''));
       }
       apptForm = null;
       await renderAppointments();
@@ -2438,7 +2469,13 @@ ${isSuper() ? `
   view.addEventListener('change', async (e) => {
     try {
       if (e.target.id === 'apptMaster') { apptMaster = e.target.value; return await renderAppointments(); }
-      if (e.target.id === 'afService') { fillMasterOptions($('#afMaster')?.value || ''); afTime = null; return await loadFormSlots(); }
+      if (e.target.id === 'afService') { renderAfExtras(); fillMasterOptions($('#afMaster')?.value || ''); afTime = null; return await loadFormSlots(); }
+      if (e.target.id === 'afAddSel') {
+        const id = Number(e.target.value);
+        if (id) afExtra.push(id);
+        renderAfExtras(); fillMasterOptions($('#afMaster')?.value || ''); afTime = null;
+        return await loadFormSlots();
+      }
       if (e.target.id === 'afMaster' || e.target.id === 'afDate') { return await loadFormSlots(); }
       if (e.target.id === 'calDate') { if (e.target.value) calDate = e.target.value; return await renderAppointments(); }
       if (e.target.id === 'schedMaster') { schedMaster = Number(e.target.value); return await renderSchedule(); }
@@ -2616,6 +2653,21 @@ ${isSuper() ? `
         const a = lastApptRows.find((x) => String(x.id) === e.target.dataset.moveAppt);
         if (a) { apptForm = { mode: 'move', appt: a }; return await renderAppointments(); }
         return;
+      }
+      if (e.target.id === 'afAddSvc') {
+        const main = Number($('#afService').value);
+        const left = afData.services.filter((x) => x.id !== main && !afExtra.includes(x.id));
+        const sel = $('#afAddSel');
+        sel.innerHTML = '<option value="">Оберіть послугу…</option>' + left.map((x) => `<option value="${x.id}">${esc(x.name)} · ${x.duration_min} хв${x.price_uah > 0 ? ' · ' + x.price_uah + ' грн' : x.price_note ? ' · ' + esc(x.price_note) : ''}</option>`).join('');
+        sel.hidden = false;
+        e.target.hidden = true;
+        sel.focus();
+        return;
+      }
+      if (e.target.dataset.afDelExtra) {
+        afExtra = afExtra.filter((id) => id !== Number(e.target.dataset.afDelExtra));
+        renderAfExtras(); fillMasterOptions($('#afMaster')?.value || ''); afTime = null;
+        return await loadFormSlots();
       }
       if (e.target.dataset.afTime) {
         afTime = e.target.dataset.afTime;

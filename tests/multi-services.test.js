@@ -65,3 +65,24 @@ test('перевірки: недоступна додаткова послуга
   if (many.length === 5) assert.equal((await srv.req('POST', '/api/appointments', { body: { ...base, extraServiceIds: many } })).status, 400);
   assert.equal((await srv.req('GET', `/api/slots?serviceId=${s1.id}&extra=99999&date=${next.date}`)).status, 400);
 });
+
+test('ручний запис в адмінці з кількома послугами: вільний час під суму, тривалість і ціна — сума; майстер Б — відмова', async () => {
+  let day = null, slots = [];
+  for (let i = 2; i < 20 && !day; i++) {
+    const d = new Date(); d.setDate(d.getDate() + i);
+    const ds = [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+    const r = await srv.req('GET', `/api/admin/slots?serviceId=${s1.id}&extra=${s2.id}&date=${ds}&masterId=${A.id}`, { token: srv.ADMIN });
+    if (r.body.slots?.length) { day = ds; slots = r.body.slots; }
+  }
+  assert.ok(day, 'є вільний час для двох послуг');
+  const r = await srv.req('POST', '/api/admin/appointments', { token: srv.ADMIN, body: { serviceId: s1.id, extraServiceIds: [s2.id], date: day, time: slots[0], name: 'Адмін Дві', phone: '0671112010', masterId: A.id } });
+  assert.equal(r.status, 201, r.text);
+  assert.equal(r.body.service, `${s1.name} + ${s2.name}`);
+  const a = (await srv.req('GET', `/api/admin/appointments?from=${day}&to=${day}`, { token: srv.ADMIN })).body.find((x) => x.id === r.body.id);
+  assert.equal(toMin(a.end_time) - toMin(a.start_time), 105);
+  assert.equal(a.price_full_uah, 2030);
+  assert.equal((await srv.req('GET', `/api/admin/slots?serviceId=${s1.id}&extra=99999&date=${day}`, { token: srv.ADMIN })).status, 400);
+  const bad = await srv.req('POST', '/api/admin/appointments', { token: srv.ADMIN, body: { serviceId: s1.id, extraServiceIds: [s2.id], date: day, time: slots[slots.length - 1], name: 'Не Той', phone: '0671112011', masterId: B.id } });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /не виконує всі обрані послуги/);
+});

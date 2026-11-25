@@ -111,7 +111,7 @@ test('лише контакт друга: список в адмінці, адм
   const friendPhone = phone();
   const r = await book(me, 'Марія Запрошує', { mode: 'lead', name: 'Друг Контакт', phone: friendPhone });
   assert.equal(r.status, 201, r.text);
-  assert.deepEqual(r.body.friends, [{ ok: true, mode: 'lead', name: 'Друг Контакт' }]);
+  assert.deepEqual(r.body.friends, [{ ok: true, mode: 'lead', name: 'Друг Контакт', pct: 20 }]);
   let row = (await adminList()).find((x) => x.friend === 'Друг Контакт');
   assert.deepEqual({ kind: row.kind, referrer: row.referrer, came: row.came, reward: row.reward }, { kind: 'lead', referrer: 'Марія Запрошує', came: false, reward: 'none' });
 
@@ -149,6 +149,29 @@ test('час друга перетинається з часом клієнта:
   assert.ok(!(await adminList()).some((x) => x.friend === 'Друг Ок'), 'запрошення першого друга теж відкочено');
   assert.equal((await quote(me)).friend.available, true);
   await putStudio({ friend_max_open: '1' });
+});
+
+test('друг лише за контактом: знижка на перший візит на будь-яку послугу, коли запишеться сам; звичайному новому клієнтові на непозначену — ні', async () => {
+  const other = (await srv.req('GET', '/api/admin/services', { token: srv.ADMIN })).body.find((x) => !x.first_discount);
+  assert.equal((await srv.req('PATCH', `/api/admin/services/${other.id}`, { token: srv.ADMIN, body: { price_uah: 500 } })).status, 200);
+  const q = async (p) => (await srv.req('GET', `/api/first-discount?serviceId=${other.id}&phone=${encodeURIComponent(p)}`)).body;
+  const stranger = phone();
+  assert.equal((await q(stranger)).kind, null, 'новий клієнт без запрошення: послуга без позначки — без знижки');
+  const friendPhone = phone();
+  const r = await book(phone(), 'Контакт Запрошує', { mode: 'lead', name: 'Друг Сам Запишеться', phone: friendPhone });
+  assert.equal(r.status, 201, r.text);
+  assert.deepEqual({ k: (await q(friendPhone)).kind, f: (await q(friendPhone)).final }, { k: 'first', f: 400 });
+  // Друг записується сам на сайті — знижка в записі
+  const s = (await srv.req('GET', `/api/next-slot?serviceId=${other.id}&masterId=${M.id}`)).body;
+  const b = await srv.req('POST', '/api/appointments', { body: { serviceId: other.id, date: s.date, time: s.slots[0], name: 'Друг Сам Запишеться', phone: friendPhone, masterId: M.id } });
+  assert.equal(b.status, 201, b.text);
+  assert.deepEqual({ k: b.body.price.kind, f: b.body.price.final }, { k: 'first', f: 400 });
+  // Друга записують одразу на непозначену послугу — теж зі знижкою
+  const s2 = (await srv.req('GET', `/api/next-slot?serviceId=${other.id}&masterId=${M.id}`)).body;
+  const r2 = await srv.req('POST', '/api/appointments', { body: { serviceId: svc, date: (await twoSlots()).date, time: (await twoSlots()).a, name: 'Ще Запрошує', phone: phone(), masterId: M.id,
+    friend: { mode: 'book', name: 'Друг Одразу', phone: phone(), serviceId: other.id, date: s2.date, time: s2.slots[s2.slots.length - 1], masterId: M.id } } });
+  assert.equal(r2.status, 201, r2.text);
+  assert.equal(r2.body.friends[0].price.kind, 'first');
 });
 
 test('перевірки друга: не свій номер, новий клієнт, не запрошений іншим; нічого не записується при помилці', async () => {

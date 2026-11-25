@@ -1087,3 +1087,5 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; -webkit-us
 tr.wait-new td { background: rgba(229, 57, 53, 0.06); }
 .badge-new { display: inline-block; padding: 1px 8px; border-radius: 999px; background: #e53935; color: #fff; font-size: 12px; font-weight: 700; }
 .badge-acc { display: inline-block; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--accent); font-size: 12px; white-space: nowrap; }
+.fr-booknow { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+.fr-booknow input { width: 18px; height: 18px; flex: none; }

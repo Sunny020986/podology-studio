@@ -87,6 +87,9 @@ function summary(db, key) {
   return { open, rewards };
 }
 
+// Цей номер запросив хтось із клієнтів (запрошення не прибране): друг отримує знижку на перший візит на будь-яку послугу
+const isInvitedFriend = (db, phone) => !!db.prepare('SELECT 1 FROM friend_invites WHERE friend_key = ? AND removed = 0').get(key9(phone));
+
 // Для bookTx: з якого запрошення взяти знижку цьому номеру (або null)
 const rewardInvite = (db, phone) => summary(db, key9(phone)).rewards[0] ?? null;
 const useReward = (db, inviteId, apptId) => db.prepare('UPDATE friend_invites SET reward_appt_id = ? WHERE id = ?').run(apptId, inviteId);
@@ -143,14 +146,16 @@ function setupFriendInvite({ app, db, publicBook, hasVisits, accountFromRequest,
       VALUES (?, ?, ?, ?, ?, ?, ?)`);
     if (f.mode === 'lead') {
       ins.run(key, ref.name, key9(phone), name, phone, 'lead', null);
-      const msg = `🤝 Друг клієнта ${ref.name}: ${name}, ${phone}\nЗателефонуйте й запишіть. Список: адмінка → «Записи» → «Друзі клієнтів»`;
+      const msg = `🤝 Друг клієнта ${ref.name}: ${name}, ${phone}\nЗателефонуйте й запишіть (знижка на перший візит нарахується сама). Список: адмінка → «Записи» → «Друзі клієнтів»`;
       if (defer) defer.push(() => notifyStaff(msg)); else notifyStaff(msg);
-      return { status: 201, body: { mode: 'lead', name } };
+      return { status: 201, body: { mode: 'lead', name, pct: discountPct(db) } };
     }
+    // Запрошення записуємо ДО запису друга: тоді bookTx бачить, що це запрошений друг, і дає знижку на перший візит
+    const inv = Number(ins.run(key, ref.name, key9(phone), name, phone, 'book', null).lastInsertRowid);
     const r = publicBook({ serviceId: f.serviceId, date: f.date, time: f.time, name, phone, comment: f.comment, masterId: f.masterId }, ip,
       { commentPrefix: `${PREFIX(ref.name)} `, defer });
-    if (r.status !== 201) return { status: r.status, body: r.body };
-    ins.run(key, ref.name, key9(phone), name, phone, 'book', r.body.id);
+    if (r.status !== 201) { db.prepare('DELETE FROM friend_invites WHERE id = ?').run(inv); return { status: r.status, body: r.body }; }
+    db.prepare('UPDATE friend_invites SET friend_appt_id = ? WHERE id = ?').run(r.body.id, inv);
     return { status: 201, body: { mode: 'book', ...r.body } };
   }
 
@@ -244,4 +249,4 @@ function eraseClient(db, key) {
   db.prepare('DELETE FROM friend_invites WHERE referrer_key = ? OR friend_key = ?').run(key, key);
 }
 
-module.exports = { createFriendTables, setupFriendInvite, eraseClient, rewardInvite, useReward };
+module.exports = { createFriendTables, setupFriendInvite, eraseClient, rewardInvite, useReward, isInvitedFriend };

@@ -1,6 +1,7 @@
 // «Приведи друга» на сайті.
 //   FriendInvite.list(holder, opts) — поля для 1–5 друзів (без <form>, тож працює всередині форми запису).
-//     Для кожного друга: «записати зараз» (послуга, дата, час) або «лише контакт — ми передзвонимо».
+//     Для кожного друга: ім'я й телефон; за бажанням — галочка «одразу записати на час» (послуга, дата, час).
+//     Без запису друг отримає знижку на перший візит, коли запишеться сам або коли йому передзвонить адміністратор.
 //     Повертає { data(), error() }: data() — масив друзів для сервера, error() — текст помилки або null.
 //   FriendInvite.mount(box) — картка в кабінеті клієнта: стан запрошень, знижка за друзів, запрошення.
 window.FriendInvite = (() => {
@@ -25,13 +26,10 @@ window.FriendInvite = (() => {
     el.className = 'fr-one';
     el.innerHTML = `<legend>Друг ${n}</legend>
       <button class="fr-del" type="button" aria-label="Прибрати друга ${n}" title="Прибрати">×</button>
-      <div class="fr-modes" role="radiogroup" aria-label="Як записати друга">
-        <label><input type="radio" name="${id}-mode" value="book" checked> Записати зараз</label>
-        <label><input type="radio" name="${id}-mode" value="lead"> Лише контакт: ми передзвонимо</label>
-      </div>
       <input class="input" data-f="name" placeholder="Ім'я друга" maxlength="60" autocomplete="off">
       <input class="input" data-f="phone" placeholder="Телефон друга, наприклад +380501234567" maxlength="30" autocomplete="off" inputmode="tel">
-      <div class="fr-book">
+      <label class="fr-booknow"><input type="checkbox" data-f="booknow"> Одразу записати друга на час (необов'язково)</label>
+      <div class="fr-book" hidden>
         <label class="fr-label">Послуга<select class="input" data-f="serviceId">${services.map((s) => `<option value="${s.id}" ${s.id == defaults.serviceId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
         <div class="fr-row">
           <label class="fr-label">Дата<input class="input" type="date" data-f="date" min="${ymd(new Date())}" ${maxDate ? `max="${maxDate}"` : ''}></label>
@@ -40,8 +38,8 @@ window.FriendInvite = (() => {
         <div class="hint" data-f="hint"></div>
       </div>`;
     const q = (f) => el.querySelector(`[data-f="${f}"]`);
-    const mode = () => el.querySelector(`input[name="${id}-mode"]:checked`).value;
-    let reqId = 0;
+    const mode = () => (q('booknow').checked ? 'book' : 'lead');
+    let reqId = 0, started = false;
 
     async function loadSlots(date, note = '') {
       const my = ++reqId;
@@ -71,8 +69,10 @@ window.FriendInvite = (() => {
     }
     q('serviceId').addEventListener('change', () => pickDate(q('date').value || ymd(new Date())));
     q('date').addEventListener('change', () => q('date').value && pickDate(q('date').value));
-    el.querySelectorAll(`input[name="${id}-mode"]`).forEach((r) => r.addEventListener('change', () => { el.querySelector('.fr-book').hidden = mode() !== 'book'; }));
-    start();
+    q('booknow').addEventListener('change', () => {
+      el.querySelector('.fr-book').hidden = mode() !== 'book';
+      if (mode() === 'book' && !started) { started = true; start(); } // вільний час вантажимо лише тоді, коли він потрібен
+    });
 
     return {
       el,
@@ -123,7 +123,7 @@ window.FriendInvite = (() => {
   // Рядок про результат для кожного друга (після запису)
   function resultText(f) {
     if (!f.ok) return `${f.name || 'Друг'}: не вдалося — ${f.error}`;
-    if (f.mode === 'lead') return `Контакт друга ${f.name} передали адміністратору: ми йому зателефонуємо.`;
+    if (f.mode === 'lead') return `Друга ${f.name} додано${f.pct ? `: на перший візит у нього знижка ${f.pct}%` : ''}. Він може записатися сам на сайті, або ми йому зателефонуємо.`;
     const p = f.price;
     const what = p && p.kind === 'friend' ? 'знижка за друга' : 'знижка на перший візит';
     const price = p && p.full ? (p.pct ? ` Ціна: ${p.full} грн − ${what} ${p.pct}% (${p.discount} грн) = ${p.final} грн.` : ` Ціна: ${p.full} грн.`) : '';

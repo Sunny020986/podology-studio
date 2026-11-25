@@ -6,7 +6,8 @@
 // Знижка за друга («Приведи друга», src/friend-invite.js): той самий відсоток на будь-яку послугу, один раз за кожного
 // друга, який прийшов. Дві знижки не додаються: новому клієнтові — на перший візит, решті — за друга, якщо є.
 // discount_kind у записі: first або friend.
-const { rewardInvite } = require('./friend-invite');
+// Запрошений друг (номер є в «Приведи друга») отримує знижку на перший візит на будь-яку послугу, не лише позначену.
+const { rewardInvite, isInvitedFriend } = require('./friend-invite');
 
 const DEFAULT_PCT = 10; // так було в тексті акції «Знижка 10% на перший візит», який власник уже опублікував
 
@@ -46,7 +47,7 @@ function quote(db, service, phone) {
   const out = { eligible: false, kind: null, pct: 0, full, discount: 0, final: full, inviteId: null };
   const pct = discountPct(db);
   if (!pct) return out;
-  if (service.first_discount && !hasVisits(db, phone)) out.kind = 'first';
+  if (!hasVisits(db, phone) && (service.first_discount || isInvitedFriend(db, phone))) out.kind = 'first';
   else {
     const inv = rewardInvite(db, phone);
     if (inv) { out.kind = 'friend'; out.inviteId = inv; }

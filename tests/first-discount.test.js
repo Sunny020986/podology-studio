@@ -33,7 +33,7 @@ after(() => srv && srv.stop());
 
 test('новому клієнтові: ціна, знижка 10% і сума до сплати; на непозначену послугу знижки немає', async () => {
   const q = (await quote(svcDisc, '+380671110001')).body;
-  assert.deepEqual(q, { eligible: true, kind: 'first', pct: 10, full: 1235, discount: 123, final: 1112, friend: { available: true, left: 5 } }); // 1235 × 0,9 = 1111,5 → 1112 (округлення до більшого)
+  assert.deepEqual(q, { eligible: true, kind: 'first', invited: false, pct: 10, full: 1235, discount: 123, final: 1112, friend: { available: true, left: 5 } }); // 1235 × 0,9 = 1111,5 → 1112 (округлення до більшого)
   const plain = (await quote(svcPlain, '+380671110001')).body;
   assert.equal(plain.eligible, false);
   assert.equal(plain.final, 500);

@@ -1091,3 +1091,4 @@ tr.wait-new td { background: rgba(229, 57, 53, 0.06); }
 .fr-booknow input { width: 18px; height: 18px; flex: none; }
 .vi-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; max-width: 760px; }
 .vi-photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; display: block; background: #eee; }
+.acc-invited { margin: 12px 0; padding: 12px 14px; border-radius: 12px; background: rgba(142, 216, 198, 0.25); border: 1px solid var(--accent); line-height: 1.5; }

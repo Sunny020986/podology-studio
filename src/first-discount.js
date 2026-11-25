@@ -47,7 +47,10 @@ function quote(db, service, phone) {
   const out = { eligible: false, kind: null, pct: 0, full, discount: 0, final: full, inviteId: null };
   const pct = discountPct(db);
   if (!pct) return out;
-  if (!hasVisits(db, phone) && (service.first_discount || isInvitedFriend(db, phone))) out.kind = 'first';
+  if (!hasVisits(db, phone)) {
+    const invited = isInvitedFriend(db, phone);
+    if (service.first_discount || invited) { out.kind = 'first'; out.invited = invited; }
+  }
   else {
     const inv = rewardInvite(db, phone);
     if (inv) { out.kind = 'friend'; out.inviteId = inv; }

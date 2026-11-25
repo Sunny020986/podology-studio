@@ -137,6 +137,7 @@
           : '<p class="muted">Підключіть Telegram: нагадування про записи і код для відновлення пароля надходитимуть у бот.</p><button class="btn btn-ghost small" type="button" data-act="tg-link">Підключити Telegram</button>'}
         <p class="acc-msg" id="tgMsg" role="status"></p>
       </div>
+      ${me.invited_discount ? `<div class="acc-invited">🎁 Вас запросив друг: знижка <b>${me.invited_discount}%</b> на перший візит на будь-яку послугу. Оберіть послугу й час на сайті — знижка порахується сама.</div>` : ''}
       <div id="accFriend"></div>
       <h3 class="acc-h">Фото й відео для майстра</h3>
       <div id="accVideos"><p class="muted">Завантажую…</p></div>

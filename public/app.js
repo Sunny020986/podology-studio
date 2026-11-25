@@ -291,7 +291,7 @@
   // Знижку пропонуємо лише тому, хто ще не мав у нас записів: сервер перевіряє за номером телефону.
   const quoteState = { key: '', data: null };
   const phoneDigits = () => $('#phoneInput').value.replace(/\D/g, '');
-  const discName = (q) => (q.kind === 'friend' ? 'Знижка за друга' : 'Знижка на перший візит');
+  const discName = (q) => (q.kind === 'friend' ? 'Знижка за друга' : q.invited ? 'Знижка на перший візит (вас запросив друг)' : 'Знижка на перший візит');
   const calcHtml = (q) => q.pct && q.full
     ? `<div class="price-calc"><div class="pc-row"><span>Ціна за прайсом</span><span>${q.full} грн</span></div>
        <div class="pc-row pc-disc"><span>${discName(q)} ${q.pct}%</span><span>− ${q.discount} грн</span></div>

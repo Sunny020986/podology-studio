@@ -1,6 +1,8 @@
 // Особистий кабінет клієнта: реєстрація за номером і паролем, вхід, записи, скасування і перенесення,
 // прив'язка Telegram-бота і відновлення пароля. Реєстрація необов'язкова: запис без неї працює як раніше.
 const crypto = require('crypto');
+const { isInvitedFriend } = require('./friend-invite');
+const { hasVisits, discountPct } = require('./first-discount');
 
 const SESSION_DAYS = 30;
 const RESET_MINUTES = 10;
@@ -138,7 +140,11 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
   app.get('/api/account/me', (req, res) => {
     const acc = accountFromRequest(req);
     if (!acc) return res.status(401).json({ error: 'Увійдіть в кабінет' });
-    res.json({ name: acc.name, phone: acc.phone, telegram: !!acc.tg_chat_id });
+    // Запрошений друг, який ще не був у нас: кабінет показує його знижку на перший візит (без імені того, хто запросив:
+    // номер при реєстрації не підтверджується, тож чуже ім'я не розкриваємо)
+    const pct = discountPct(db);
+    const invited = pct > 0 && isInvitedFriend(db, acc.phone) && !hasVisits(db, acc.phone) ? pct : 0;
+    res.json({ name: acc.name, phone: acc.phone, telegram: !!acc.tg_chat_id, invited_discount: invited });
   });
 
   // ----- Записи клієнта -----

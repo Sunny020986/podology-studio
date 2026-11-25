@@ -270,3 +270,21 @@ test('видалення запрошувача: ім\'я зникає з ком
   assert.ok(friend && !friend.client_comment.includes('Стерти Запрошувача'));
   assert.ok(!(await adminList()).some((x) => x.referrer === 'Стерти Запрошувача'));
 });
+
+test('сценарій: Сашуліна запросила Арамчика контактом → Арамчик реєструється в кабінеті й одразу бачить знижку; у ціні «вас запросив друг»', async () => {
+  const friendPhone = '0930525824';
+  const r = await book(phone(), 'Сашуліна', { mode: 'lead', name: 'Арамчик', phone: friendPhone });
+  assert.equal(r.status, 201, r.text);
+  const reg = await srv.req('POST', '/api/account/register', { body: { name: 'Арамчик', phone: friendPhone, password: 'cabinet-pass-1' } });
+  assert.equal(reg.status, 201, reg.text);
+  const Cookie = (reg.headers.get('set-cookie') || '').split(';')[0];
+  const me = (await srv.req('GET', '/api/account/me', { headers: { Cookie } })).body;
+  assert.equal(me.invited_discount, 20, 'кабінет показує знижку запрошеного');
+  const other = (await srv.req('GET', '/api/admin/services', { token: srv.ADMIN })).body.find((x) => !x.first_discount);
+  const q = (await srv.req('GET', `/api/first-discount?serviceId=${other.id}&phone=${friendPhone}`)).body;
+  assert.deepEqual({ k: q.kind, inv: q.invited, pct: q.pct }, { k: 'first', inv: true, pct: 20 });
+  // Звичайний новий клієнт без запрошення — без плашки
+  const reg2 = await srv.req('POST', '/api/account/register', { body: { name: 'Просто Новий', phone: phone(), password: 'cabinet-pass-1' } });
+  const me2 = (await srv.req('GET', '/api/account/me', { headers: { Cookie: (reg2.headers.get('set-cookie') || '').split(';')[0] } })).body;
+  assert.equal(me2.invited_discount, 0);
+});

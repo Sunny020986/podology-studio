@@ -918,6 +918,17 @@ function listClients(q, mode, masterId = null) {
       c.next_visit = r.date;
     }
   }
+  // Зареєстровані в кабінеті: позначка «кабінет»; суперадмін бачить і тих, хто ще жодного разу не записувався
+  // (майстер — лише своїх клієнтів із записами)
+  for (const acc of db.prepare('SELECT phone, phone_key, name, created_at, (tg_chat_id IS NOT NULL) AS tg FROM accounts').all()) {
+    let c = map.get(acc.phone_key);
+    if (!c && masterId) continue;
+    if (!c) {
+      c = { key: acc.phone_key, name: acc.name, phone: acc.phone, visits: 0, cancelled: 0, no_shows: 0, noshow_streak: 0, last_visit: null, next_visit: null, last_change: acc.created_at };
+      map.set(acc.phone_key, c);
+    }
+    c.account = { since: acc.created_at, telegram: !!acc.tg };
+  }
   let list = [...map.values()].map((c) => {
     const n = notes.get(c.key);
     if (n && n.updated_at > c.last_change) c.last_change = n.updated_at;
@@ -1045,8 +1056,8 @@ app.get('/api/admin/clients.csv', (req, res) => {
     if (/^[=@]/.test(s) || (/^[+-]/.test(s) && !/^[+-]?[\d\s()-]+$/.test(s))) s = "'" + s;
     return '"' + s.replace(/"/g, '""') + '"';
   };
-  const lines = [['Імʼя', 'Телефон', 'Візитів', 'Скасовано', 'Останній візит', 'Наступний запис']];
-  for (const c of listClients()) lines.push([c.name, c.phone, c.visits, c.cancelled, c.last_visit, c.next_visit]);
+  const lines = [['Імʼя', 'Телефон', 'Візитів', 'Скасовано', 'Останній візит', 'Наступний запис', 'Кабінет']];
+  for (const c of listClients()) lines.push([c.name, c.phone, c.visits, c.cancelled, c.last_visit, c.next_visit, c.account ? 'так' : '']);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="clients.csv"');
   res.send('\uFEFF' + lines.map((l) => l.map(cell).join(';')).join('\r\n') + '\r\n');
@@ -1061,13 +1072,16 @@ app.get('/api/admin/clients/:key', (req, res) => {
               ORDER BY a.date DESC, a.start_time DESC`)
     .all()
     .filter((a) => last9(a.client_phone) === key && (req.role === 'super' || a.master_id === req.masterId));
-  if (!appointments.length) return res.status(404).json({ error: 'Клієнта не знайдено' });
+  const acc = db.prepare('SELECT name, phone, created_at, (tg_chat_id IS NOT NULL) AS tg FROM accounts WHERE phone_key = ?').get(key);
+  // Клієнт без записів, але з кабінетом — бачить лише суперадмін
+  if (!appointments.length && !(acc && req.role === 'super')) return res.status(404).json({ error: 'Клієнта не знайдено' });
   const noteRow = db.prepare('SELECT note, updated_at FROM client_notes WHERE phone_key = ?').get(key);
   res.json({
     key,
-    name: appointments[0].client_name,
-    phone: appointments[0].client_phone,
+    name: appointments.length ? appointments[0].client_name : acc.name,
+    phone: appointments.length ? appointments[0].client_phone : acc.phone,
     note: noteRow ? noteRow.note : '',
+    account: acc ? { since: acc.created_at, telegram: !!acc.tg, name: acc.name } : null,
     appointments,
   });
 });

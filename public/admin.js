@@ -1041,6 +1041,8 @@
   });
 
   // ----- Клієнти -----
+  // Дата з бази (UTC, «YYYY-MM-DD HH:MM:SS») у місцевому вигляді ДД.ММ.РРРР
+  const fmtUtcDate = (s) => (s ? new Date(String(s).replace(' ', 'T') + 'Z').toLocaleDateString('uk-UA') : '—');
   async function renderClients() {
     const arch = isSuper() ? await api('/api/admin/archive-months') : { options: [], months: 0 };
     const archiveOpts = arch.options.map((m) => '<option value="' + m + '"' + (m === arch.months ? ' selected' : '') + '>' + m + ' міс.</option>').join('');
@@ -1055,7 +1057,7 @@
         ${isSuper() ? `<label class="muted" style="margin-left:auto">В архів, якщо без змін понад <select id="archiveMonths">${archiveOpts}</select></label>` : ''}
       </div>
       <table>
-        <thead><tr><th>Імʼя</th><th>Телефон</th><th>Візитів</th><th>Останній візит</th><th>Наступний запис</th><th>Нотатка</th><th></th></tr></thead>
+        <thead><tr><th>Імʼя</th><th>Телефон</th><th>Кабінет</th><th>Візитів</th><th>Останній візит</th><th>Наступний запис</th><th>Нотатка</th><th></th></tr></thead>
         <tbody id="clientRows"></tbody>
       </table>`;
     let timer = null;
@@ -1075,6 +1077,7 @@
       ? list.map((c) => `<tr>
           <td><button class="link" type="button" data-client="${c.key}">${esc(c.name)}</button>${noShowBadge(c.noshow_streak)}</td>
           <td>${esc(c.phone)}</td>
+          <td>${c.account ? `<span class="badge-acc" title="Зареєстрований ${esc(fmtUtcDate(c.account.since))}${c.account.telegram ? ', Telegram підключено' : ''}">кабінет${c.account.telegram ? ' · TG' : ''}</span>` : '—'}${c.account && !c.visits && !c.next_visit && !c.cancelled && !c.no_shows ? ' <span class="muted">ще не записувався</span>' : ''}</td>
           <td>${c.visits}${c.no_shows ? ` <span class="muted">(не прийшов: ${c.no_shows})</span>` : ''}</td>
           <td>${fmtDate(c.last_visit)}</td>
           <td>${fmtDate(c.next_visit)}</td>
@@ -1083,7 +1086,7 @@
             ? '<button class="btn btn-ghost small" type="button" data-restore="' + c.key + '">Повернути</button>'
             : '<button class="btn btn-ghost small" type="button" data-archive-client="' + c.key + '">В архів</button>'}</td>
         </tr>`).join('')
-      : `<tr><td colspan="7" class="muted">${q ? 'Нікого не знайдено.' : clientsArchived ? 'В архіві нікого немає.' : 'Активних клієнтів немає. Нові зʼявляться після запису, решта може бути в архіві.'}</td></tr>`;
+      : `<tr><td colspan="8" class="muted">${q ? 'Нікого не знайдено.' : clientsArchived ? 'В архіві нікого немає.' : 'Активних клієнтів немає. Нові зʼявляться після запису чи реєстрації в кабінеті, решта може бути в архіві.'}</td></tr>`;
   }
 
   async function renderClient(key) {
@@ -1102,6 +1105,7 @@
       <button class="btn btn-ghost small" type="button" id="clientBack">← До списку клієнтів</button>
       <h3 style="margin:16px 0 4px">${esc(c.name)}</h3>
       <div class="muted">${esc(c.phone)} · візитів: ${done}${noShows ? ` · не прийшов: ${noShows}` : ''} · усього записів: ${c.appointments.length}</div>
+      <div class="muted">${c.account ? `Кабінет: зареєстрований ${esc(fmtUtcDate(c.account.since))}, Telegram ${c.account.telegram ? 'підключено' : 'не підключено'}${c.appointments.length ? '' : '. Ще жодного разу не записувався'}` : 'Кабінету на сайті немає'}</div>
       <div class="toolbar client-actions">
         <button class="btn btn-primary small" type="button" id="clientBook">+ Записати</button>
         ${isSuper() ? '<button class="btn btn-ghost small danger" type="button" id="clientErase">Видалити клієнта</button>' : ''}

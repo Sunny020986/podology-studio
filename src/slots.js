@@ -128,10 +128,13 @@ function masterFreeAt(db, dateStr, timeHHMM, durationMin, masterId, excludeId = 
 }
 
 // Майстри, які можуть прийняти: конкретний (якщо активний і робить цю послугу) або всі такі
+// serviceId — одна послуга або список (кілька послуг в одному візиті): тоді лише майстри, які роблять УСІ ці послуги
 function candidateMasters(db, masterId, serviceId) {
-  const rows = serviceId
+  const want = (Array.isArray(serviceId) ? serviceId : serviceId ? [serviceId] : []).map(Number).filter(Boolean);
+  const rows = want.length
     ? db.prepare(`SELECT m.id FROM masters m JOIN master_services ms ON ms.master_id = m.id
-        WHERE m.status = 'active' AND ms.service_id = ? ORDER BY m.id`).all(serviceId)
+        WHERE m.status = 'active' AND ms.service_id IN (${want.map(() => '?').join(',')})
+        GROUP BY m.id HAVING COUNT(DISTINCT ms.service_id) = ? ORDER BY m.id`).all(...want, new Set(want).size)
     : db.prepare("SELECT id FROM masters WHERE status = 'active' ORDER BY id").all();
   const ids = rows.map((r) => r.id);
   return masterId ? ids.filter((id) => id === Number(masterId)) : ids;

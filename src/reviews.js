@@ -29,7 +29,7 @@ function createReviewTables(db) {
 }
 
 function setupReviews({ app, db, telegram, todayStr, siteUrl, last9 }) {
-  const apptByCode = (code) => db.prepare(`SELECT a.*, s.name AS service FROM appointments a
+  const apptByCode = (code) => db.prepare(`SELECT a.*, COALESCE(a.services_label, s.name) AS service FROM appointments a
     JOIN services s ON s.id = a.service_id WHERE a.review_code = ?`).get(code);
 
   function ensureCode(a) {
@@ -50,7 +50,7 @@ function setupReviews({ app, db, telegram, todayStr, siteUrl, last9 }) {
   async function sendReviewRequests() {
     const hour = new Date().getHours();
     if (hour < ASK_FROM_HOUR || hour >= ASK_TO_HOUR || !siteUrl()) return;
-    const rows = db.prepare(`SELECT a.*, s.name AS service FROM appointments a JOIN services s ON s.id = a.service_id
+    const rows = db.prepare(`SELECT a.*, COALESCE(a.services_label, s.name) AS service FROM appointments a JOIN services s ON s.id = a.service_id
       WHERE a.status NOT IN ('cancelled', 'no_show') AND a.review_asked = 0 AND a.date < ? AND a.date >= date(?, '-${ASK_WITHIN_DAYS} day')
         AND NOT EXISTS (SELECT 1 FROM reviews r WHERE r.appointment_id = a.id)`).all(todayStr(), todayStr());
     for (const a of rows) {

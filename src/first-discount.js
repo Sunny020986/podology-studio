@@ -18,6 +18,9 @@ function createFirstDiscountColumns(db) {
   if (!appt.includes('price_full_uah')) db.exec('ALTER TABLE appointments ADD COLUMN price_full_uah INTEGER');
   if (!appt.includes('discount_pct')) db.exec('ALTER TABLE appointments ADD COLUMN discount_pct INTEGER NOT NULL DEFAULT 0');
   if (!appt.includes('discount_kind')) db.exec('ALTER TABLE appointments ADD COLUMN discount_kind TEXT');
+  // Кілька послуг в одному візиті: додаткові послуги (JSON-список id) і підпис «Послуга 1 + Послуга 2» на момент запису
+  if (!appt.includes('extra_services')) db.exec('ALTER TABLE appointments ADD COLUMN extra_services TEXT');
+  if (!appt.includes('services_label')) db.exec('ALTER TABLE appointments ADD COLUMN services_label TEXT');
   // Один раз: відсоток 10 і позначка на «первинних» послугах (як у тексті акції: «первинну консультацію й огляд стоп»).
   // Власник може змінити обидва в адмінці.
   // Знижка «Приведи друга» — окремий відсоток, за замовчуванням 20 (один раз)
@@ -54,12 +57,18 @@ const friendPct = (db) => {
 // Розрахунок для послуги й номера. kind: first (перший візит), invited (запрошений друг: перший візит + знижка друга),
 // friend (той, хто привів друга), або null. pctFirst/pctFriend — складові для показу; pct — разом (не більше 90).
 // inviteId — з якого запрошення взято знижку за друга. Суми — лише якщо в послуги є числова ціна.
+// service — одна послуга або список (кілька послуг в одному візиті). Ціна — сума числових цін.
+// Знижка на перший візит — від суми послуг з позначкою (для запрошеного друга — від усіх); інші знижки — від усієї суми.
 function quote(db, service, phone) {
-  const full = service.price_uah > 0 ? service.price_uah : null;
+  const list = Array.isArray(service) ? service : [service];
+  const priced = list.filter((x) => x.price_uah > 0);
+  const full = priced.length ? priced.reduce((s, x) => s + x.price_uah, 0) : null;
   const out = { eligible: false, kind: null, pct: 0, pctFirst: 0, pctFriend: 0, full, discount: 0, final: full, inviteId: null };
+  let baseFirst = 0;
   if (!hasVisits(db, phone)) {
     const invited = isInvitedFriend(db, phone);
-    if (service.first_discount || invited) out.pctFirst = discountPct(db);
+    const firstOn = list.filter((x) => x.first_discount || invited);
+    if (firstOn.length) { out.pctFirst = discountPct(db); baseFirst = firstOn.reduce((s, x) => s + (x.price_uah > 0 ? x.price_uah : 0), 0); }
     if (invited) out.pctFriend = friendPct(db);
     out.invited = invited;
     if (out.pctFirst || out.pctFriend) out.kind = invited && out.pctFriend ? 'invited' : 'first';
@@ -72,7 +81,8 @@ function quote(db, service, phone) {
   out.eligible = true;
   out.pct = Math.min(90, out.pctFirst + out.pctFriend);
   if (full) {
-    out.final = Math.round(full * (100 - out.pct) / 100);
+    const off = Math.min(full * 0.9, baseFirst * out.pctFirst / 100 + full * out.pctFriend / 100);
+    out.final = Math.round(full - off);
     out.discount = full - out.final;
   }
   return out;
@@ -84,12 +94,15 @@ function setupFirstDiscount({ app, db, makeLimiter, friendState = () => null }) 
   app.get('/api/first-discount', (req, res) => {
     const service = db.prepare('SELECT id, price_uah, first_discount FROM services WHERE id = ? AND active = 1').get(Number(req.query.serviceId));
     if (!service) return res.status(400).json({ error: 'Невідома послуга' });
+    // Додаткові послуги того самого візиту: ціна й знижки — від суми
+    const extraIds = [...new Set(String(req.query.extra ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0 && n !== service.id))].slice(0, 4);
+    const all = [service, ...extraIds.map((id) => db.prepare('SELECT id, price_uah, first_discount FROM services WHERE id = ? AND active = 1').get(id)).filter(Boolean)];
     const digits = String(req.query.phone ?? '').replace(/\D/g, '');
-    const full = service.price_uah > 0 ? service.price_uah : null;
+    const full = all.some((x) => x.price_uah > 0) ? all.reduce((s, x) => s + (x.price_uah > 0 ? x.price_uah : 0), 0) : null;
     if (digits.length < 9 || digits.length > 15) return res.json({ eligible: false, kind: null, pct: 0, full, discount: 0, final: full, friend: { available: false } });
     if (limiter.blocked(req.ip)) return res.status(429).json({ error: 'Забагато перевірок. Спробуйте пізніше' });
     limiter.hit(req.ip);
-    const { inviteId, ...q } = quote(db, service, digits);
+    const { inviteId, ...q } = quote(db, all, digits);
     // Чи показувати у формі запису блок «Приведи друга» для цього номера (без подробиць)
     const fs = friendState(digits.slice(-9));
     res.json({ ...q, friend: { available: !!(fs && fs.available), left: fs ? fs.left : 0 } });

@@ -63,9 +63,11 @@ const local = (d) => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0')
 function insertSoon(hours, { chat = null, phone, name }) {
   const t = new Date(Date.now() + hours * 3600000);
   const start = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+  const e = Math.min(23 * 60 + 59, t.getHours() * 60 + t.getMinutes() + 45); // звичайний візит на 45 хв
+  const end = `${String(Math.floor(e / 60)).padStart(2, '0')}:${String(e % 60).padStart(2, '0')}`;
   const d = db();
   const id = d.prepare(`INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code, master_id, status, tg_chat_id)
-    VALUES (?, ?, ?, '23:59', ?, ?, ?, ?, 'new', ?)`).run(serviceId, local(t), start, name, phone, 'r' + Math.random().toString(36).slice(2), A.id, chat).lastInsertRowid;
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)`).run(serviceId, local(t), start, end, name, phone, 'r' + Math.random().toString(36).slice(2), A.id, chat).lastInsertRowid;
   d.close();
   return Number(id);
 }

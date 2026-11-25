@@ -32,7 +32,7 @@ function setupStats({ app, db, toMin, weekdayOf, last9 }) {
 
     // masterId: статистика одного майстра; без нього — по всьому кабінету
     const masterId = Number(req.query.masterId) > 0 ? Number(req.query.masterId) : null;
-    const appts = db.prepare(`SELECT a.date, a.start_time, a.end_time, a.status, a.client_phone, a.master_id, s.name AS service, COALESCE(a.price_uah, s.price_uah) AS price_uah
+    const appts = db.prepare(`SELECT a.date, a.start_time, a.end_time, a.status, a.client_phone, a.master_id, COALESCE(a.services_label, s.name) AS service, COALESCE(a.price_uah, s.price_uah) AS price_uah
       FROM appointments a JOIN services s ON s.id = a.service_id WHERE a.date BETWEEN ? AND ?`).all(from, to)
       .filter((a) => !masterId || a.master_id === masterId);
     const active = appts.filter((a) => a.status !== 'cancelled');

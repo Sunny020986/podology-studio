@@ -68,7 +68,7 @@ function setupCalendar({ app, db, todayStr, addDays }) {
     const m = token.length >= 20 && db.prepare("SELECT id, name FROM masters WHERE cal_token_hash = ? AND status = 'active'").get(sha(token));
     if (!m) return res.status(404).type('text/plain').send('Календар не знайдено');
     const today = todayStr();
-    const rows = db.prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.status, a.client_name, a.updated_at, s.name AS service
+    const rows = db.prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.status, a.client_name, a.updated_at, COALESCE(a.services_label, s.name) AS service
       FROM appointments a JOIN services s ON s.id = a.service_id
       WHERE a.master_id = ? AND a.status != 'cancelled' AND a.date BETWEEN ? AND ? ORDER BY a.date, a.start_time`)
       .all(m.id, addDays(today, -PAST_DAYS), addDays(today, FUTURE_DAYS));

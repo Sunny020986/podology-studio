@@ -56,11 +56,17 @@ function setupMaterials({ app, db, notify }) {
 
   // Викликається в транзакції зміни статусу запису: доводить списання до потрібного
   function applyVisit(apptId, status) {
-    const a = db.prepare('SELECT service_id FROM appointments WHERE id = ?').get(apptId);
+    const a = db.prepare('SELECT service_id, extra_services FROM appointments WHERE id = ?').get(apptId);
     if (!a) return;
-    const want = status === 'done'
-      ? new Map(db.prepare('SELECT material_id, amount FROM service_materials WHERE service_id = ?').all(a.service_id).map((r) => [r.material_id, -r.amount]))
-      : new Map();
+    // Усі послуги візиту: основна й додаткові (кілька послуг в одному записі)
+    let ids = [a.service_id];
+    try { ids = ids.concat(JSON.parse(a.extra_services || '[]')); } catch { /* старий запис */ }
+    const want = new Map();
+    if (status === 'done') {
+      for (const sid of ids) {
+        for (const r of db.prepare('SELECT material_id, amount FROM service_materials WHERE service_id = ?').all(sid)) want.set(r.material_id, round((want.get(r.material_id) || 0) - r.amount));
+      }
+    }
     const have = new Map(db.prepare("SELECT material_id, SUM(delta) AS d FROM material_moves WHERE appt_id = ? AND reason = 'visit' GROUP BY material_id").all(apptId).map((r) => [r.material_id, r.d]));
     for (const id of new Set([...want.keys(), ...have.keys()])) {
       const diff = round((want.get(id) || 0) - (have.get(id) || 0));

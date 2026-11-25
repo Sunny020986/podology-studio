@@ -55,7 +55,7 @@ function setupCourse({ app, db, telegram, todayStr, siteUrl, last9, canSeeClient
   // План усіх курсів клієнта. masterId — лише курси, які починались у цього майстра
   function plansFor(key, masterId = null) {
     const today = todayStr();
-    const appts = db.prepare(`SELECT a.id, a.date, a.start_time, a.status, a.service_id, a.master_id, a.client_name, a.client_phone, s.name AS service
+    const appts = db.prepare(`SELECT a.id, a.date, a.start_time, a.status, a.service_id, a.master_id, a.client_name, a.client_phone, COALESCE(a.services_label, s.name) AS service
                               FROM appointments a JOIN services s ON s.id = a.service_id ORDER BY a.date, a.start_time`).all()
       .filter((a) => last9(a.client_phone) === key);
     const services = new Map(db.prepare('SELECT id, name, course_visits, course_interval_days, course_next_service_id FROM services').all().map((s) => [s.id, s]));

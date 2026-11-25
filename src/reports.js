@@ -21,7 +21,7 @@ function setupReports({ app, db, todayStr, hasStarted }) {
   const rowsOf = (month, masterId = null) => {
     const [from, to] = range(month);
     return db.prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.status, a.client_name, a.client_phone, a.master_id,
-        m.name AS master, s.name AS service, COALESCE(a.price_uah, s.price_uah) AS price, a.price_uah IS NULL AS price_now
+        m.name AS master, COALESCE(a.services_label, s.name) AS service, COALESCE(a.price_uah, s.price_uah) AS price, a.price_uah IS NULL AS price_now
       FROM appointments a JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id
       WHERE a.date BETWEEN ? AND ? AND (? IS NULL OR a.master_id = ?) ORDER BY a.date, a.start_time`).all(from, to, masterId, masterId);
   };

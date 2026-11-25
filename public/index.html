@@ -85,6 +85,11 @@
           <input id="serviceSearch" class="input" role="combobox" aria-expanded="false" aria-controls="serviceSuggest" aria-autocomplete="list" autocomplete="off" placeholder="Почніть вводити назву послуги">
           <ul id="serviceSuggest" class="suggest" role="listbox" hidden></ul>
         </div>
+        <div class="extra-svcs" id="extraSvcs"></div>
+        <div class="extra-add">
+          <button type="button" class="btn btn-ghost small" id="addSvcBtn">+ Додати ще послугу</button>
+          <select class="input" id="addSvcSelect" hidden aria-label="Додати послугу до цього візиту"></select>
+        </div>
 
         <div id="masterStep" hidden>
           <label class="step-label" for="masterSelect">2. Майстер</label>

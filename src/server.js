@@ -290,18 +290,33 @@ app.get('/api/settings', (req, res) => {
   res.json({ horizonDays: HORIZON_DAYS, maxDate: maxDateStr(HORIZON_DAYS), studio: readStudio() });
 });
 
+// Кілька послуг в одному візиті: основна + додаткові (до MAX_EXTRA). Повертає { list, ids, duration } або { error }.
+// extra — масив id або рядок «2,3» з рядка запиту.
+const MAX_EXTRA = 4;
+function serviceSet(mainId, extra) {
+  const main = db.prepare('SELECT * FROM services WHERE id = ? AND active = 1').get(Number(mainId));
+  if (!main) return { error: 'Невідома послуга' };
+  const raw = Array.isArray(extra) ? extra : String(extra ?? '').split(',');
+  const extraIds = [...new Set(raw.map(Number).filter((n) => Number.isInteger(n) && n > 0 && n !== main.id))];
+  if (extraIds.length > MAX_EXTRA) return { error: `До однієї послуги можна додати не більше ${MAX_EXTRA} інших` };
+  const extras = extraIds.map((id) => db.prepare('SELECT * FROM services WHERE id = ? AND active = 1').get(id));
+  if (extras.some((x) => !x)) return { error: 'Одна з додаткових послуг недоступна' };
+  const list = [main, ...extras];
+  return { main, extras, list, ids: list.map((x) => x.id), duration: list.reduce((s, x) => s + x.duration_min, 0) };
+}
+
 app.get('/api/slots', (req, res) => {
-  const service = db.prepare('SELECT id, duration_min FROM services WHERE id = ? AND active = 1').get(Number(req.query.serviceId));
+  const set = serviceSet(req.query.serviceId, req.query.extra);
   const date = String(req.query.date || '');
-  if (!service) return res.status(400).json({ error: 'Невідома послуга' });
+  if (set.error) return res.status(400).json({ error: set.error });
   if (!isBookableDate(date, HORIZON_DAYS)) return res.status(400).json({ error: `Запис відкрито від сьогодні до ${maxDateStr(HORIZON_DAYS)}` });
-  res.json({ date, slots: freeSlots(db, date, service.duration_min, { masterId: masterParam(req.query.masterId), serviceId: service.id, client: true }) });
+  res.json({ date, duration: set.duration, slots: freeSlots(db, date, set.duration, { masterId: masterParam(req.query.masterId), serviceId: set.ids, client: true }) });
 });
 
 // Дні, коли для послуги (і майстра) ніхто не працює: вихідні майстрів і свята кабінету. Сайт не пропонує їх для запису.
 app.get('/api/days-off', (req, res) => {
-  const serviceId = Number(req.query.serviceId) || null;
-  const ids = candidateMasters(db, masterParam(req.query.masterId), serviceId);
+  const set = Number(req.query.serviceId) ? serviceSet(req.query.serviceId, req.query.extra) : null;
+  const ids = candidateMasters(db, masterParam(req.query.masterId), set && !set.error ? set.ids : null);
   const off = [];
   for (let i = 0; i <= HORIZON_DAYS; i++) {
     const date = addDays(todayStr(), i);
@@ -314,13 +329,13 @@ app.get('/api/days-off', (req, res) => {
 
 // Найближчий день з вільним часом для послуги, щоб клієнт одразу бачив записи, а не порожню дату
 app.get('/api/next-slot', (req, res) => {
-  const service = db.prepare('SELECT id, duration_min FROM services WHERE id = ? AND active = 1').get(Number(req.query.serviceId));
-  if (!service) return res.status(400).json({ error: 'Невідома послуга' });
-  const opts = { masterId: masterParam(req.query.masterId), serviceId: service.id, client: true };
+  const set = serviceSet(req.query.serviceId, req.query.extra);
+  if (set.error) return res.status(400).json({ error: set.error });
+  const opts = { masterId: masterParam(req.query.masterId), serviceId: set.ids, client: true };
   for (let i = 0; i <= HORIZON_DAYS; i++) {
     const date = addDays(todayStr(), i);
     if (!isBookableDate(date, HORIZON_DAYS)) break;
-    const slots = freeSlots(db, date, service.duration_min, opts);
+    const slots = freeSlots(db, date, set.duration, opts);
     if (slots.length) return res.json({ date, slots });
   }
   res.json({ date: null, slots: [] });
@@ -329,9 +344,13 @@ app.get('/api/next-slot', (req, res) => {
 // Перевірка вільного часу і запис виконуються в одній транзакції, тому два клієнти не займуть один слот.
 const last9 = (phone) => phone.replace(/\D/g, '').slice(-9); // номер без коду країни, щоб +380 50... і 050... збігалися
 
-const bookTx = db.transaction(({ service, date, time, name, phone, comment, masterId, skipPhoneLimit = false, status = 'new' }) => {
+// extras — додаткові послуги того самого візиту (той самий майстер, час іде підряд, ціна — сума)
+const bookTx = db.transaction(({ service, extras = [], date, time, name, phone, comment, masterId, skipPhoneLimit = false, status = 'new' }) => {
+  const all = [service, ...extras];
+  const duration = all.reduce((s, x) => s + x.duration_min, 0);
+  const fullPrice = all.some((x) => x.price_uah > 0) ? all.reduce((s, x) => s + (x.price_uah > 0 ? x.price_uah : 0), 0) : null;
   // Знижка на перший візит: перевіряємо тут, у тій самій транзакції, щоб два одночасні записи не отримали її обидва
-  const q = firstQuote(db, service, phone);
+  const q = firstQuote(db, all, phone);
   const samePhone = db
     .prepare("SELECT client_phone FROM appointments WHERE date >= ? AND status != 'cancelled'")
     .all(todayStr())
@@ -344,15 +363,17 @@ const bookTx = db.transaction(({ service, date, time, name, phone, comment, mast
   }
   // Конкретний майстер або, для «будь-кого», вільний майстер з найменшою кількістю записів цього дня
   // Клієнтський запис (з сайту) — з обмеженнями майстра; ручний запис в адмінці (skipPhoneLimit) — без них
-  const master = pickMaster(db, date, service.duration_min, time, { masterId, serviceId: service.id, client: !skipPhoneLimit });
+  const master = pickMaster(db, date, duration, time, { masterId, serviceId: all.map((x) => x.id), client: !skipPhoneLimit });
   if (!master) {
     throw Object.assign(new Error('Цей час уже недоступний, оберіть інший'), { status: 409 });
   }
-  const end = toHHMM(toMin(time) + service.duration_min);
+  const end = toHHMM(toMin(time) + duration);
   const remindCode = 'r' + crypto.randomBytes(9).toString('base64url');
+  const label = extras.length ? all.map((x) => x.name).join(' + ') : null;
   const info = db
-    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code, client_comment, master_id, status, price_uah, price_full_uah, discount_pct, discount_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(service.id, date, time, end, name, phone, remindCode, comment ?? '', master, status, q.final ?? service.price_uah ?? null, service.price_uah ?? null, q.eligible ? q.pct : 0, q.kind); // ціна на момент запису — для звіту
+    .prepare('INSERT INTO appointments (service_id, date, start_time, end_time, client_name, client_phone, remind_code, client_comment, master_id, status, price_uah, price_full_uah, discount_pct, discount_kind, extra_services, services_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(service.id, date, time, end, name, phone, remindCode, comment ?? '', master, status, q.final ?? fullPrice, fullPrice, q.eligible ? q.pct : 0, q.kind,
+      extras.length ? JSON.stringify(extras.map((x) => x.id)) : null, label); // ціна на момент запису — для звіту
   if (q.kind === 'friend') useReward(db, q.inviteId, info.lastInsertRowid); // знижку за друга використано
   return { id: info.lastInsertRowid, remindCode, masterId: master, price: q };
 });
@@ -400,8 +421,9 @@ const accounts = setupAccounts({
 function publicBook(body, ip, { commentPrefix = '', ownerCheck = null, defer = null } = {}) {
   const { serviceId, date, time, name, phone, comment, masterId } = body || {};
   const fail = (status, error) => ({ status, body: { error } });
-  const service = db.prepare('SELECT * FROM services WHERE id = ? AND active = 1').get(Number(serviceId));
-  if (!service) return fail(400, 'Невідома послуга');
+  const set = serviceSet(serviceId, body?.extraServiceIds);
+  if (set.error) return fail(400, set.error);
+  const service = set.main;
   if (!isBookableDate(date, HORIZON_DAYS)) return fail(400, `Запис відкрито від сьогодні до ${maxDateStr(HORIZON_DAYS)}`);
   if (!isTime(time)) return fail(400, 'Некоректний час');
 
@@ -419,19 +441,20 @@ function publicBook(body, ip, { commentPrefix = '', ownerCheck = null, defer = n
   try {
     const cleanComment = (commentPrefix + String(comment ?? '').trim()).slice(0, 500);
     const wantMaster = masterParam(masterId);
-    if (wantMaster && !masterOffers(db, wantMaster, service.id)) return fail(400, 'Цей майстер не виконує обрану послугу');
-    const { id, remindCode, masterId: assigned, price } = bookTx({ service, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, masterId: wantMaster });
+    if (wantMaster && set.ids.some((sid) => !masterOffers(db, wantMaster, sid))) return fail(400, set.extras.length ? 'Цей майстер не виконує всі обрані послуги' : 'Цей майстер не виконує обрану послугу');
+    const { id, remindCode, masterId: assigned, price } = bookTx({ service, extras: set.extras, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, masterId: wantMaster });
+    const svcName = set.list.map((x) => x.name).join(' + ');
     const masterName = db.prepare('SELECT name FROM masters WHERE id = ?').get(assigned)?.name || '';
     const streak = noShowStreaks().get(last9(cleanPhone)) || 0;
     const warn = streak >= 2 ? `\n⚠️ Цей клієнт не прийшов ${streak} рази поспіль` : '';
     const notify = () => {
-      notifyMasterOf(assigned, `🗓 Новий запис до вас\n${service.name}\n${date.split('-').reverse().join('.')} о ${time}\n${cleanName}, ${cleanPhone}${cleanComment ? '\nКоментар: ' + cleanComment : ''}${priceLine(price)}${warn}`);
+      notifyMasterOf(assigned, `🗓 Новий запис до вас\n${svcName}\n${date.split('-').reverse().join('.')} о ${time}\n${cleanName}, ${cleanPhone}${cleanComment ? '\nКоментар: ' + cleanComment : ''}${priceLine(price)}${warn}`);
       bookingLimiter.hit(ip);
-      telegram.newAppointment({ service: service.name, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, master: masterName, warn: priceLine(price) + warn });
-      liveAppt('new', { id: Number(id), master_id: assigned, date, start_time: time, client_name: cleanName, service: service.name, master: masterName });
+      telegram.newAppointment({ service: svcName, date, time, name: cleanName, phone: cleanPhone, comment: cleanComment, master: masterName, warn: priceLine(price) + warn });
+      liveAppt('new', { id: Number(id), master_id: assigned, date, start_time: time, client_name: cleanName, service: svcName, master: masterName });
     };
     if (defer) defer.push(notify); else notify();
-    return { status: 201, body: { id: Number(id), date, time, service: service.name, master: masterName, remindLink: telegram.remindLink(remindCode), price: { full: price.full, pct: price.pct, pctFirst: price.pctFirst, pctFriend: price.pctFriend, kind: price.kind, discount: price.discount, final: price.final, note: service.price_note || '' } }, remindCode, phone: cleanPhone, name: cleanName };
+    return { status: 201, body: { id: Number(id), date, time, service: svcName, master: masterName, remindLink: telegram.remindLink(remindCode), price: { full: price.full, pct: price.pct, pctFirst: price.pctFirst, pctFriend: price.pctFriend, kind: price.kind, discount: price.discount, final: price.final, note: service.price_note || '' } }, remindCode, phone: cleanPhone, name: cleanName };
   } catch (e) {
     if (e.status) return fail(e.status, e.message);
     console.error(e);
@@ -687,7 +710,7 @@ app.post('/api/admin/telegram/test', tgRoute(async () => { await telegram.test()
 // Якщо на цей запис була взята знижка за друга, вона повертається клієнтові.
 app.patch('/api/admin/appointments/:id/discount', (req, res) => {
   const id = Number(req.params.id);
-  const a = db.prepare(`SELECT a.*, s.price_uah AS svc_price, s.name AS service FROM appointments a JOIN services s ON s.id = a.service_id WHERE a.id = ?`).get(id);
+  const a = db.prepare(`SELECT a.*, s.price_uah AS svc_price, COALESCE(a.services_label, s.name) AS service FROM appointments a JOIN services s ON s.id = a.service_id WHERE a.id = ?`).get(id);
   if (!a) return res.status(404).json({ error: 'Запис не знайдено' });
   if (a.status === 'cancelled') return res.status(409).json({ error: 'Запис скасовано' });
   const pct = Number(req.body?.pct);
@@ -711,7 +734,7 @@ app.get('/api/admin/appointments', (req, res) => {
   res.json(
     db
       .prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.client_name, a.client_phone, a.status, a.client_comment,
-                       a.master_id, a.service_id, a.client_confirmed_at, a.client_declined_at, m.name AS master, s.name AS service,
+                       a.master_id, a.service_id, a.client_confirmed_at, a.client_declined_at, m.name AS master, COALESCE(a.services_label, s.name) AS service,
                        a.price_uah, a.price_full_uah, a.discount_pct, a.discount_kind, s.price_note
                 FROM appointments a JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id
                 WHERE a.date BETWEEN ? AND ? AND (? IS NULL OR a.master_id = ?) ORDER BY a.date, a.start_time`)
@@ -771,7 +794,7 @@ function unclosedAppts(req) {
   const today = todayStr();
   const mid = scopeMaster(req);
   return db.prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.status, a.client_name, a.client_phone, a.master_id,
-                            m.name AS master, s.name AS service
+                            m.name AS master, COALESCE(a.services_label, s.name) AS service
                      FROM appointments a JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id
                      WHERE a.status IN ('new', 'confirmed') AND a.date BETWEEN date(?, '-${CLOSE_DAYS} day') AND ?
                        AND (? IS NULL OR a.master_id = ?)
@@ -812,7 +835,7 @@ app.post('/api/admin/close-day', (req, res) => {
 // ---------- Нагадування клієнтам у Telegram ----------
 const REMIND_BEFORE_MS = 24 * 60 * 60 * 1000; // нагадуємо за добу до візиту
 const msUntil = (date, time) => new Date(`${date}T${time}:00`).getTime() - Date.now(); // за часом сервера (Київ)
-const apptForClient = (where, arg) => db.prepare(`SELECT a.*, s.name AS service FROM appointments a
+const apptForClient = (where, arg) => db.prepare(`SELECT a.*, COALESCE(a.services_label, s.name) AS service FROM appointments a
   JOIN services s ON s.id = a.service_id WHERE ${where}`).get(arg);
 const studioLine = () => {
   const s = readStudio();
@@ -848,7 +871,7 @@ telegram.onStart((code, chatId) => {
 
 // Нагадування за добу: чат, прив'язаний до запису, або чат кабінету клієнта з тим самим телефоном
 async function sendDueReminders() {
-  const rows = db.prepare(`SELECT a.*, s.name AS service FROM appointments a JOIN services s ON s.id = a.service_id
+  const rows = db.prepare(`SELECT a.*, COALESCE(a.services_label, s.name) AS service FROM appointments a JOIN services s ON s.id = a.service_id
     WHERE a.reminded = 0 AND a.status IN ('new', 'confirmed') AND a.date BETWEEN ? AND date(?, '+2 day')`)
     .all(todayStr(), todayStr());
   for (const a of rows) {
@@ -1070,7 +1093,7 @@ app.get('/api/admin/clients/:key', (req, res) => {
   const key = req.params.key;
   if (!isClientKey(key)) return res.status(400).json({ error: 'Некоректний клієнт' });
   const appointments = db
-    .prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.client_name, a.client_phone, a.status, a.note, a.master_id, m.name AS master, s.name AS service
+    .prepare(`SELECT a.id, a.date, a.start_time, a.end_time, a.client_name, a.client_phone, a.status, a.note, a.master_id, m.name AS master, COALESCE(a.services_label, s.name) AS service
               FROM appointments a JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id
               ORDER BY a.date DESC, a.start_time DESC`)
     .all()

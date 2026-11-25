@@ -79,9 +79,13 @@
   settingsReady.then((cfg) => { if (cfg.studio) applyStudio(cfg.studio); });
 
   // ----- Стан запису -----
-  const state = { services: [], serviceId: null, date: today(), time: null, reqId: 0, masters: [], masterId: '' };
+  const state = { services: [], serviceId: null, extra: [], date: today(), time: null, reqId: 0, masters: [], masterId: '' };
   // Майстри: вибір показується, лише коли їх більше одного. '' = «будь-який вільний»
   const addDaysStr = (d, n) => { const [y, m, dd] = d.split('-').map(Number); const t = new Date(y, m - 1, dd + n); return [t.getFullYear(), String(t.getMonth() + 1).padStart(2, '0'), String(t.getDate()).padStart(2, '0')].join('-'); };
+  // Кілька послуг в одному візиті: основна (state.serviceId) + додаткові (state.extra). Час і ціна — сума.
+  const extraQ = () => (state.extra && state.extra.length ? '&extra=' + state.extra.join(',') : '');
+  const selectedServices = () => [state.serviceId, ...(state.extra || [])].map((id) => state.services.find((x) => x.id == id)).filter(Boolean);
+  const totalDuration = () => selectedServices().reduce((s, x) => s + x.duration_min, 0);
   const masterQ = () => (state.masterId ? '&masterId=' + state.masterId : '');
   const masterName = (id) => state.masters.find((m) => String(m.id) === String(id))?.name || '';
   function renderMasterOptions() {
@@ -92,7 +96,7 @@
       el.textContent = String({ date: 2, time: 3, data: 4 }[el.dataset.step] + (many ? 1 : 0));
     });
     if (!many) { state.masterId = ''; return; }
-    const list = state.masters.filter((m) => !state.serviceId || m.services.includes(state.serviceId));
+    const list = state.masters.filter((m) => !state.serviceId || [state.serviceId, ...(state.extra || [])].every((sid) => m.services.includes(Number(sid))));
     if (state.masterId && !list.some((m) => String(m.id) === String(state.masterId))) state.masterId = '';
     $('#masterSelect').innerHTML = '<option value="">Будь-який вільний</option>' +
       list.map((m) => '<option value="' + m.id + '"' + (String(m.id) === String(state.masterId) ? ' selected' : '') + '>' + esc(m.name) + '</option>').join('');
@@ -175,7 +179,7 @@
   let daysOff = new Set();
   async function loadDaysOff() {
     try {
-      const r = await fetch(`/api/days-off?serviceId=${state.serviceId || ''}` + masterQ());
+      const r = await fetch(`/api/days-off?serviceId=${state.serviceId || ''}` + extraQ() + masterQ());
       daysOff = new Set(r.ok ? (await r.json()).off : []);
     } catch { daysOff = new Set(); }
   }
@@ -190,11 +194,12 @@
 
   // Клієнт одразу бачить найближчий день з вільним часом, а не порожню дату
   async function pickNearestDate() {
+    state.extra = (state.extra || []).filter((x) => x != state.serviceId); // основна послуга не дублюється в додаткових
     if (!state.serviceId) return refreshSlots();
     try {
       renderMasterOptions(); // послуга могла змінитись: показуємо лише майстрів, які її роблять
       await loadDaysOff();
-      const r = await fetch(`/api/next-slot?serviceId=${state.serviceId}` + masterQ());
+      const r = await fetch(`/api/next-slot?serviceId=${state.serviceId}` + extraQ() + masterQ());
       const data = r.ok ? await r.json() : null;
       if (data?.date) {
         state.date = data.date;
@@ -262,7 +267,7 @@
 
     const reqId = ++state.reqId;
     $('#slotsHint').textContent = 'Завантажую вільний час…';
-    const r = await fetch(`/api/slots?serviceId=${state.serviceId}&date=${state.date}` + masterQ());
+    const r = await fetch(`/api/slots?serviceId=${state.serviceId}&date=${state.date}` + extraQ() + masterQ());
     const data = await r.json();
     if (reqId !== state.reqId) return; // відповідь застаріла, вже вибрано іншу дату або послугу
     if (!r.ok) {
@@ -280,9 +285,12 @@
 
   function updateSummary() {
     const s = state.services.find((x) => x.id == state.serviceId);
+    const names = selectedServices().map((x) => x.name).join(' + ');
+    const dur = totalDuration();
+    renderExtras();
     $('#summary').textContent = state.time && s
-      ? `${s.name}${state.masterId ? ', майстер ' + masterName(state.masterId) : ''}, ${fmtDate(state.date)}, ${state.time}–${addMin(state.time, s.duration_min)} (триває ${durText(s.duration_min)})`
-      : s ? `Процедура триває ${durText(s.duration_min)}. Оберіть час, щоб продовжити.` : 'Оберіть час, щоб продовжити.';
+      ? `${names}${state.masterId ? ', майстер ' + masterName(state.masterId) : ''}, ${fmtDate(state.date)}, ${state.time}–${addMin(state.time, dur)} (триває ${durText(dur)})`
+      : s ? `${state.extra.length ? 'Візит' : 'Процедура'} триває ${durText(dur)}. Оберіть час, щоб продовжити.` : 'Оберіть час, щоб продовжити.';
     $('#submitBtn').disabled = !state.time;
     refreshQuote();
   }
@@ -311,9 +319,22 @@
     if (!box) return;
     const s = state.services.find((x) => x.id == state.serviceId);
     if (!s) { box.innerHTML = ''; return; }
-    const q = quoteState.key === `${s.id}|${phoneDigits()}` ? quoteState.data : null;
+    const q = quoteState.key === quoteKey() ? quoteState.data : null;
     renderFriendInline(q);
-    if (q && q.eligible) { box.innerHTML = calcHtml(q); return; }
+    if (q && q.eligible) { box.innerHTML = calcHtml(q) + unpricedNote(); return; }
+    const list = selectedServices();
+    if (list.length > 1) {
+      // Кілька послуг: кожна окремим рядком і сума
+      const sum = list.reduce((t, x) => t + (x.price_uah > 0 ? x.price_uah : 0), 0);
+      // Ціна текстом «від 1380 грн» — додаємо її мінімум, і тоді разом теж «від …»
+      const un = list.filter((x) => !(x.price_uah > 0));
+      const mins = un.map((x) => Number((String(x.price_note || '').match(/\d[\d\s]*/) || [''])[0].replace(/\s/g, '')) || 0);
+      const total = !un.length ? (sum ? sum + ' грн' : 'ціна уточнюється')
+        : mins.every((n) => n > 0) ? `від ${sum + mins.reduce((a, b) => a + b, 0)} грн` : sum ? `${sum} грн + уточнюється` : 'ціна уточнюється';
+      box.innerHTML = `<div class="price-calc">${list.map((x) => `<div class="pc-row"><span>${esc(x.name)}</span><span>${esc(priceText(x))}</span></div>`).join('')}
+        <div class="pc-row pc-total"><span>Разом</span><span>${total}</span></div></div>` + unpricedNote();
+      return;
+    }
     box.innerHTML = s.price_uah > 0 || s.price_note
       ? `<div class="price-calc"><div class="pc-row pc-total"><span>Ціна</span><span>${esc(priceText(s))}</span></div></div>` : '';
   }
@@ -339,20 +360,58 @@
       friendList = window.FriendInvite.list($('#frList'), { services: state.services, maxDate: state.maxDate, max: Number($('#friendInline').dataset.left) || 1, defaults: { serviceId: state.serviceId, date: state.date } });
     }
   });
+  const quoteKey = () => `${state.serviceId}|${(state.extra || []).join(',')}|${phoneDigits()}`;
+  // Послуги без числової ціни (лише «від … грн») у суму не входять — підказка
+  const unpricedNote = () => {
+    const list = selectedServices();
+    const un = list.filter((x) => !(x.price_uah > 0));
+    return list.length > 1 && un.length ? `<div class="muted">Без точної ціни: ${un.map((x) => esc(x.name) + (x.price_note ? ' (' + esc(x.price_note) + ')' : '')).join(', ')} — суму за ${un.length > 1 ? 'них' : 'неї'} назве майстер.</div>` : '';
+  };
+  // Додаткові послуги: плашки з «×» і список, з якого додати ще
+  function renderExtras() {
+    const box = $('#extraSvcs');
+    if (!box) return;
+    box.innerHTML = (state.extra || []).map((id) => {
+      const x = state.services.find((s) => s.id == id);
+      return x ? `<span class="extra-chip">+ ${esc(x.name)} <button type="button" data-del-extra="${x.id}" aria-label="Прибрати ${esc(x.name)}">×</button></span>` : '';
+    }).join('');
+    const left = state.services.filter((x) => x.id != state.serviceId && !(state.extra || []).includes(x.id));
+    $('#addSvcBtn').hidden = !state.serviceId || !left.length || (state.extra || []).length >= 4;
+  }
+  $('#addSvcBtn').addEventListener('click', () => {
+    const left = state.services.filter((x) => x.id != state.serviceId && !(state.extra || []).includes(x.id));
+    const sel = $('#addSvcSelect');
+    sel.innerHTML = '<option value="">Оберіть послугу…</option>' + left.map((x) => `<option value="${x.id}">${esc(x.name)} · ${durText(x.duration_min)} · ${esc(priceText(x))}</option>`).join('');
+    sel.hidden = false;
+    $('#addSvcBtn').hidden = true;
+    sel.focus();
+  });
+  $('#addSvcSelect').addEventListener('change', (e) => {
+    const id = Number(e.target.value);
+    e.target.hidden = true;
+    if (id) { state.extra = [...(state.extra || []), id]; renderMasterOptions(); pickNearestDate(); } else renderExtras();
+  });
+  $('#extraSvcs').addEventListener('click', (e) => {
+    const id = Number(e.target.dataset.delExtra);
+    if (!id) return;
+    state.extra = (state.extra || []).filter((x) => x !== id);
+    renderMasterOptions();
+    pickNearestDate();
+  });
   let quoteTimer = null;
   function refreshQuote() {
     const s = state.services.find((x) => x.id == state.serviceId);
     const d = phoneDigits();
     clearTimeout(quoteTimer);
     if (!s || d.length < 9) { quoteState.key = ''; renderPrice(); return; }
-    const key = `${s.id}|${d}`;
+    const key = quoteKey();
     if (quoteState.key === key) { renderPrice(); return; }
     quoteTimer = setTimeout(async () => {
       try {
-        const r = await fetch(`/api/first-discount?serviceId=${s.id}&phone=${encodeURIComponent(d)}`);
+        const r = await fetch(`/api/first-discount?serviceId=${s.id}&phone=${encodeURIComponent(d)}` + extraQ());
         if (!r.ok) throw new Error();
         const data = await r.json();
-        if (phoneDigits() !== d || state.serviceId != s.id) return; // поки чекали, клієнт змінив дані
+        if (quoteKey() !== key) return; // поки чекали, клієнт змінив дані
         quoteState.key = key; quoteState.data = data;
       } catch { quoteState.key = ''; }
       renderPrice();
@@ -462,6 +521,7 @@
       phone: $('#phoneInput').value,
       comment: $('#commentInput').value,
       masterId: state.masterId ? Number(state.masterId) : undefined,
+      extraServiceIds: state.extra && state.extra.length ? state.extra : undefined,
     };
     if (friendList && $('#frOn').checked && !$('#friendInline').hidden) {
       const err = friendList.error();
@@ -495,8 +555,8 @@
       return;
     }
     msg.className = 'msg ok';
-    const svc = state.services.find((x) => x.name === data.service);
-    const span = svc ? `${data.time}–${addMin(data.time, svc.duration_min)} (триває ${durText(svc.duration_min)})` : `о ${data.time}`;
+    const dur = totalDuration();
+    const span = dur ? `${data.time}–${addMin(data.time, dur)} (триває ${durText(dur)})` : `о ${data.time}`;
     msg.textContent = `Дякуємо! Ви записані: ${data.service}${data.master && state.masters.length > 1 ? ', майстер ' + data.master : ''}, ${fmtDate(data.date)}, ${span}. Номер запису: ${data.id}.`;
     const pr = data.price;
     if (pr && pr.full) {
@@ -517,6 +577,7 @@
     // Після запису поля очищаємо, але для клієнта з кабінету лишаємо його дані
     $('#nameInput').value = autoFilled.name;
     $('#phoneInput').value = autoFilled.phone;
+    state.extra = []; // наступний запис — знову з однією послугою
     quoteState.key = '';
     renderPrice();
     document.dispatchEvent(new CustomEvent('booking:success'));

@@ -46,7 +46,7 @@ function setupReassign(ctx) {
     return { master, from, to };
   }
 
-  const listAppts = (masterId, from, to) => db.prepare(`SELECT a.*, s.name AS service FROM appointments a JOIN services s ON s.id = a.service_id
+  const listAppts = (masterId, from, to) => db.prepare(`SELECT a.*, COALESCE(a.services_label, s.name) AS service FROM appointments a JOIN services s ON s.id = a.service_id
     WHERE a.master_id = ? AND a.date BETWEEN ? AND ? AND a.status IN ('new', 'confirmed') ORDER BY a.date, a.start_time`).all(masterId, from, to);
 
   // Робочі дні майстра в періоді (їх закриють разові блокування)

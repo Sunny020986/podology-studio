@@ -92,7 +92,7 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
   const canChange = (a) => a.status !== 'cancelled' && hoursUntil(a.date, a.start_time) >= changeHours();
 
   const accountPhoneAppts = (acc) => db.prepare(`
-      SELECT a.id, a.date, a.start_time, a.end_time, a.client_phone, a.status, a.master_id, m.name AS master, s.id AS service_id, s.name AS service, s.duration_min, a.price_uah, a.price_full_uah, a.discount_pct, a.discount_kind
+      SELECT a.id, a.date, a.start_time, a.end_time, a.client_phone, a.status, a.master_id, m.name AS master, s.id AS service_id, COALESCE(a.services_label, s.name) AS service, (CAST(substr(a.end_time, 1, 2) AS INTEGER) * 60 + CAST(substr(a.end_time, 4, 2) AS INTEGER)) - (CAST(substr(a.start_time, 1, 2) AS INTEGER) * 60 + CAST(substr(a.start_time, 4, 2) AS INTEGER)) AS duration_min, a.price_uah, a.price_full_uah, a.discount_pct, a.discount_kind, a.extra_services
       FROM appointments a JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id ORDER BY a.date DESC, a.start_time DESC`)
     .all().filter((a) => last9(a.client_phone) === last9(acc.phone));
 
@@ -154,6 +154,7 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
     res.json(accountPhoneAppts(req.account).map((a) => ({
       id: a.id, service_id: a.service_id, master_id: a.master_id, master: a.master || '', date: a.date, start_time: a.start_time, end_time: a.end_time, status: a.status,
       service: a.service, upcoming: a.date >= today && a.status !== 'cancelled', canChange: canChange(a),
+      extra: (() => { try { return JSON.parse(a.extra_services || '[]'); } catch { return []; } })(),
       price: a.price_uah > 0 ? { full: a.price_full_uah || a.price_uah, pct: a.discount_pct || 0, kind: a.discount_kind || null, final: a.price_uah } : null,
     })));
   });

@@ -20,7 +20,12 @@ function setupAdminAppointments(ctx) {
     if (!inRange(date)) return res.status(400).json({ error: 'Некоректна дата' });
     const masterId = req.role === 'master' ? req.masterId : masterParam(req.query.masterId);
     const excludeId = Number(req.query.excludeId) || 0;
-    res.json({ date, slots: freeSlots(db, date, service.duration_min, { masterId, serviceId: service.id, excludeId }) });
+    // Перенесення: тривалість — самого запису (кілька послуг в одному візиті тривають довше за основну)
+    const moving = excludeId ? db.prepare('SELECT start_time, end_time, service_id, extra_services FROM appointments WHERE id = ?').get(excludeId) : null;
+    const duration = moving ? toMin(moving.end_time) - toMin(moving.start_time) : service.duration_min;
+    let ids = [service.id];
+    if (moving) { try { ids = [moving.service_id, ...JSON.parse(moving.extra_services || '[]')]; } catch { /* старий запис */ } }
+    res.json({ date, slots: freeSlots(db, date, duration, { masterId, serviceId: ids, excludeId }) });
   });
 
   // Ручний запис: перевіряє вільний час, але не обмежує кількість записів на телефон
@@ -65,7 +70,8 @@ function setupAdminAppointments(ctx) {
   });
   app.patch('/api/admin/appointments/:id/move', (req, res) => {
     const id = Number(req.params.id);
-    const a = db.prepare(`SELECT a.*, s.duration_min, s.name AS service FROM appointments a JOIN services s ON s.id = a.service_id WHERE a.id = ?`).get(id);
+    // Тривалість — з самого запису (кілька послуг в одному візиті тривають довше за основну послугу)
+    const a = db.prepare(`SELECT a.*, (CAST(substr(a.end_time, 1, 2) AS INTEGER) * 60 + CAST(substr(a.end_time, 4, 2) AS INTEGER)) - (CAST(substr(a.start_time, 1, 2) AS INTEGER) * 60 + CAST(substr(a.start_time, 4, 2) AS INTEGER)) AS duration_min, COALESCE(a.services_label, s.name) AS service FROM appointments a JOIN services s ON s.id = a.service_id WHERE a.id = ?`).get(id);
     if (!a) return res.status(404).json({ error: 'Запис не знайдено' });
     if (!ownsAppt(req, id)) return res.status(403).json({ error: 'Це запис іншого майстра' });
     if (a.status === 'cancelled') return res.status(400).json({ error: 'Запис скасовано. Спершу поверніть йому статус' });
@@ -120,7 +126,7 @@ function setupAdminAppointments(ctx) {
       blocks: db.prepare(`SELECT master_id, date, start_time, end_time, note FROM blocks WHERE master_id IN ${inList} AND date BETWEEN ? AND ?`).all(...ids, from, to),
       holidays: db.prepare('SELECT date, note FROM studio_holidays WHERE date BETWEEN ? AND ?').all(from, to),
       appointments: db.prepare(`SELECT a.id, a.master_id, a.date, a.start_time, a.end_time, a.status, a.client_name, a.client_phone, a.client_comment, a.service_id,
-          a.client_confirmed_at, a.client_declined_at, s.name AS service
+          a.client_confirmed_at, a.client_declined_at, COALESCE(a.services_label, s.name) AS service
         FROM appointments a JOIN services s ON s.id = a.service_id
         WHERE a.master_id IN ${inList} AND a.date BETWEEN ? AND ? AND a.status != 'cancelled' ORDER BY a.date, a.start_time`).all(...ids, from, to),
     });

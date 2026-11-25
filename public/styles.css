@@ -1092,3 +1092,12 @@ tr.wait-new td { background: rgba(229, 57, 53, 0.06); }
 .vi-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; max-width: 760px; }
 .vi-photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; display: block; background: #eee; }
 .acc-invited { margin: 12px 0; padding: 12px 14px; border-radius: 12px; background: rgba(142, 216, 198, 0.25); border: 1px solid var(--accent); line-height: 1.5; }
+
+/* Кілька послуг в одному візиті */
+.extra-svcs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.extra-svcs:empty { display: none; }
+.extra-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 4px 4px 10px; border-radius: 999px; border: 1px solid var(--accent); font-size: 14px; max-width: 100%; }
+.extra-chip button { border: 0; background: transparent; font-size: 18px; line-height: 1; min-width: 28px; min-height: 28px; border-radius: 50%; cursor: pointer; color: var(--muted); }
+.extra-chip button:hover { background: rgba(0,0,0,0.06); color: var(--ink); }
+.extra-add { margin-top: 8px; }
+.extra-add select { width: 100%; }

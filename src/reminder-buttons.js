@@ -14,7 +14,7 @@ function createReminderColumns(db) {
 }
 
 function setupReminderButtons({ db, telegram, changeHours, setStatus, live, notifyMasterOf, waitlistCheck, readStudio, todayStr, last9 }) {
-  const appt = (id) => db.prepare(`SELECT a.*, s.name AS service, m.name AS master FROM appointments a
+  const appt = (id) => db.prepare(`SELECT a.*, COALESCE(a.services_label, s.name) AS service, m.name AS master FROM appointments a
     JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id WHERE a.id = ?`).get(id);
   const accountChat = (a) => db.prepare('SELECT tg_chat_id FROM accounts WHERE phone_key = ?').get(last9(a.client_phone))?.tg_chat_id || null;
   // Куди писати клієнту про запис: чат, прив'язаний до запису, або чат кабінету з тим самим телефоном

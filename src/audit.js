@@ -75,8 +75,8 @@ function setupAudit({ app, db, last9 }) {
       return key ? client(key) : {};
     }],
     ['PUT', /^\/archive-months$/, 'Клієнти: строк архіву'],
-    ['PUT', /^\/client-videos\/(\d+)\/reply$/, 'Відео: відповідь клієнтові', (m) => named('client_videos', m[1], 'name')],
-    ['DELETE', /^\/client-videos\/(\d+)$/, 'Відео: видалено', (m) => named('client_videos', m[1], 'name')],
+    ['PUT', /^\/client-videos\/(\d+)\/reply$/, 'Фото/відео: відповідь клієнтові', (m) => named('client_videos', m[1], 'name')],
+    ['DELETE', /^\/client-videos\/(\d+)$/, 'Фото/відео: видалено', (m) => named('client_videos', m[1], 'name')],
     ['PUT', /^\/booking-limits$/, (b) => (b.closed_today === true ? 'Розклад: запис закрито до кінця дня' : b.closed_today === false ? 'Розклад: запис на сьогодні відкрито' : `Розклад: запис щонайменше за ${b.lead_hours} год`)],
     ['PATCH', /^\/appointments\/(\d+)\/discount$/, (b) => (Number(b.pct) ? `Записи: знижка ${Number(b.pct)}%` : 'Записи: знижку прибрано'), (m) => appt(m[1])],
     ['DELETE', /^\/friend-invites\/(\d+)$/, 'Друзі клієнтів: запрошення прибрано', (m) => named('friend_invites', m[1], 'friend_name')],

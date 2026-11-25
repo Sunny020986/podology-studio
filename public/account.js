@@ -138,7 +138,7 @@
         <p class="acc-msg" id="tgMsg" role="status"></p>
       </div>
       <div id="accFriend"></div>
-      <h3 class="acc-h">Відео для майстра</h3>
+      <h3 class="acc-h">Фото й відео для майстра</h3>
       <div id="accVideos"><p class="muted">Завантажую…</p></div>
       <h3 class="acc-h">Мої записи</h3>
       <ul class="acc-list" id="apptList"><li class="muted">Завантажую…</li></ul>`;
@@ -156,26 +156,108 @@
     let list = [], masters = [];
     try { [list, masters] = await Promise.all([api('/api/account/videos'), api('/api/masters').catch(() => [])]); } catch (e) { box.innerHTML = `<p class="acc-msg">${esc(e.message)}</p>`; return; }
     box.innerHTML = `
-      <p class="muted">Зніміть на телефон, що турбує (ніготь, шкіра стопи), до 1 хвилини — майстер подивиться й напише, чи можна це зробити і яку послугу обрати.</p>
+      <p class="muted">Сфотографуйте чи зніміть на відео (до 1 хвилини), що турбує: ніготь, шкіру стопи. Майстер подивиться й напише, чи можна це зробити і яку послугу обрати.</p>
       ${list.map((v) => `<div class="acc-video">
-        <div><b>${fmt(v.created_at.slice(0, 10))}</b> · ${VSTATUS[v.status] || esc(v.status)}${v.master ? ' · для майстра ' + esc(v.master) : ''}</div>
+        <div><b>${fmt(v.created_at.slice(0, 10))}</b> · ${v.kind === 'photo' ? `📷 фото: ${v.count}` : '🎥 відео'} · ${VSTATUS[v.status] || esc(v.status)}${v.master ? ' · для майстра ' + esc(v.master) : ''}</div>
         ${v.comment ? `<div class="muted">${esc(v.comment)}</div>` : ''}
         ${v.status === 'answered' ? `<div class="vi-reply"><b>${esc(v.reply_by)}:</b> ${esc(v.reply)}</div>` : ''}
-        <div class="muted">Відео видалиться ${fmt(v.expires_on)}.
-          <button class="link" type="button" data-vplay="${v.id}">Подивитися</button> ·
+        <div class="muted">${v.kind === 'photo' ? 'Фото видаляться' : 'Відео видалиться'} ${fmt(v.expires_on)}.
+          <button class="link" type="button" data-vplay="${v.id}" data-kind="${v.kind}" data-count="${v.count}">Подивитися</button> ·
           <button class="link" type="button" data-vdel="${v.id}">Видалити</button></div>
       </div>`).join('')}
-      <button class="btn btn-primary small" type="button" data-act="video-open">${list.length ? 'Надіслати ще відео' : 'Надіслати відео майстру'}</button>
+      <div class="acc-actions">
+        <button class="btn btn-primary small" type="button" data-act="photo-open">📷 Надіслати фото майстру</button>
+        <button class="btn btn-primary small" type="button" data-act="video-open">🎥 Надіслати відео майстру</button>
+      </div>
       <div id="vuBox"></div>`;
-    box.querySelector('[data-act="video-open"]').addEventListener('click', (e) => { e.target.hidden = true; openVideoForm(masters); });
+    const hideBtns = () => box.querySelectorAll('[data-act="photo-open"], [data-act="video-open"]').forEach((b) => { b.hidden = true; });
+    box.querySelector('[data-act="video-open"]').addEventListener('click', () => { hideBtns(); openVideoForm(masters); });
+    box.querySelector('[data-act="photo-open"]').addEventListener('click', () => { hideBtns(); openPhotoForm(masters); });
     box.querySelectorAll('[data-vplay]').forEach((b) => b.addEventListener('click', () => {
-      b.closest('.acc-video').insertAdjacentHTML('beforeend', `<video controls playsinline preload="metadata" src="/api/account/videos/${b.dataset.vplay}/file"></video>`);
+      const src = (i) => `/api/account/videos/${b.dataset.vplay}/file?i=${i}`;
+      b.closest('.acc-video').insertAdjacentHTML('beforeend', b.dataset.kind === 'photo'
+        ? `<div class="vi-photos">${Array.from({ length: Number(b.dataset.count) || 1 }, (_, i) => `<a href="${src(i)}" target="_blank" rel="noopener"><img src="${src(i)}" alt="Фото ${i + 1}"></a>`).join('')}</div>`
+        : `<video controls playsinline preload="metadata" src="${src(0)}"></video>`);
       b.remove();
     }));
     box.querySelectorAll('[data-vdel]').forEach((b) => b.addEventListener('click', async () => {
       if (!confirm('Видалити це відео? Майстер його більше не побачить.')) return;
       try { await api(`/api/account/videos/${b.dataset.vdel}`, { method: 'DELETE' }); loadVideos(); } catch (e) { alert(e.message); }
     }));
+  }
+  // Фото: до 5, кожне стискаємо в браузері до 1600 px (JPEG) — так файл легкий, а метадані (зокрема місце зйомки) зникають
+  const PHOTO_MAX = 5;
+  async function shrink(file, max = 1600) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((ok, fail) => { const i = new Image(); i.onload = () => ok(i); i.onerror = fail; i.src = url; });
+      const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.naturalWidth * k);
+      c.height = Math.round(img.naturalHeight * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      return await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.85));
+    } finally { URL.revokeObjectURL(url); }
+  }
+  const masterSelectHtml = (masters) => (masters.length > 1 ? `<label class="step-label" for="vuMaster">Кому</label><select class="input" id="vuMaster"><option value="">Будь-якому майстру</option>${masters.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>` : '');
+  function openPhotoForm(masters) {
+    const box = $('#vuBox');
+    box.innerHTML = `<div class="vu-form">
+      <input class="input" type="file" id="vuPhotos" accept="image/*" multiple>
+      <div class="muted">До ${PHOTO_MAX} фото за раз. Краще при денному світлі, зблизька й трохи збоку.</div>
+      <div class="vi-photos" id="vuThumbs"></div>
+      ${masterSelectHtml(masters)}
+      <textarea class="input" id="vuComment" rows="2" maxlength="500" placeholder="Що турбує і як давно (необов'язково)"></textarea>
+      <label class="consent-check"><input type="checkbox" id="vuConsent"> Погоджуюсь, що працівники кабінету переглянуть ці фото моїх стоп. Фото видаляться через 90 днів.</label>
+      <progress class="vu-progress" id="vuProgress" max="100" value="0" hidden></progress>
+      <p class="acc-msg" id="vuMsg" role="status"></p>
+      <button class="btn btn-primary" type="button" id="vuSend">Надіслати фото</button>
+    </div>`;
+    const msg = (t, ok = false) => { const m = $('#vuMsg'); m.textContent = t; m.classList.toggle('ok', ok); };
+    let blobs = [];
+    $('#vuPhotos').addEventListener('change', async () => {
+      const files = [...$('#vuPhotos').files];
+      msg('');
+      blobs = [];
+      $('#vuThumbs').innerHTML = '';
+      if (files.length > PHOTO_MAX) msg(`Обрано ${files.length} фото, надішлемо перші ${PHOTO_MAX}.`);
+      for (const f of files.slice(0, PHOTO_MAX)) {
+        try {
+          const b = await shrink(f);
+          if (!b) throw new Error();
+          blobs.push(b);
+          $('#vuThumbs').insertAdjacentHTML('beforeend', `<img src="${URL.createObjectURL(b)}" alt="Фото ${blobs.length}">`);
+        } catch { msg('Одне з фото не вдалося відкрити. Оберіть фото у форматі JPEG або PNG.'); }
+      }
+    });
+    $('#vuSend').addEventListener('click', () => {
+      if (!blobs.length) return msg('Оберіть фото з телефона');
+      if (!$('#vuConsent').checked) return msg('Позначте згоду на перегляд фото');
+      // «Пакет»: для кожного фото 4 байти довжини, потім сам файл
+      const pack = [];
+      for (const b of blobs) { const n = new DataView(new ArrayBuffer(4)); n.setUint32(0, b.size); pack.push(n.buffer, b); }
+      const q = new URLSearchParams({ consent: '1', comment: $('#vuComment').value.trim(), masterId: $('#vuMaster')?.value || '' });
+      sendWithProgress('/api/account/photos?' + q, new Blob(pack), 'application/x-photo-pack', msg, 'Фото надіслано. Майстер подивиться й відповість тут і в Telegram, якщо його підключено.');
+    });
+  }
+  // Надсилання з відсотками (для фото й відео)
+  function sendWithProgress(url, body, type, msg, okText) {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.setRequestHeader('Content-Type', type);
+    const bar = $('#vuProgress');
+    bar.hidden = false;
+    $('#vuSend').disabled = true;
+    msg('Завантажую…');
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) { bar.value = Math.round((e.loaded / e.total) * 100); msg(`Завантажую… ${bar.value}%`); } };
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch { /* не JSON */ }
+      if (xhr.status === 201) { msg(okText, true); setTimeout(loadVideos, 1500); }
+      else { msg(data.error || 'Не вдалося надіслати. Спробуйте ще раз'); $('#vuSend').disabled = false; bar.hidden = true; }
+    };
+    xhr.onerror = () => { msg('Зв\'язок перервався. Спробуйте ще раз'); $('#vuSend').disabled = false; bar.hidden = true; };
+    xhr.send(body);
   }
   function openVideoForm(masters) {
     const box = $('#vuBox');

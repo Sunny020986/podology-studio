@@ -198,33 +198,35 @@
     const list = await api('/api/admin/client-videos');
     const mb = (n) => (n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + ' КБ' : (n / 1024 / 1024).toFixed(1).replace('.', ',') + ' МБ');
     $('#view').innerHTML = `
-      <p class="muted">Відео стоп, які клієнти надіслали з кабінету, щоб майстер оцінив, чи можна це зробити. Відповідь клієнт побачить у кабінеті й отримає в Telegram, якщо підключив бота. Відео видаляється саме через 90 днів.${isSuper() ? '' : ' Тут — відео для вас і для «будь-якого майстра».'}</p>
+      <p class="muted">Фото й відео стоп, які клієнти надіслали з кабінету, щоб майстер оцінив, чи можна це зробити. Відповідь клієнт побачить у кабінеті й отримає в Telegram, якщо підключив бота. Усе видаляється саме через 90 днів.${isSuper() ? '' : ' Тут — надіслане вам і «будь-якому майстру».'}</p>
       ${list.length ? '<div class="video-list">' + list.map((v) => `
         <div class="card video-item" data-video="${v.id}">
           <div class="vi-head">
             <div><b>${esc(v.name)}</b> · <a href="tel:${esc(v.phone.replace(/[^\d+]/g, ''))}">${esc(v.phone)}</a></div>
             <span class="vi-status vi-${v.status}">${VIDEO_STATUS[v.status] || esc(v.status)}</span>
           </div>
-          <div class="muted">${esc(new Date(String(v.created_at).replace(' ', 'T') + 'Z').toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }))} · ${v.master ? 'для майстра ' + esc(v.master) : 'будь-якому майстру'} · ${mb(v.size)} · видалиться ${fmtDate(v.expires_on)}</div>
+          <div class="muted">${v.kind === 'photo' ? `📷 фото: ${v.count}` : '🎥 відео'} · ${esc(new Date(String(v.created_at).replace(' ', 'T') + 'Z').toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }))} · ${v.master ? 'для майстра ' + esc(v.master) : 'будь-якому майстру'} · ${mb(v.size)} · видалиться ${fmtDate(v.expires_on)}</div>
           ${v.comment ? `<p class="vi-comment">${esc(v.comment)}</p>` : ''}
-          <div class="vi-player"><button class="btn btn-ghost small" type="button" data-video-play="${v.id}">▶ Дивитися</button></div>
+          <div class="vi-player"><button class="btn btn-ghost small" type="button" data-video-play="${v.id}">${v.kind === 'photo' ? '📷 Дивитися фото' : '▶ Дивитися'}</button></div>
           ${v.status === 'answered' ? `<div class="vi-reply"><b>Відповідь (${esc(v.reply_by)}):</b> ${esc(v.reply)}</div>` : ''}
           <div class="vi-form">
             <textarea class="input" rows="2" maxlength="1000" data-video-text="${v.id}" placeholder="${v.status === 'answered' ? 'Нова відповідь замінить попередню' : 'Відповідь клієнтові: чи можна це зробити, яка послуга, що підготувати'}"></textarea>
             <div class="toolbar" style="margin:0">
               <button class="btn btn-primary small" type="button" data-video-reply="${v.id}">Надіслати відповідь</button>
-              <button class="btn btn-ghost small danger" type="button" data-video-del="${v.id}">Видалити відео</button>
+              <button class="btn btn-ghost small danger" type="button" data-video-del="${v.id}">Видалити</button>
             </div>
           </div>
-        </div>`).join('') + '</div>' : '<p class="muted">Клієнти ще не надсилали відео.</p>'}`;
+        </div>`).join('') + '</div>' : '<p class="muted">Клієнти ще не надсилали фото чи відео.</p>'}`;
     updateVideoCount();
   }
   $('#view').addEventListener('click', async (e) => {
     const t = e.target;
     try {
       if (t.dataset.videoPlay) {
-        const { url } = await api(`/api/admin/client-videos/${t.dataset.videoPlay}/link`);
-        t.parentElement.innerHTML = `<video controls playsinline preload="metadata" src="${esc(url)}"></video>`;
+        const { kind, url, urls } = await api(`/api/admin/client-videos/${t.dataset.videoPlay}/link`);
+        t.parentElement.innerHTML = kind === 'photo'
+          ? `<div class="vi-photos">${urls.map((u, i) => `<a href="${esc(u)}" target="_blank" rel="noopener" title="Відкрити фото ${i + 1} повністю (посилання діє 10 хв)"><img src="${esc(u)}" alt="Фото ${i + 1}"></a>`).join('')}</div>`
+          : `<video controls playsinline preload="metadata" src="${esc(url)}"></video>`;
         updateVideoCount();
       } else if (t.dataset.videoReply) {
         const id = t.dataset.videoReply;
@@ -233,9 +235,9 @@
         notify(r.telegram ? 'Відповідь надіслано: у кабінет і в Telegram клієнта' : 'Відповідь збережено: клієнт побачить її в кабінеті (Telegram не підключено — можна ще зателефонувати)');
         await renderVideos();
       } else if (t.dataset.videoDel) {
-        if (!confirm('Видалити це відео? Відновити його буде неможливо.')) return;
+        if (!confirm('Видалити це надсилання (фото чи відео)? Відновити буде неможливо.')) return;
         await api(`/api/admin/client-videos/${t.dataset.videoDel}`, { method: 'DELETE' });
-        notify('Відео видалено');
+        notify('Видалено');
         await renderVideos();
       }
     } catch (err) { notify(err.message, true); }

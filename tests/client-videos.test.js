@@ -65,7 +65,7 @@ test('персонал: суперадмін бачить усі, майстер
   assert.equal((await srv.req('GET', '/api/admin/client-videos/new-count', { token: srv.ADMIN })).body.count, 2);
 
   const link = (await srv.req('GET', `/api/admin/client-videos/${forA.id}/link`, { token: A.token })).body.url;
-  assert.match(link, /^\/media\/client-video\/\d+\?exp=\d+&sig=/);
+  assert.match(link, /^\/media\/client-video\/\d+\?i=0&exp=\d+&sig=/);
   assert.equal((await fetch(srv.base + link)).status, 200);
   assert.equal((await fetch(srv.base + link.replace(/sig=.{4}/, 'sig=AAAA'))).status, 403);
   assert.equal((await fetch(srv.base + link.replace(/exp=\d+/, 'exp=1'))).status, 403, 'прострочене');
@@ -82,15 +82,15 @@ test('відповідь майстра: клієнт бачить у кабін
   const mine = (await acc('/api/account/videos')).body.find((v) => v.id === forA.id);
   assert.deepEqual({ s: mine.status, r: mine.reply, by: mine.reply_by }, { s: 'answered', r: 'Можна виправити скобою. Записуйтесь на корекцію.', by: 'Майстер Відео А' });
   const audit = (await srv.req('GET', '/api/admin/audit?limit=50', { token: srv.ADMIN })).body.rows;
-  assert.ok(audit.some((x) => x.action === 'Відео: відповідь клієнтові' && x.target === 'Клієнтка Відео'));
+  assert.ok(audit.some((x) => x.action === 'Фото/відео: відповідь клієнтові' && x.target === 'Клієнтка Відео'));
 });
 
-test('ліміт: не більше 3 відео на добу', async () => {
+test('ліміт: не більше 3 надсилань (фото чи відео) на добу', async () => {
   const r = await up(mp4());
   assert.equal(r.status, 201);
   const over = await up(mp4());
   assert.equal(over.status, 429);
-  assert.match((await over.json()).error, /не більше 3 відео/);
+  assert.match((await over.json()).error, /не більше 3 разів/);
 });
 
 test('клієнт видаляє своє відео (і файл); повне видалення клієнта прибирає решту', async () => {
@@ -105,4 +105,43 @@ test('клієнт видаляє своє відео (і файл); повне 
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(fs.readdirSync(videoDir()).filter((f) => !f.startsWith('.')).length, 0, 'файлів не лишилось');
   assert.equal((await srv.req('GET', '/api/admin/client-videos', { token: srv.ADMIN })).body.length, 0);
+});
+
+test('фото для майстра: до 5 JPEG за раз; персонал бачить кожне за одноразовим посиланням; клієнт — свої', async () => {
+  const reg = await srv.req('POST', '/api/account/register', { body: { name: 'Клієнтка Фото', phone: '+380671118811', password: 'cabinet-pass-1' } });
+  assert.equal(reg.status, 201, reg.text);
+  const c2 = (reg.headers.get('set-cookie') || '').split(';')[0];
+  const jpg = (n) => Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), Buffer.alloc(1500 + n)]);
+  const pack = (list) => Buffer.concat(list.flatMap((b) => { const h = Buffer.alloc(4); h.writeUInt32BE(b.length); return [h, b]; }));
+  const send = (body, q = 'consent=1') => fetch(`${srv.base}/api/account/photos?${q}`, { method: 'POST', headers: { 'Content-Type': 'application/x-photo-pack', Cookie: c2 }, body });
+
+  assert.equal((await send(pack([jpg(1)]), '')).status, 400, 'без згоди');
+  assert.equal((await send(pack([Buffer.concat([Buffer.from('%PDF'), Buffer.alloc(2000)])]))).status, 400, 'не JPEG');
+  assert.equal((await send(pack([1, 2, 3, 4, 5, 6].map(jpg)))).status, 400, '6 фото — забагато');
+  assert.equal((await fetch(`${srv.base}/api/account/photos?consent=1`, { method: 'POST', headers: { 'Content-Type': 'application/x-photo-pack' }, body: pack([jpg(1)]) })).status, 401);
+  const ok = await send(pack([jpg(1), jpg(2)]), `consent=1&comment=${encodeURIComponent('Тріщини на п\'ятах')}`);
+  assert.equal(ok.status, 201, await ok.clone().text());
+  const { id, count } = await ok.json();
+  assert.equal(count, 2);
+
+  const mine = (await srv.req('GET', '/api/account/videos', { headers: { Cookie: c2 } })).body;
+  assert.deepEqual({ k: mine[0].kind, n: mine[0].count }, { k: 'photo', n: 2 });
+  const own = await fetch(`${srv.base}/api/account/videos/${id}/file?i=1`, { headers: { Cookie: c2 } });
+  assert.equal(own.status, 200);
+  assert.equal(own.headers.get('content-type'), 'image/jpeg');
+
+  const item = (await srv.req('GET', '/api/admin/client-videos', { token: srv.ADMIN })).body.find((v) => v.id === id);
+  assert.deepEqual({ k: item.kind, n: item.count }, { k: 'photo', n: 2 });
+  const link = (await srv.req('GET', `/api/admin/client-videos/${id}/link`, { token: A.token })).body;
+  assert.equal(link.kind, 'photo');
+  assert.equal(link.urls.length, 2);
+  for (const u of link.urls) assert.equal((await fetch(srv.base + u)).status, 200);
+  assert.equal((await fetch(srv.base + link.urls[1].replace('i=1', 'i=0'))).status, 403, 'підпис прив\'язаний до номера фото');
+
+  // Видалення клієнткою — обидва файли
+  const files = () => fs.readdirSync(videoDir()).filter((f) => f.endsWith('.jpg')).length;
+  assert.equal(files(), 2);
+  assert.equal((await srv.req('DELETE', `/api/account/videos/${id}`, { headers: { Cookie: c2 } })).status, 200);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(files(), 0);
 });

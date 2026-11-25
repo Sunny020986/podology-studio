@@ -59,7 +59,7 @@ test('запис разом із другом; поки друг не прийш
   const fid = r.body.friends[0].id;
   const appts = (await srv.req('GET', '/api/admin/appointments?from=2020-01-01&to=2099-12-31', { token: srv.ADMIN })).body;
   assert.match(appts.find((a) => a.id === fid).client_comment, /^🤝 Друг клієнта Олена Запрошує\./);
-  assert.equal(r.body.friends[0].price.kind, 'first', 'друг — новий клієнт, у нього знижка на перший візит');
+  assert.equal(r.body.friends[0].price.kind, 'invited', 'друг — новий клієнт: знижка на перший візит + від друга');
   assert.equal((await quote(me)).friend.available, false);
 
   // Друге запрошення: помилка, і не записується ніхто
@@ -111,7 +111,7 @@ test('лише контакт друга: список в адмінці, адм
   const friendPhone = phone();
   const r = await book(me, 'Марія Запрошує', { mode: 'lead', name: 'Друг Контакт', phone: friendPhone });
   assert.equal(r.status, 201, r.text);
-  assert.deepEqual(r.body.friends, [{ ok: true, mode: 'lead', name: 'Друг Контакт', pct: 20 }]);
+  assert.deepEqual(r.body.friends, [{ ok: true, mode: 'lead', name: 'Друг Контакт', pct: 40 }]); // 20% перший візит + 20% від друга
   let row = (await adminList()).find((x) => x.friend === 'Друг Контакт');
   assert.deepEqual({ kind: row.kind, referrer: row.referrer, came: row.came, reward: row.reward }, { kind: 'lead', referrer: 'Марія Запрошує', came: false, reward: 'none' });
 
@@ -160,18 +160,18 @@ test('друг лише за контактом: знижка на перший 
   const friendPhone = phone();
   const r = await book(phone(), 'Контакт Запрошує', { mode: 'lead', name: 'Друг Сам Запишеться', phone: friendPhone });
   assert.equal(r.status, 201, r.text);
-  assert.deepEqual({ k: (await q(friendPhone)).kind, f: (await q(friendPhone)).final }, { k: 'first', f: 400 });
+  assert.deepEqual({ k: (await q(friendPhone)).kind, f: (await q(friendPhone)).final }, { k: 'invited', f: 300 }); // 500 − (20% + 20%)
   // Друг записується сам на сайті — знижка в записі
   const s = (await srv.req('GET', `/api/next-slot?serviceId=${other.id}&masterId=${M.id}`)).body;
   const b = await srv.req('POST', '/api/appointments', { body: { serviceId: other.id, date: s.date, time: s.slots[0], name: 'Друг Сам Запишеться', phone: friendPhone, masterId: M.id } });
   assert.equal(b.status, 201, b.text);
-  assert.deepEqual({ k: b.body.price.kind, f: b.body.price.final }, { k: 'first', f: 400 });
+  assert.deepEqual({ k: b.body.price.kind, f: b.body.price.final }, { k: 'invited', f: 300 });
   // Друга записують одразу на непозначену послугу — теж зі знижкою
   const s2 = (await srv.req('GET', `/api/next-slot?serviceId=${other.id}&masterId=${M.id}`)).body;
   const r2 = await srv.req('POST', '/api/appointments', { body: { serviceId: svc, date: (await twoSlots()).date, time: (await twoSlots()).a, name: 'Ще Запрошує', phone: phone(), masterId: M.id,
     friend: { mode: 'book', name: 'Друг Одразу', phone: phone(), serviceId: other.id, date: s2.date, time: s2.slots[s2.slots.length - 1], masterId: M.id } } });
   assert.equal(r2.status, 201, r2.text);
-  assert.equal(r2.body.friends[0].price.kind, 'first');
+  assert.equal(r2.body.friends[0].price.kind, 'invited');
 });
 
 test('перевірки друга: не свій номер, новий клієнт, не запрошений іншим; нічого не записується при помилці', async () => {
@@ -279,12 +279,34 @@ test('сценарій: Сашуліна запросила Арамчика к�
   assert.equal(reg.status, 201, reg.text);
   const Cookie = (reg.headers.get('set-cookie') || '').split(';')[0];
   const me = (await srv.req('GET', '/api/account/me', { headers: { Cookie } })).body;
-  assert.equal(me.invited_discount, 20, 'кабінет показує знижку запрошеного');
+  assert.equal(me.invited_discount, 40, 'кабінет показує знижку запрошеного: 20% + 20%');
+  assert.deepEqual(me.invited_parts, { first: 20, friend: 20 });
   const other = (await srv.req('GET', '/api/admin/services', { token: srv.ADMIN })).body.find((x) => !x.first_discount);
   const q = (await srv.req('GET', `/api/first-discount?serviceId=${other.id}&phone=${friendPhone}`)).body;
-  assert.deepEqual({ k: q.kind, inv: q.invited, pct: q.pct }, { k: 'first', inv: true, pct: 20 });
+  assert.deepEqual({ k: q.kind, inv: q.invited, pct: q.pct }, { k: 'invited', inv: true, pct: 40 });
   // Звичайний новий клієнт без запрошення — без плашки
   const reg2 = await srv.req('POST', '/api/account/register', { body: { name: 'Просто Новий', phone: phone(), password: 'cabinet-pass-1' } });
   const me2 = (await srv.req('GET', '/api/account/me', { headers: { Cookie: (reg2.headers.get('set-cookie') || '').split(';')[0] } })).body;
   assert.equal(me2.invited_discount, 0);
+});
+
+test('знижки разом: 10% на перший візит + 20% від друга = 30% запрошеному; той, хто привів, — 20% після візиту друга', async () => {
+  assert.equal((await putStudio({ first_discount_pct: '10', friend_discount_pct: '20' })).status, 200);
+  assert.equal((await putStudio({ friend_discount_pct: '95' })).status, 400);
+  const me = phone(), fr = phone();
+  const r = await book(me, 'Привела Подругу', { mode: 'lead', name: 'Подруга', phone: fr });
+  assert.equal(r.status, 201, r.text);
+  assert.equal(r.body.friends[0].pct, 30);
+  const q1 = (await srv.req('GET', `/api/first-discount?serviceId=${svc}&phone=${fr}`)).body;
+  assert.deepEqual({ k: q1.kind, p: q1.pct, a: q1.pctFirst, b: q1.pctFriend, f: q1.final }, { k: 'invited', p: 30, a: 10, b: 20, f: 700 });
+  // Подруга прийшла → тій, хто привела, 20% на наступний запис
+  const s = await twoSlots();
+  const fb = await srv.req('POST', '/api/appointments', { body: { serviceId: svc, date: s.date, time: s.a, name: 'Подруга', phone: fr, masterId: M.id } });
+  assert.equal(fb.status, 201, fb.text);
+  assert.equal(fb.body.price.final, 700);
+  setStatus(fb.body.id, 'done');
+  setStatus(r.body.id, 'done');
+  const q2 = (await srv.req('GET', `/api/first-discount?serviceId=${svc}&phone=${encodeURIComponent(me)}`)).body;
+  assert.deepEqual({ k: q2.kind, p: q2.pct, f: q2.final }, { k: 'friend', p: 20, f: 800 });
+  await putStudio({ first_discount_pct: '20' });
 });

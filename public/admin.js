@@ -42,7 +42,7 @@
     .map(([k, v]) => `<option value="${k}" ${k === a.status ? 'selected' : ''}>${v}</option>`).join('');
   // Позначка, якщо клієнт не прийшов 2 і більше разів поспіль
   // Ціна запису: до сплати й знижка (перший візит, за друга, від адміністратора)
-  const DISC_KIND = { first: 'перший візит', friend: 'за друга', manual: 'від адміна' };
+  const DISC_KIND = { first: 'перший візит', invited: 'запрошений друг', friend: 'за друга', manual: 'від адміна' };
   const priceCell = (r) => {
     if (!(r.price_uah > 0)) return esc(r.price_note || '—');
     return r.discount_pct ? `<b>${r.price_uah} грн</b> <span class="muted">(${r.price_full_uah} − ${r.discount_pct}%, ${DISC_KIND[r.discount_kind] || 'знижка'})</span>` : `${r.price_uah} грн`;
@@ -2373,10 +2373,15 @@ ${isSuper() ? `
         <label class="studio-field">
           <span>Відсоток знижки на перший візит (0 — без знижки)</span>
           <input name="first_discount_pct" type="number" min="0" max="90" step="1" value="${esc(s.first_discount_pct)}" style="max-width:120px">
-          <small class="muted">Рахується сама: клієнт бачить ціну, знижку й суму до сплати, але лише якщо в нього ще не було записів, і лише на послуги з позначкою «Знижка на перший візит» у вкладці «Послуги». Той самий відсоток — знижка за друга: клієнт отримує її на один наступний запис (будь-яка послуга), коли друг, якого він привів, прийшов на візит.</small>
+          <small class="muted">Рахується сама: клієнт бачить ціну, знижку й суму до сплати, але лише якщо в нього ще не було записів, і лише на послуги з позначкою «Знижка на перший візит» у вкладці «Послуги». Запрошений друг отримує цю знижку на будь-яку послугу, разом зі знижкою «Приведи друга» нижче.</small>
         </label>
         ${area('promo_first', 'Знижка на перший візит', 400, 3, 'Зараз цей текст на сайті не показується: знижку клієнт бачить у розрахунку ціни під час запису. Відсоток задається полем вище.')}
         ${area('promo_friend', '«Приведи друга»', 400, 3, PROMO_HINT)}
+        <label class="studio-field">
+          <span>Знижка «Приведи друга», % (0 — без неї)</span>
+          <input name="friend_discount_pct" type="number" min="0" max="90" step="1" value="${esc(s.friend_discount_pct)}" style="max-width:120px">
+          <small class="muted">Запрошений друг отримує її разом зі знижкою на перший візит: наприклад, 10% + 20% = 30%. Той, хто привів, отримує цей самий відсоток на один наступний запис, коли друг прийде.</small>
+        </label>
         <label class="studio-field">
           <span>Скільки друзів клієнт може записати одночасно</span>
           <input name="friend_max_open" type="number" min="1" max="5" step="1" value="${esc(s.friend_max_open || '5')}" style="max-width:120px">

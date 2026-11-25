@@ -125,7 +125,7 @@ window.FriendInvite = (() => {
     if (!f.ok) return `${f.name || 'Друг'}: не вдалося — ${f.error}`;
     if (f.mode === 'lead') return `Друга ${f.name} додано${f.pct ? `: на перший візит у нього знижка ${f.pct}%` : ''}. Він може записатися сам на сайті, або ми йому зателефонуємо.`;
     const p = f.price;
-    const what = p && p.kind === 'friend' ? 'знижка за друга' : 'знижка на перший візит';
+    const what = p && p.kind === 'friend' ? 'знижка за друга' : p && p.kind === 'invited' ? 'знижка запрошеному другу' : 'знижка на перший візит';
     const price = p && p.full ? (p.pct ? ` Ціна: ${p.full} грн − ${what} ${p.pct}% (${p.discount} грн) = ${p.final} грн.` : ` Ціна: ${p.full} грн.`) : '';
     return `Друга записано: ${f.service}, ${fmt(f.date)} о ${f.time}.${price}`;
   }

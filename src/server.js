@@ -29,7 +29,7 @@ const { setupReassign } = require('./reassign');
 const { setupHolidays } = require('./holidays');
 const { setupClientErase } = require('./client-erase');
 const { setupReminderButtons } = require('./reminder-buttons');
-const { setupFirstDiscount, quote: firstQuote, hasVisits, discountPct } = require('./first-discount');
+const { setupFirstDiscount, quote: firstQuote, hasVisits, discountPct, friendPct } = require('./first-discount');
 const { setupFriendInvite, useReward } = require('./friend-invite');
 const { setupClientVideos } = require('./client-videos');
 const { adminBySession: adminSessionLookup, setupAdminUsers } = require('./admin-users');
@@ -278,7 +278,7 @@ const STUDIO_FIELDS = {
   name: 80, tagline: 120, address: 200, phone: 40, city: 80, review_url: 300,
   promo_first: 400, promo_friend: 400, promo_gift: 400, partners: 600,
   master_name: 80, master_about: 2000, faq: 6000, stat_years: 6, stat_clients: 6, site_url: 200,
-  owner_legal: 120, first_discount_pct: 2, friend_max_open: 1,
+  owner_legal: 120, first_discount_pct: 2, friend_discount_pct: 2, friend_max_open: 1,
 };
 function readStudio() {
   const rows = db.prepare('SELECT key, value FROM settings').all();
@@ -360,7 +360,7 @@ const bookTx = db.transaction(({ service, date, time, name, phone, comment, mast
 // Рядок про знижку для сповіщень персоналу
 function priceLine(q) {
   if (!q.eligible) return '';
-  const what = q.kind === 'friend' ? 'Знижка за друга' : 'Перший візит: знижка';
+  const what = q.kind === 'friend' ? 'Знижка за друга' : q.kind === 'invited' ? `Запрошений друг: ${q.pctFirst}% перший візит + ${q.pctFriend}% від друга, разом` : 'Перший візит: знижка';
   return q.full ? `\n🎁 ${what} ${q.pct}% (${q.full} − ${q.discount} = ${q.final} грн)` : `\n🎁 ${what} ${q.pct}% (суму рахує майстер)`;
 }
 
@@ -379,7 +379,7 @@ function readChangeHours() {
 }
 setupFirstDiscount({ app, db, makeLimiter, friendState: (key) => friendInvites.state(key) });
 const friendInvites = setupFriendInvite({ app, db, publicBook, hasVisits, accountFromRequest: (req) => accounts.accountFromRequest(req), readStudio,
-  notifyStaff: (t) => telegram.notifyMaster(t), discountPct });
+  notifyStaff: (t) => telegram.notifyMaster(t), discountPct, friendPct });
 // Відео від клієнтів (кабінет → майстер): публічні маршрути кабінету тут, адмінські — після перевірки входу
 const clientVideos = setupClientVideos({
   app, db, dataDir: DATA_DIR, telegram,
@@ -431,7 +431,7 @@ function publicBook(body, ip, { commentPrefix = '', ownerCheck = null, defer = n
       liveAppt('new', { id: Number(id), master_id: assigned, date, start_time: time, client_name: cleanName, service: service.name, master: masterName });
     };
     if (defer) defer.push(notify); else notify();
-    return { status: 201, body: { id: Number(id), date, time, service: service.name, master: masterName, remindLink: telegram.remindLink(remindCode), price: { full: price.full, pct: price.pct, kind: price.kind, discount: price.discount, final: price.final, note: service.price_note || '' } }, remindCode, phone: cleanPhone, name: cleanName };
+    return { status: 201, body: { id: Number(id), date, time, service: service.name, master: masterName, remindLink: telegram.remindLink(remindCode), price: { full: price.full, pct: price.pct, pctFirst: price.pctFirst, pctFriend: price.pctFriend, kind: price.kind, discount: price.discount, final: price.final, note: service.price_note || '' } }, remindCode, phone: cleanPhone, name: cleanName };
   } catch (e) {
     if (e.status) return fail(e.status, e.message);
     console.error(e);
@@ -649,6 +649,9 @@ app.put('/api/admin/studio', (req, res) => {
   }
   if (clean.first_discount_pct && (!/^\d{1,2}$/.test(clean.first_discount_pct) || Number(clean.first_discount_pct) > 90)) {
     return res.status(400).json({ error: 'Знижка на перший візит: ціле число від 0 до 90 (0 — без знижки)' });
+  }
+  if (clean.friend_discount_pct && (!/^\d{1,2}$/.test(clean.friend_discount_pct) || Number(clean.friend_discount_pct) > 90)) {
+    return res.status(400).json({ error: 'Знижка «Приведи друга»: ціле число від 0 до 90 (0 — без неї)' });
   }
   if (clean.friend_max_open && !/^[1-5]$/.test(clean.friend_max_open)) {
     return res.status(400).json({ error: 'Скільки друзів одночасно: число від 1 до 5' });

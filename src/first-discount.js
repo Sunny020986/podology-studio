@@ -20,6 +20,8 @@ function createFirstDiscountColumns(db) {
   if (!appt.includes('discount_kind')) db.exec('ALTER TABLE appointments ADD COLUMN discount_kind TEXT');
   // Один раз: відсоток 10 і позначка на «первинних» послугах (як у тексті акції: «первинну консультацію й огляд стоп»).
   // Власник може змінити обидва в адмінці.
+  // Знижка «Приведи друга» — окремий відсоток, за замовчуванням 20 (один раз)
+  db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('friend_discount_pct', '20')").run();
   if (!db.prepare("SELECT 1 FROM settings WHERE key = 'first_discount_v1'").get()) {
     db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('first_discount_pct', ?)").run(String(DEFAULT_PCT));
     db.prepare("UPDATE services SET first_discount = 1 WHERE name LIKE 'Первин%'").run();
@@ -42,24 +44,35 @@ function hasVisits(db, phone) {
 
 // Розрахунок для послуги й номера. eligible — чи є знижка; kind — first (перший візит) або friend (за друга),
 // inviteId — з якого запрошення взято знижку за друга. Суми — лише якщо в послуги є числова ціна.
+// Знижка «Приведи друга» (налаштування friend_discount_pct, за замовчуванням 20): запрошений друг отримує її РАЗОМ
+// зі знижкою на перший візит (наприклад, 10% + 20% = 30%); той, хто привів, — на один наступний запис після візиту друга.
+const friendPct = (db) => {
+  const n = Number(db.prepare("SELECT value FROM settings WHERE key = 'friend_discount_pct'").get()?.value);
+  return Number.isInteger(n) && n > 0 && n <= 90 ? n : 0;
+};
+
+// Розрахунок для послуги й номера. kind: first (перший візит), invited (запрошений друг: перший візит + знижка друга),
+// friend (той, хто привів друга), або null. pctFirst/pctFriend — складові для показу; pct — разом (не більше 90).
+// inviteId — з якого запрошення взято знижку за друга. Суми — лише якщо в послуги є числова ціна.
 function quote(db, service, phone) {
   const full = service.price_uah > 0 ? service.price_uah : null;
-  const out = { eligible: false, kind: null, pct: 0, full, discount: 0, final: full, inviteId: null };
-  const pct = discountPct(db);
-  if (!pct) return out;
+  const out = { eligible: false, kind: null, pct: 0, pctFirst: 0, pctFriend: 0, full, discount: 0, final: full, inviteId: null };
   if (!hasVisits(db, phone)) {
     const invited = isInvitedFriend(db, phone);
-    if (service.first_discount || invited) { out.kind = 'first'; out.invited = invited; }
-  }
-  else {
+    if (service.first_discount || invited) out.pctFirst = discountPct(db);
+    if (invited) out.pctFriend = friendPct(db);
+    out.invited = invited;
+    if (out.pctFirst || out.pctFriend) out.kind = invited && out.pctFriend ? 'invited' : 'first';
+  } else {
     const inv = rewardInvite(db, phone);
-    if (inv) { out.kind = 'friend'; out.inviteId = inv; }
+    const p = friendPct(db);
+    if (inv && p) { out.kind = 'friend'; out.inviteId = inv; out.pctFriend = p; }
   }
   if (!out.kind) return out;
   out.eligible = true;
-  out.pct = pct;
+  out.pct = Math.min(90, out.pctFirst + out.pctFriend);
   if (full) {
-    out.final = Math.round(full * (100 - pct) / 100);
+    out.final = Math.round(full * (100 - out.pct) / 100);
     out.discount = full - out.final;
   }
   return out;
@@ -83,4 +96,4 @@ function setupFirstDiscount({ app, db, makeLimiter, friendState = () => null }) 
   });
 }
 
-module.exports = { createFirstDiscountColumns, setupFirstDiscount, quote, discountPct, hasVisits };
+module.exports = { createFirstDiscountColumns, setupFirstDiscount, quote, discountPct, friendPct, hasVisits };

@@ -94,7 +94,7 @@ const isInvitedFriend = (db, phone) => !!db.prepare('SELECT 1 FROM friend_invite
 const rewardInvite = (db, phone) => summary(db, key9(phone)).rewards[0] ?? null;
 const useReward = (db, inviteId, apptId) => db.prepare('UPDATE friend_invites SET reward_appt_id = ? WHERE id = ?').run(apptId, inviteId);
 
-function setupFriendInvite({ app, db, publicBook, hasVisits, accountFromRequest, readStudio, notifyStaff = () => {}, discountPct }) {
+function setupFriendInvite({ app, db, publicBook, hasVisits, accountFromRequest, readStudio, notifyStaff = () => {}, discountPct, friendPct = () => 0 }) {
   const enabled = () => !!String(readStudio().promo_friend || '').trim();
   const maxOpen = () => {
     const n = Number(db.prepare("SELECT value FROM settings WHERE key = 'friend_max_open'").get()?.value);
@@ -103,7 +103,7 @@ function setupFriendInvite({ app, db, publicBook, hasVisits, accountFromRequest,
 
   function state(key) {
     const s = summary(db, key);
-    const base = { rewards: s.rewards.length, pct: discountPct(db) };
+    const base = { rewards: s.rewards.length, pct: friendPct(db) }; // знижка того, хто привів, за кожного друга, що прийшов
     if (!enabled()) return { enabled: false, available: false, open: s.open, max: 0, left: 0, ...base };
     const max = maxOpen();
     return { enabled: true, available: s.open < max, open: s.open, max, left: Math.max(0, Math.min(max - s.open, MAX_PER_BOOKING)), ...base };
@@ -153,7 +153,7 @@ function setupFriendInvite({ app, db, publicBook, hasVisits, accountFromRequest,
       ins.run(key, ref.name, key9(phone), name, phone, 'lead', null);
       const msg = `🤝 Друг клієнта ${ref.name}: ${name}, ${phone}\nЗателефонуйте й запишіть (знижка на перший візит нарахується сама). Список: адмінка → «Записи» → «Друзі клієнтів»`;
       if (defer) defer.push(() => notifyStaff(msg)); else notifyStaff(msg);
-      return { status: 201, body: { mode: 'lead', name, pct: discountPct(db) } };
+      return { status: 201, body: { mode: 'lead', name, pct: Math.min(90, discountPct(db) + friendPct(db)) } }; // знижка друга на перший візит
     }
     // Запрошення записуємо ДО запису друга: тоді bookTx бачить, що це запрошений друг, і дає знижку на перший візит
     const inv = Number(ins.run(key, ref.name, key9(phone), name, phone, 'book', null).lastInsertRowid);

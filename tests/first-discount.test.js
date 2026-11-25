@@ -33,7 +33,7 @@ after(() => srv && srv.stop());
 
 test('новому клієнтові: ціна, знижка 10% і сума до сплати; на непозначену послугу знижки немає', async () => {
   const q = (await quote(svcDisc, '+380671110001')).body;
-  assert.deepEqual(q, { eligible: true, kind: 'first', invited: false, pct: 10, full: 1235, discount: 123, final: 1112, friend: { available: true, left: 5 } }); // 1235 × 0,9 = 1111,5 → 1112 (округлення до більшого)
+  assert.deepEqual(q, { eligible: true, kind: 'first', invited: false, pct: 10, pctFirst: 10, pctFriend: 0, full: 1235, discount: 123, final: 1112, friend: { available: true, left: 5 } }); // 1235 × 0,9 = 1111,5 → 1112 (округлення до більшого)
   const plain = (await quote(svcPlain, '+380671110001')).body;
   assert.equal(plain.eligible, false);
   assert.equal(plain.final, 500);
@@ -47,7 +47,7 @@ test('новому клієнтові: ціна, знижка 10% і сума д
 test('запис: ціна зі знижкою у відповіді й у базі; другий запис того ж номера — вже за повною ціною', async () => {
   const r = await bookReq(svcDisc, '+380671110002');
   assert.equal(r.status, 201, r.text);
-  assert.deepEqual(r.body.price, { full: 1235, pct: 10, kind: 'first', discount: 123, final: 1112, note: '' });
+  assert.deepEqual(r.body.price, { full: 1235, pct: 10, pctFirst: 10, pctFriend: 0, kind: 'first', discount: 123, final: 1112, note: '' });
   assert.deepEqual(row(r.body.id), { price_uah: 1112, price_full_uah: 1235, discount_pct: 10, status: 'new' });
 
   // Той самий номер в іншому записі: пропозиції вже немає (формат номера не важливий)
@@ -69,7 +69,7 @@ test('скасований запис не робить клієнта «ста�
 test('послуга без числової ціни: знижка обіцяна, сума — ні; ціна текстом у відповіді', async () => {
   const r = await bookReq(svcNote, '+380671110004');
   assert.equal(r.status, 201, r.text);
-  assert.deepEqual(r.body.price, { full: null, pct: 10, kind: 'first', discount: 0, final: null, note: 'від 1380 грн' });
+  assert.deepEqual(r.body.price, { full: null, pct: 10, pctFirst: 10, pctFriend: 0, kind: 'first', discount: 0, final: null, note: 'від 1380 грн' });
 });
 
 test('відсоток 0 вимикає знижку; некоректний відсоток відхиляється', async () => {

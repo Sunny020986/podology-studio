@@ -291,10 +291,17 @@
   // Знижку пропонуємо лише тому, хто ще не мав у нас записів: сервер перевіряє за номером телефону.
   const quoteState = { key: '', data: null };
   const phoneDigits = () => $('#phoneInput').value.replace(/\D/g, '');
-  const discName = (q) => (q.kind === 'friend' ? 'Знижка за друга' : q.invited ? 'Знижка на перший візит (вас запросив друг)' : 'Знижка на перший візит');
+  const discName = (q) => (q.kind === 'friend' ? 'Знижка за друга' : q.kind === 'invited' ? (q.pctFirst ? `Знижка запрошеному другу (${q.pctFirst}% + ${q.pctFriend}%)` : 'Знижка запрошеному другу') : 'Знижка на перший візит');
+  // Запрошений друг: дві знижки окремими рядками (перший візит + від друга), сума — разом
+  const discRows = (q) => {
+    if (q.kind !== 'invited' || !q.pctFirst) return `<div class="pc-row pc-disc"><span>${discName(q)} ${q.pct}%</span><span>− ${q.discount} грн</span></div>`;
+    const a = Math.round(q.full * q.pctFirst / 100);
+    return `<div class="pc-row pc-disc"><span>Знижка на перший візит ${q.pctFirst}%</span><span>− ${a} грн</span></div>
+       <div class="pc-row pc-disc"><span>Знижка запрошеному другу ${q.pctFriend}%</span><span>− ${q.discount - a} грн</span></div>`;
+  };
   const calcHtml = (q) => q.pct && q.full
     ? `<div class="price-calc"><div class="pc-row"><span>Ціна за прайсом</span><span>${q.full} грн</span></div>
-       <div class="pc-row pc-disc"><span>${discName(q)} ${q.pct}%</span><span>− ${q.discount} грн</span></div>
+       ${discRows(q)}
        <div class="pc-row pc-total"><span>До сплати</span><span>${q.final} грн</span></div></div>`
     : q.pct
       ? `<div class="price-calc"><div class="pc-row pc-disc"><span>${discName(q)} ${q.pct}%</span><span></span></div><div class="muted">Точну суму з урахуванням знижки назве майстер.</div></div>`
@@ -494,10 +501,10 @@
     const pr = data.price;
     if (pr && pr.full) {
       msg.textContent += pr.pct
-        ? ` Ціна: ${pr.full} грн − ${pr.kind === 'friend' ? 'знижка за друга' : 'знижка на перший візит'} ${pr.pct}% (${pr.discount} грн) = ${pr.final} грн.`
+        ? ` Ціна: ${pr.full} грн − ${pr.kind === 'friend' ? 'знижка за друга' : pr.kind === 'invited' ? `знижка запрошеному другу${pr.pctFirst ? ` (${pr.pctFirst}% + ${pr.pctFriend}%)` : ''}` : 'знижка на перший візит'} ${pr.pct}% (${pr.discount} грн) = ${pr.final} грн.`
         : ` Ціна: ${pr.full} грн.`;
     } else if (pr && pr.pct) {
-      msg.textContent += ` ${pr.kind === 'friend' ? 'Знижка за друга' : 'Знижка на перший візит'} ${pr.pct}%: точну суму назве майстер.`;
+      msg.textContent += ` ${pr.kind === 'friend' ? 'Знижка за друга' : pr.kind === 'invited' ? 'Знижка запрошеному другу' : 'Знижка на перший візит'} ${pr.pct}%: точну суму назве майстер.`;
     } else if (pr && pr.note) {
       msg.textContent += ` Ціна: ${pr.note}.`;
     }

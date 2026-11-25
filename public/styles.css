@@ -1132,3 +1132,6 @@ tr.wait-new td { background: rgba(229, 57, 53, 0.06); }
 .hero-faq .faq-item { background: rgba(255, 255, 255, 0.82); padding: 0 16px; border-radius: 12px; }
 .hero-faq .faq-item summary { padding: 12px 0; font-size: 15px; }
 .hero-faq .faq-answer { font-size: 15px; padding-bottom: 12px; }
+
+/* Попередження: сповіщення Telegram не доходять */
+.tg-error { color: var(--danger, #b42318); background: rgba(180, 35, 24, 0.07); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }

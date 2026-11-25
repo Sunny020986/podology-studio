@@ -1514,7 +1514,8 @@ function handleClient(ws, msg) {
     }
     const message = saveMessage(id, 'client', body);
     (clients.get(id) || new Set()).forEach((c) => send(c, { type: 'message', message })); // і в інших вкладках клієнта
-    telegram.newChatMessage(id, body);
+    const who = db.prepare('SELECT name, phone FROM accounts WHERE id = ?').get(accId);
+    telegram.newChatMessage(id, body, who ? `${who.name}, ${who.phone}` : '');
     notifyAdmins({ type: 'message', conversationId: id, message });
     return;
   }

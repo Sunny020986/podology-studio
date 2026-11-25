@@ -2446,9 +2446,10 @@ ${isSuper() ? `
   async function renderTelegram() {
     const t = await api('/api/admin/telegram');
     $('#tgBox').innerHTML = `
-      <p class="tg-state ${t.configured ? 'ok' : ''}">${t.configured
-        ? 'Увімкнено: бот пише вам про кожен новий запис і нове питання в чаті.'
+      <p class="tg-state ${t.configured && !t.lastError ? 'ok' : ''}">${t.configured
+        ? (t.lastError ? 'Увімкнено, але є проблема:' : 'Увімкнено: бот пише вам про кожен новий запис і нове питання в чаті.')
         : 'Вимкнено. Налаштування займає близько 3 хвилин.'}</p>
+      ${t.lastError ? `<p class="tg-error" role="alert">⚠️ Сповіщення зараз не доходять: ${esc(t.lastError.text)}. Остання помилка: ${esc(localTime(t.lastError.at.replace('T', ' ').slice(0, 19)))}. Після виправлення натисніть «Надіслати тест».</p>` : ''}
       <ol class="tg-steps">
         <li>У Telegram відкрийте <b>@BotFather</b>, надішліть <code>/newbot</code>, придумайте боту назву й ім'я, що закінчується на <code>bot</code>. BotFather надішле токен: довгий рядок на зразок <code>1234567890:AAH…</code></li>
         <li>Вставте токен нижче.</li>
@@ -2938,7 +2939,7 @@ ${isSuper() ? `
         e.target.disabled = true;
         try {
           const { chats } = await api('/api/admin/telegram/detect', { method: 'POST', body: { token: $('#tgForm [name=token]').value } });
-          if (!chats.length) return notify('Бот ще не отримав жодного повідомлення. Напишіть йому в Telegram і натисніть ще раз', true);
+          if (!chats.length) return notify('За останню добу бот не отримав від вас повідомлень. Напишіть йому в Telegram будь-що й натисніть ще раз', true);
           const last = chats[chats.length - 1];
           $('#tgForm [name=chatId]').value = last.id;
           $('#tgFound').textContent = `Знайдено чат: ${last.name}. Тепер натисніть «Зберегти».`;
@@ -2952,9 +2953,13 @@ ${isSuper() ? `
         e.target.disabled = true;
         try {
           await api('/api/admin/telegram/test', { method: 'POST' });
-          return notify('Тест надіслано. Перевірте Telegram');
+          notify('Тест надіслано. Перевірте Telegram');
+          return await renderTelegram(); // прибрати попередження про помилку
+        } catch (err) {
+          notify(err.message, true);
+          return await renderTelegram().catch(() => {}); // показати помилку в розділі
         } finally {
-          e.target.disabled = false;
+          if (e.target.isConnected) e.target.disabled = false;
         }
       }
 

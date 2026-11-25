@@ -23,9 +23,15 @@ function createWaitlistTable(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_waitlist_date ON waitlist(date, status);
   `);
+  // seen_at — коли персонал побачив заявку (відкрив «Чергу очікування»); поки порожнє, адмінка показує червоний сигнал
+  const cols = db.prepare('PRAGMA table_info(waitlist)').all().map((c) => c.name);
+  if (!cols.includes('seen_at')) {
+    db.exec('ALTER TABLE waitlist ADD COLUMN seen_at TEXT');
+    db.exec("UPDATE waitlist SET seen_at = datetime('now')"); // старі заявки вважаємо переглянутими
+  }
 }
 
-function setupWaitlist({ app, db, telegram, freeSlots, isBookableDate, horizonDays, todayStr, siteUrl, makeLimiter, last9 }) {
+function setupWaitlist({ app, db, telegram, freeSlots, isBookableDate, horizonDays, todayStr, siteUrl, makeLimiter, last9, onNew = () => {} }) {
   const limiter = makeLimiter(5, 60 * 60 * 1000);
   const fmt = (d) => d.split('-').reverse().join('.');
 
@@ -49,6 +55,7 @@ function setupWaitlist({ app, db, telegram, freeSlots, isBookableDate, horizonDa
     const code = crypto.randomBytes(8).toString('base64url');
     db.prepare('INSERT INTO waitlist (service_id, date, name, phone, code, master_id) VALUES (?, ?, ?, ?, ?, ?)').run(service.id, date, name, phone, code, masterId);
     telegram.notifyMaster(`⏳ Новий запит у списку очікування\n${service.name}, ${fmt(date)}\n${name}, ${phone}`);
+    onNew(masterId); // адмінка наживо: червоний сигнал
     res.status(201).json({ ok: true, telegramLink: telegram.remindLink(`w_${code}`) });
   });
 
@@ -87,14 +94,23 @@ function setupWaitlist({ app, db, telegram, freeSlots, isBookableDate, horizonDa
   setInterval(() => checkWaitlist().catch((e) => console.error('Список очікування:', e.message)), CHECK_EVERY_MS).unref();
 
   // ----- Адмінка (маршрути реєструються після перевірки доступу адміна) -----
-  app.get('/api/admin/waitlist', (req, res) => {
-    // Майстер бачить заявки до себе і заявки «до будь-кого»
+  // Майстер бачить заявки до себе і заявки «до будь-кого»
+  const SCOPE = "w.status IN ('waiting', 'notified') AND w.date >= ? AND (? IS NULL OR w.master_id IS NULL OR w.master_id = ?)";
+  // Скільки нових (ще не переглянутих) заявок — для червоного сигналу в адмінці
+  app.get('/api/admin/waitlist/new-count', (req, res) => {
     const mine = req.role === 'master' ? req.masterId : null;
-    res.json(db.prepare(`SELECT w.id, w.date, w.name, w.phone, w.status, (w.tg_chat_id IS NOT NULL) AS telegram, s.name AS service,
-        w.master_id, m.name AS master
+    res.json({ count: db.prepare(`SELECT COUNT(*) AS n FROM waitlist w WHERE ${SCOPE} AND w.seen_at IS NULL`).get(todayStr(), mine, mine).n });
+  });
+  // Список; відкрили — отже, побачили: позначаємо показані заявки переглянутими
+  app.get('/api/admin/waitlist', (req, res) => {
+    const mine = req.role === 'master' ? req.masterId : null;
+    const rows = db.prepare(`SELECT w.id, w.date, w.name, w.phone, w.status, (w.tg_chat_id IS NOT NULL) AS telegram, s.name AS service,
+        w.master_id, m.name AS master, (w.seen_at IS NULL) AS is_new
       FROM waitlist w JOIN services s ON s.id = w.service_id LEFT JOIN masters m ON m.id = w.master_id
-      WHERE w.status IN ('waiting', 'notified') AND w.date >= ? AND (? IS NULL OR w.master_id IS NULL OR w.master_id = ?)
-      ORDER BY w.date, w.id`).all(todayStr(), mine, mine));
+      WHERE ${SCOPE} ORDER BY w.date, w.id`).all(todayStr(), mine, mine);
+    const mark = db.prepare("UPDATE waitlist SET seen_at = datetime('now') WHERE id = ? AND seen_at IS NULL");
+    for (const r of rows) if (r.is_new) mark.run(r.id);
+    res.json(rows);
   });
   app.delete('/api/admin/waitlist/:id', (req, res) => {
     if (req.role === 'master') db.prepare("UPDATE waitlist SET status = 'removed' WHERE id = ? AND master_id = ?").run(Number(req.params.id), req.masterId);

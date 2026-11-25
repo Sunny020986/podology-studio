@@ -180,6 +180,7 @@
     renderMasterTg();
     renderMasterCal().catch(() => {});
     updateVideoCount();
+    updateWaitCount();
     show('appointments');
   }
 
@@ -279,16 +280,35 @@
   };
 
   const WAIT_STATUS = { waiting: 'Чекає', notified: 'Повідомлено' };
+  // Червоний сигнал (1 см, пульсує раз на 5 с): нові клієнти в черзі очікування, яких ще ніхто не переглянув
+  let waitNew = 0;
+  async function updateWaitCount() {
+    try {
+      const { count } = await api('/api/admin/waitlist/new-count');
+      waitNew = count;
+      const sig = $('#waitSignal');
+      if (sig) { sig.textContent = count; sig.hidden = !count; }
+      const btn = $('#apptWaitBtn');
+      if (btn) {
+        const old = btn.querySelector('.wait-signal');
+        if (count && !old) btn.insertAdjacentHTML('beforeend', ` <span class="wait-signal" title="Нові клієнти в черзі">${count}</span>`);
+        else if (count && old) old.textContent = count;
+        else if (!count && old) old.remove();
+      }
+    } catch { /* не критично */ }
+  }
+  setInterval(() => { if (token && !document.hidden) updateWaitCount(); }, 60000);
   async function renderWaitlist() {
-    const list = await api('/api/admin/waitlist');
+    const list = await api('/api/admin/waitlist'); // відкрили список — нові заявки стають переглянутими
     $('#view').innerHTML = apptToolbar() +
       '<p class="muted">Клієнти, яким не вистачило вільного часу. Коли час звільняється, бот повідомляє першого в черзі. Якщо в клієнта немає Telegram, повідомлення приходить вам, щоб зателефонувати.</p>' +
       '<table><thead><tr><th>Дата</th><th>Послуга</th><th>Майстер</th><th>Клієнт</th><th>Телефон</th><th>Telegram</th><th>Статус</th><th></th></tr></thead><tbody>' +
-      (list.length ? list.map((w) => '<tr><td>' + fmtDate(w.date) + '</td><td>' + esc(w.service) + '</td><td>' + esc(w.master || 'будь-хто') + '</td><td>' + esc(w.name) + '</td><td>' + esc(w.phone) + '</td>' +
+      (list.length ? list.map((w) => '<tr' + (w.is_new ? ' class="wait-new"' : '') + '><td>' + (w.is_new ? '<span class="badge-new">нова</span> ' : '') + fmtDate(w.date) + '</td><td>' + esc(w.service) + '</td><td>' + esc(w.master || 'будь-хто') + '</td><td>' + esc(w.name) + '</td><td>' + esc(w.phone) + '</td>' +
         '<td>' + (w.telegram ? 'так' : '—') + '</td><td>' + (WAIT_STATUS[w.status] || esc(w.status)) + '</td>' +
         '<td><button class="btn btn-ghost small danger" type="button" data-del-wait="' + w.id + '">Прибрати</button></td></tr>').join('')
         : '<tr><td colspan="8" class="muted">У черзі нікого немає.</td></tr>') + '</tbody></table>';
     updateCloseDayCount();
+    updateWaitCount();
   }
   // «Друзі клієнтів»: кого привели клієнти, кому передзвонити, чи прийшов друг і чи нараховано знижку тому, хто привів
   const FR_REWARD = { none: '—', available: 'є, ще не використана', used: 'використана' };
@@ -325,7 +345,7 @@
       ${apptView !== 'table' ? '' : `<div class="toolbar">
         <button class="btn ${!apptArchive && !apptWaitlist && !apptFriends ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptUpcoming">Поточні і майбутні</button>
         <button class="btn ${apptArchive && !apptWaitlist && !apptFriends ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptArchiveBtn">Архів</button>
-        <button class="btn ${apptWaitlist ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptWaitBtn">Черга очікування</button>
+        <button class="btn ${apptWaitlist ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptWaitBtn">Черга очікування${waitNew ? ` <span class="wait-signal" title="Нові клієнти в черзі">${waitNew}</span>` : ''}</button>
         ${isSuper() ? `<button class="btn ${apptFriends ? 'btn-primary' : 'btn-ghost'} small" type="button" id="apptFriendsBtn">Друзі клієнтів</button>` : ''}
         ${apptWaitlist || apptFriends ? '' : masterSelect('apptMaster', apptMaster, 'Усі майстри')}
       </div>`}`;
@@ -1462,6 +1482,7 @@
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
       if (m.type === 'appt') liveAppt(m);
+      if (m.type === 'waitlist') { updateWaitCount(); beep(false); notify('Новий клієнт у черзі очікування'); }
       if (m.type === 'message') {
         if (m.conversationId === currentConv && $('#threadBody') && $('#replyForm') && !$('#replyForm').hidden) {
           const empty = $('#threadBody .muted');

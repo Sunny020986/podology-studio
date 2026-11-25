@@ -505,7 +505,7 @@ const MASTER_ROUTES = [
   /^GET \/clients\/\d{9}\/course$/, /^GET \/clients\/\d{9}\/photos$/, /^POST \/clients\/\d{9}\/photos$/, /^GET \/clients\/\d{9}\/photo-consent$/, /^PUT \/clients\/\d{9}\/photo-consent$/, /^GET \/client-photos\/\d+\/file$/, /^DELETE \/client-photos\/\d+$/,
   /^GET \/schedule$/, /^PUT \/schedule\/\d$/, /^GET \/booking-limits$/, /^PUT \/booking-limits$/,
   /^GET \/client-videos$/, /^GET \/client-videos\/new-count$/, /^GET \/client-videos\/\d+\/link$/, /^PUT \/client-videos\/\d+\/reply$/, /^DELETE \/client-videos\/\d+$/, /^GET \/breaks$/, /^POST \/breaks$/, /^DELETE \/breaks\/\d+$/,
-  /^GET \/blocks$/, /^POST \/blocks$/, /^DELETE \/blocks\/\d+$/, /^GET \/waitlist$/, /^DELETE \/waitlist\/\d+$/,
+  /^GET \/blocks$/, /^POST \/blocks$/, /^DELETE \/blocks\/\d+$/, /^GET \/waitlist$/, /^GET \/waitlist\/new-count$/, /^DELETE \/waitlist\/\d+$/,
   /^POST \/appointments$/, /^PATCH \/appointments\/\d+\/move$/, /^GET \/slots$/, /^GET \/calendar$/,
   /^POST \/me\/telegram$/, /^DELETE \/me\/telegram$/,
   /^GET \/me\/calendar$/, /^POST \/me\/calendar$/, /^DELETE \/me\/calendar$/,
@@ -621,6 +621,7 @@ setupPrivacy({ app, readStudio });
 setupSeo({ app, db, siteUrl });
 const waitlist = setupWaitlist({
   app, db, telegram, freeSlots, isBookableDate, horizonDays: HORIZON_DAYS, todayStr, siteUrl, makeLimiter, last9,
+  onNew: (masterId) => liveWaitlist(masterId),
 });
 
 // Налаштування годин для скасування й перенесення клієнтом (лише для адміна)
@@ -1342,6 +1343,14 @@ const notifyAdmins = (obj) => admins.forEach((a) => { if (staffStillValid(a)) se
 // Адміністратор отримує всі; майстер — лише ті, що стосуються його записів (masters — кого стосується подія).
 // kind: 'new' | 'cancelled' | 'moved' | 'confirmed' — від клієнта (адмінка показує й подає звук); 'changed' — тихе оновлення.
 const staffSockets = new Set();
+// Нова заявка в черзі очікування: адмінка показує червоний сигнал. Майстрові — лише заявки до нього чи «до будь-кого».
+function liveWaitlist(masterId) {
+  for (const s of staffSockets) {
+    if (!staffStillValid(s)) continue;
+    if (s.meta.role === 'master' && masterId && Number(masterId) !== s.meta.masterId) continue;
+    send(s, { type: 'waitlist' });
+  }
+}
 function liveAppt(kind, a, masters = [a.master_id]) {
   const payload = { type: 'appt', kind, id: a.id, date: a.date, start_time: a.start_time, client_name: a.client_name, service: a.service, master: a.master || '' };
   for (const s of staffSockets) {

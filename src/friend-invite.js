@@ -128,8 +128,13 @@ function setupFriendInvite({ app, db, publicBook, hasVisits, accountFromRequest,
     if (!/^\+?[\d\s()-]+$/.test(phone) || digits.length < 9 || digits.length > 15) return { status: 400, error: 'Вкажіть коректний телефон друга' };
     if (key9(phone) === key) return { status: 400, error: 'Вкажіть номер друга, а не свій' };
     if (hasVisits(db, phone)) return { status: 409, error: 'Цей номер уже є в нашій базі. «Приведи друга» діє для нових клієнтів' };
-    if (db.prepare('SELECT 1 FROM friend_invites WHERE friend_key = ? AND removed = 0').get(key9(phone))) {
-      return { status: 409, error: 'Цього друга вже запросив інший клієнт' };
+    const prev = db.prepare('SELECT referrer_key, created_at FROM friend_invites WHERE friend_key = ? AND removed = 0 ORDER BY id DESC').get(key9(phone));
+    if (prev) {
+      const when = String(prev.created_at).slice(0, 10).split('-').reverse().join('.');
+      // Свій повтор — пояснюємо, що все вже гаразд; чужий — без імені того, хто запросив (це чужі дані)
+      return prev.referrer_key === key
+        ? { status: 409, error: `Ви вже запросили цього друга ${when}. Йому нічого не треба робити ще раз: знижка на перший візит чекає, щойно він запишеться` }
+        : { status: 409, error: 'Цього друга вже запросив інший наш клієнт. Друг однаково отримає знижку на перший візит' };
     }
     return null;
   }

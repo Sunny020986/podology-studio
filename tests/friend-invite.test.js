@@ -189,9 +189,17 @@ test('перевірки друга: не свій номер, новий клі
   assert.equal((await book(phone(), 'Перший Запрошувач', { mode: 'lead', name: 'Спільний Друг', phone: taken })).status, 201);
   const dup = await book(me, 'Тест Запрошує', { mode: 'lead', name: 'Спільний Друг', phone: taken });
   assert.equal(dup.status, 409);
-  assert.match(dup.body.error, /вже запросив інший клієнт/);
+  assert.match(dup.body.error, /вже запросив інший наш клієнт/);
+  // Той самий клієнт запрошує того самого друга вдруге — зрозуміле пояснення
+  const me2 = phone(), fr2 = phone();
+  assert.equal((await book(me2, 'Повтор Запрошує', { mode: 'lead', name: 'Друг Повтор', phone: fr2 })).status, 201);
+  await putStudio({ friend_max_open: '5' });
+  const again = await book(me2, 'Повтор Запрошує', { mode: 'lead', name: 'Друг Повтор', phone: fr2 });
+  assert.equal(again.status, 409);
+  assert.match(again.body.error, /Ви вже запросили цього друга \d\d\.\d\d\.\d{4}/);
+  await putStudio({ friend_max_open: '1' });
   assert.equal((await book(me, 'Тест Запрошує', { mode: 'щось', name: 'Друг', phone: phone() })).status, 400);
-  assert.equal(count(), before + 2, 'записано лише двох клієнтів з успішних кроків, жодного з помилкових');
+  assert.equal(count(), before + 3, 'записано лише трьох клієнтів з успішних кроків, жодного з помилкових');
 });
 
 test('до 5 друзів за один запис (за замовчуванням ліміт 5); 6-й — уже ні; повтор номера у формі — помилка', async () => {

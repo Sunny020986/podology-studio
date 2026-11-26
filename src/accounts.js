@@ -51,6 +51,11 @@ function createAccountTables(db) {
       PRIMARY KEY (kind, key)
     );
   `);
+  // Номер підтверджено через Telegram («Поділитися номером») або персоналом після дзвінка.
+  // Без підтвердження кабінет не показує записи цього номера й не дає знижки на перший візит.
+  const cols = db.prepare('PRAGMA table_info(accounts)').all().map((c) => c.name);
+  if (!cols.includes('phone_verified_at')) db.exec('ALTER TABLE accounts ADD COLUMN phone_verified_at TEXT');
+  if (!cols.includes('verified_by')) db.exec('ALTER TABLE accounts ADD COLUMN verified_by TEXT'); // telegram або хто з персоналу
 }
 
 function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate, isTime, horizonDays, makeLimiter, notifyMaster, changeHours, notifyMasterOf = () => {}, live = () => {} }) {
@@ -91,10 +96,11 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
   const hoursUntil = (date, time) => (new Date(`${date}T${time}:00`).getTime() - Date.now()) / 3600000;
   const canChange = (a) => a.status !== 'cancelled' && hoursUntil(a.date, a.start_time) >= changeHours();
 
-  const accountPhoneAppts = (acc) => db.prepare(`
+  // Записи номера бачить лише той, хто підтвердив, що номер його: інакше хтось міг би зареєструватися на чужий номер
+  const accountPhoneAppts = (acc) => (!acc.phone_verified_at ? [] : db.prepare(`
       SELECT a.id, a.date, a.start_time, a.end_time, a.client_phone, a.status, a.master_id, m.name AS master, s.id AS service_id, COALESCE(a.services_label, s.name) AS service, (CAST(substr(a.end_time, 1, 2) AS INTEGER) * 60 + CAST(substr(a.end_time, 4, 2) AS INTEGER)) - (CAST(substr(a.start_time, 1, 2) AS INTEGER) * 60 + CAST(substr(a.start_time, 4, 2) AS INTEGER)) AS duration_min, a.price_uah, a.price_full_uah, a.discount_pct, a.discount_kind, a.extra_services
       FROM appointments a JOIN services s ON s.id = a.service_id LEFT JOIN masters m ON m.id = a.master_id ORDER BY a.date DESC, a.start_time DESC`)
-    .all().filter((a) => last9(a.client_phone) === last9(acc.phone));
+    .all().filter((a) => last9(a.client_phone) === last9(acc.phone)));
 
   const ownAppt = (acc, id) => accountPhoneAppts(acc).find((a) => a.id === id);
 
@@ -145,7 +151,7 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
     const first = discountPct(db), extra = friendPct(db);
     const isInv = isInvitedFriend(db, acc.phone) && !hasVisits(db, acc.phone);
     const total = isInv ? Math.min(90, first + extra) : 0;
-    res.json({ name: acc.name, phone: acc.phone, telegram: !!acc.tg_chat_id, invited_discount: total, invited_parts: isInv ? { first, friend: extra } : null });
+    res.json({ name: acc.name, phone: acc.phone, telegram: !!acc.tg_chat_id, verified: !!acc.phone_verified_at, invited_discount: total, invited_parts: isInv ? { first, friend: extra } : null });
   });
 
   // ----- Записи клієнта -----
@@ -215,6 +221,70 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
     return '✅ Готово! Тепер ви можете входити на сайт через цей бот. Нагадування про записи надходитимуть сюди.';
   }
 
+  // ----- Підтвердження номера через Telegram -----
+  // Кабінет → «Підтвердити номер у Telegram» (v_) або вкладка «Забули пароль» → «Номер зайнятий?» (c_, без входу).
+  // Бот просить натиснути «Поділитися номером»; Telegram передає номер самого акаунта, тож підробити його не можна.
+  const VERIFY_MINUTES = 15;
+  const claimLimiter = makeLimiter(10, 60 * 60 * 1000);
+  function verifyLink(prefix, value) {
+    const code = crypto.randomBytes(6).toString('base64url');
+    db.prepare("INSERT INTO account_codes (kind, key, value, expires_at) VALUES ('verify', ?, ?, ?) ON CONFLICT(kind, key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at")
+      .run(sha(code), value, Date.now() + VERIFY_MINUTES * 60000);
+    return telegram.remindLink(`${prefix}_${code}`);
+  }
+  app.post('/api/account/verify/link', requireAccount, (req, res) => {
+    if (req.account.phone_verified_at) return res.status(409).json({ error: 'Номер уже підтверджено' });
+    const link = verifyLink('v', 'acc:' + req.account.id);
+    if (!link) return res.status(503).json({ error: 'Підтвердження через Telegram поки недоступне. Напишіть оператору в чат або подзвоніть — підтвердимо після дзвінка' });
+    res.json({ link, minutes: VERIFY_MINUTES });
+  });
+  // Справжній власник номера, на який уже хтось зареєструвався: підтверджує номер у боті й отримує код для нового пароля
+  app.post('/api/account/claim/link', (req, res) => {
+    if (claimLimiter.blocked(req.ip)) return res.status(429).json({ error: 'Забагато запитів. Спробуйте пізніше' });
+    claimLimiter.hit(req.ip);
+    const key = last9(req.body?.phone ?? '');
+    if (key.length !== 9) return res.status(400).json({ error: 'Вкажіть коректний телефон' });
+    const link = verifyLink('c', 'phone:' + key);
+    if (!link) return res.status(503).json({ error: 'Підтвердження через Telegram поки недоступне. Напишіть оператору в чат' });
+    res.json({ link, minutes: VERIFY_MINUTES });
+  });
+
+  const contactKeyboard = { keyboard: [[{ text: '📱 Поділитися номером', request_contact: true }]], resize_keyboard: true, one_time_keyboard: true };
+  const noKeyboard = { remove_keyboard: true };
+  // /start v_<код> або c_<код>: запам'ятовуємо, що цей чат чекає на номер, і показуємо кнопку
+  function verifyStart(code, chatId) {
+    const row = db.prepare("SELECT value, expires_at FROM account_codes WHERE kind = 'verify' AND key = ?").get(sha(code));
+    if (!row || row.expires_at < Date.now()) return 'Посилання застаріло. Відкрийте нове з сайту.';
+    db.prepare("DELETE FROM account_codes WHERE kind = 'verify' AND key = ?").run(sha(code));
+    db.prepare("INSERT INTO account_codes (kind, key, value, expires_at) VALUES ('vpend', ?, ?, ?) ON CONFLICT(kind, key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at")
+      .run(String(chatId), row.value, Date.now() + VERIFY_MINUTES * 60000);
+    return { text: 'Щоб підтвердити номер, натисніть кнопку «📱 Поділитися номером» внизу. Telegram передасть лише номер вашого акаунта.', reply_markup: contactKeyboard };
+  }
+  // Клієнт поділився контактом. contact.user_id має збігатися з тим, хто пише: чужий переслений контакт не рахується
+  function verifyContact(contact, fromId, chatId) {
+    const pend = db.prepare("SELECT value, expires_at FROM account_codes WHERE kind = 'vpend' AND key = ?").get(String(chatId));
+    if (!pend || pend.expires_at < Date.now()) return { text: 'Щоб підтвердити номер, відкрийте посилання з сайту ще раз.', reply_markup: noKeyboard };
+    if (!contact || String(contact.user_id) !== String(fromId)) return { text: 'Потрібен саме ваш номер: натисніть кнопку «📱 Поділитися номером».', reply_markup: contactKeyboard };
+    const key = last9(contact.phone_number || '');
+    const [type, val] = String(pend.value).split(':');
+    const acc = type === 'acc' ? db.prepare('SELECT * FROM accounts WHERE id = ?').get(Number(val)) : db.prepare('SELECT * FROM accounts WHERE phone_key = ?').get(val);
+    const want = type === 'acc' ? acc?.phone_key : val;
+    if (!want || key !== want) {
+      return { text: `Номер у Telegram (закінчується на ${key.slice(-4) || '—'}) не збігається з номером на сайті. Підтвердити можна лише свій номер. Якщо на сайті помилка в номері, напишіть оператору.`, reply_markup: noKeyboard };
+    }
+    db.prepare("DELETE FROM account_codes WHERE kind = 'vpend' AND key = ?").run(String(chatId));
+    if (!acc) return { text: 'Номер підтверджено, але кабінету на нього ще немає. Зареєструйтеся на сайті, а потім підтвердьте номер у кабінеті.', reply_markup: noKeyboard };
+    if (type === 'acc') {
+      db.prepare("UPDATE accounts SET phone_verified_at = datetime('now'), verified_by = 'telegram', tg_chat_id = ? WHERE id = ?").run(String(chatId), acc.id);
+      return { text: '✅ Номер підтверджено. Тепер у кабінеті видно ваші записи й діє знижка на перший візит. Нагадування про записи надходитимуть сюди.', reply_markup: noKeyboard };
+    }
+    // Номер зайнятий: код для нового пароля. Після нього кабінет переходить до власника номера (старі входи скасовуються)
+    const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    db.prepare("INSERT INTO account_codes (kind, key, value, expires_at, attempts) VALUES ('vreset', ?, ?, ?, 0) ON CONFLICT(kind, key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at, attempts = 0")
+      .run(want, sha(code) + ':' + chatId, Date.now() + RESET_MINUTES * 60000);
+    return { text: `✅ Номер підтверджено. Код для нового пароля: ${code}\nДійсний ${RESET_MINUTES} хв. Введіть його на сайті: «Кабінет» → «Забули пароль» → «Ввести код».`, reply_markup: noKeyboard };
+  }
+
   // ----- Відновлення пароля -----
   // Відповідь однакова незалежно від того, чи є такий номер: нікого не можна перевірити так
   app.post('/api/account/reset/request', (req, res) => {
@@ -236,24 +306,38 @@ function setupAccounts({ app, db, telegram, freeSlots, todayStr, isBookableDate,
     const code = String(req.body?.code ?? '').trim();
     const password = String(req.body?.password ?? '');
     if (password.length < 8 || password.length > 100) return res.status(400).json({ error: 'Пароль: від 8 до 100 символів' });
-    const row = db.prepare("SELECT * FROM account_codes WHERE kind = 'reset' AND key = ?").get(key);
-    if (!row || row.expires_at < Date.now()) return res.status(400).json({ error: 'Код прострочено. Запросіть новий' });
-    if (row.attempts >= MAX_CODE_TRIES) return res.status(429).json({ error: 'Забагато помилкових кодів. Запросіть новий' });
-    if (sha(code) !== row.value) {
-      db.prepare("UPDATE account_codes SET attempts = attempts + 1 WHERE kind = 'reset' AND key = ?").run(key);
+    // Код зі звичайного відновлення (reset) або після підтвердження номера в боті (vreset: «hash:чат»)
+    const vrow = db.prepare("SELECT * FROM account_codes WHERE kind = 'vreset' AND key = ?").get(key);
+    const rrow = db.prepare("SELECT * FROM account_codes WHERE kind = 'reset' AND key = ?").get(key);
+    const live = [vrow, rrow].filter((r) => r && r.expires_at >= Date.now());
+    if (!live.length) return res.status(400).json({ error: 'Код прострочено. Запросіть новий' });
+    if (live.every((r) => r.attempts >= MAX_CODE_TRIES)) return res.status(429).json({ error: 'Забагато помилкових кодів. Запросіть новий' });
+    const row = live.find((r) => r.attempts < MAX_CODE_TRIES && r.value.split(':')[0] === sha(code));
+    if (!row) {
+      for (const r of live) db.prepare('UPDATE account_codes SET attempts = attempts + 1 WHERE kind = ? AND key = ?').run(r.kind, key);
       return res.status(400).json({ error: 'Невірний код' });
     }
+    const verifiedChat = row.kind === 'vreset' ? row.value.split(':')[1] : null;
     const acc = db.prepare('SELECT id FROM accounts WHERE phone_key = ?').get(key);
     if (!acc) return res.status(400).json({ error: 'Невірний код' });
     db.transaction(() => {
       db.prepare('UPDATE accounts SET pass_hash = ? WHERE id = ?').run(hashPassword(password), acc.id);
       db.prepare('DELETE FROM account_sessions WHERE account_id = ?').run(acc.id);
-      db.prepare("DELETE FROM account_codes WHERE kind = 'reset' AND key = ?").run(key);
+      db.prepare("DELETE FROM account_codes WHERE kind IN ('reset', 'vreset') AND key = ?").run(key);
+      if (verifiedChat) {
+        db.prepare("UPDATE accounts SET phone_verified_at = datetime('now'), verified_by = 'telegram', tg_chat_id = ? WHERE id = ?").run(verifiedChat, acc.id);
+        db.prepare("DELETE FROM account_codes WHERE kind = 'link' AND value = ?").run(String(acc.id)); // старі посилання прив'язки Telegram
+      }
     })();
     res.json({ ok: true });
   });
 
-  return { linkTelegram, accountFromRequest };
+  // Персонал підтверджує номер після дзвінка (для клієнтів без Telegram)
+  function verifyByStaff(key, actor) {
+    return db.prepare("UPDATE accounts SET phone_verified_at = datetime('now'), verified_by = ? WHERE phone_key = ? AND phone_verified_at IS NULL").run(String(actor || 'персонал').slice(0, 80), key).changes;
+  }
+
+  return { linkTelegram, accountFromRequest, verifyStart, verifyContact, verifyByStaff };
 }
 
 module.exports = { setupAccounts, createAccountTables, hashPassword, checkPassword, last9, CHANGE_HOUR_OPTIONS };

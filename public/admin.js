@@ -1003,13 +1003,17 @@
   }
 
   // Рядок Telegram для майстра під вкладками
+  // Рядок Telegram під вкладками: майстрові — його записи; адміністраторові — ті самі сповіщення, що й у чат кабінету.
+  // Власник налаштовує чат кабінету у вкладці «Кабінет», тому йому цей рядок не потрібен.
   function renderMasterTg() {
     const box = $('#masterTg');
-    if (isSuper()) { box.hidden = true; return; }
+    const adminUser = isSuper() && me.admin;
+    if (isSuper() && !adminUser) { box.hidden = true; return; }
     box.hidden = false;
+    const what = adminUser ? 'нові записи, питання в чаті та інші сповіщення кабінету' : 'ваші нові записи, скасування й перенесення';
     box.innerHTML = me.telegram
-      ? '<span>✅ Telegram підключено: ваші нові записи, скасування й перенесення надходять у бот.</span><button class="btn btn-ghost small" type="button" id="mtgOff">Відключити</button>'
-      : '<span>Підключіть Telegram, щоб отримувати свої нові записи, скасування й перенесення.</span><button class="btn btn-primary small" type="button" id="mtgOn">Підключити Telegram</button>';
+      ? `<span>✅ Telegram підключено: ${what} надходять у бот.</span><button class="btn btn-ghost small" type="button" id="mtgOff">Відключити</button>`
+      : `<span>Підключіть свій Telegram, щоб отримувати ${what}.</span><button class="btn btn-primary small" type="button" id="mtgOn">Підключити Telegram</button>`;
   }
   // Посилання на календар: показується один раз, тому одразу пропонуємо скопіювати
   function calLinkHtml(r) {
@@ -1110,7 +1114,7 @@
       ? list.map((c) => `<tr>
           <td><button class="link" type="button" data-client="${c.key}">${esc(c.name)}</button>${noShowBadge(c.noshow_streak)}</td>
           <td>${esc(c.phone)}</td>
-          <td>${c.account ? `<span class="badge-acc" title="Зареєстрований ${esc(fmtUtcDate(c.account.since))}${c.account.telegram ? ', Telegram підключено' : ''}">кабінет${c.account.telegram ? ' · TG' : ''}</span>` : '—'}${c.account && !c.visits && !c.next_visit && !c.cancelled && !c.no_shows ? ' <span class="muted">ще не записувався</span>' : ''}</td>
+          <td>${c.account ? `<span class="badge-acc" title="Зареєстрований ${esc(fmtUtcDate(c.account.since))}${c.account.telegram ? ', Telegram підключено' : ''}">кабінет${c.account.telegram ? ' · TG' : ''}${c.account.verified ? '' : ' · номер не підтверджено'}</span>` : '—'}${c.account && !c.visits && !c.next_visit && !c.cancelled && !c.no_shows ? ' <span class="muted">ще не записувався</span>' : ''}</td>
           <td>${c.visits}${c.no_shows ? ` <span class="muted">(не прийшов: ${c.no_shows})</span>` : ''}</td>
           <td>${fmtDate(c.last_visit)}</td>
           <td>${fmtDate(c.next_visit)}</td>
@@ -1138,7 +1142,8 @@
       <button class="btn btn-ghost small" type="button" id="clientBack">← До списку клієнтів</button>
       <h3 style="margin:16px 0 4px">${esc(c.name)}</h3>
       <div class="muted">${esc(c.phone)} · візитів: ${done}${noShows ? ` · не прийшов: ${noShows}` : ''} · усього записів: ${c.appointments.length}</div>
-      <div class="muted">${c.account ? `Кабінет: зареєстрований ${esc(fmtUtcDate(c.account.since))}, Telegram ${c.account.telegram ? 'підключено' : 'не підключено'}${c.appointments.length ? '' : '. Ще жодного разу не записувався'}` : 'Кабінету на сайті немає'}</div>
+      <div class="muted">${c.account ? `Кабінет: зареєстрований ${esc(fmtUtcDate(c.account.since))}, Telegram ${c.account.telegram ? 'підключено' : 'не підключено'}, номер ${c.account.verified ? `підтверджено${c.account.verified_by && c.account.verified_by !== 'telegram' ? ` (${esc(c.account.verified_by)}, після дзвінка)` : ' через Telegram'}` : '<b>не підтверджено</b>'}${c.appointments.length ? '' : '. Ще жодного разу не записувався'}` : 'Кабінету на сайті немає'}</div>
+      ${c.account && !c.account.verified && isSuper() ? `<p class="verify-note">Поки номер не підтверджено, клієнт не бачить своїх записів у кабінеті й не отримує знижку на перший візит. Клієнт може підтвердити номер сам через Telegram. Якщо Telegram немає — подзвоніть на ${esc(c.phone)} і, якщо відповіла та сама людина, натисніть кнопку. <button class="btn btn-ghost small" type="button" id="clientVerify">Номер підтверджено дзвінком</button></p>` : ''}
       <div class="toolbar client-actions">
         <button class="btn btn-primary small" type="button" id="clientBook">+ Записати</button>
         ${isSuper() ? '<button class="btn btn-ghost small danger" type="button" id="clientErase">Видалити клієнта</button>' : ''}
@@ -1410,7 +1415,7 @@
   };
   const bubbleHtml = (m) => `<div class="bubble ${m.sender === 'operator' ? 'mine' : 'theirs'}" data-msg="${m.id}"><div class="who"><span>${m.sender === 'operator' ? 'Ви' : 'Клієнт'} · ${esc(localTime(m.created_at))}</span><button class="bubble-del" type="button" data-del-msg="${m.id}" title="Видалити це повідомлення" aria-label="Видалити повідомлення">×</button></div>${esc(m.body)}${m.edited_at ? `<div class="bubble-edited" title="Клієнт змінив повідомлення ${esc(localTime(m.edited_at))}">змінено</div>` : ''}</div>`;
   // Назва діалогу: ім'я й телефон клієнта з кабінету (старі діалоги без кабінету — за номером діалогу)
-  const convName = (c) => (c.client_name ? `${c.client_name}${c.client_phone ? ' · ' + c.client_phone : ''}` : 'Діалог ' + c.id.slice(0, 6));
+  const convName = (c) => (c.client_name ? `${c.client_name}${c.client_phone ? ' · ' + c.client_phone : ''}${c.client_verified ? '' : ' (номер не підтверджено)'}` : 'Діалог ' + c.id.slice(0, 6));
   let convCache = [];
 
   async function renderChat() {
@@ -2876,6 +2881,12 @@ ${isSuper() ? `
         return notify('Витрату збережено');
       }
 
+      if (e.target.id === 'clientVerify' && currentClient) {
+        if (!confirm('Ви подзвонили на цей номер і переконалися, що кабінет зареєструвала саме ця людина?')) return;
+        await api('/api/admin/clients/' + currentClient + '/verify-phone', { method: 'POST' });
+        notify('Номер кабінету підтверджено');
+        return await renderClient(currentClient);
+      }
       if (e.target.id === 'clientErase' && currentClient) {
         const key = currentClient;
         const p = await api('/api/admin/clients/' + key + '/erase-preview');

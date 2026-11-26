@@ -154,7 +154,7 @@ function setupFriendInvite({ app, db, publicBook, hasVisits, accountFromRequest,
       const msg = `🤝 Друг клієнта ${ref.name}: ${name}, ${phone}\nЗателефонуйте й запишіть (знижка на перший візит нарахується сама). Список: адмінка → «Записи» → «Друзі клієнтів»`;
       if (defer) defer.push(() => notifyStaff(msg)); else notifyStaff(msg);
       // Знижка друга на перший візит: за запрошення — завжди; ще знижка на перший візит — якщо в нього є кабінет на сайті
-      const reg = !!db.prepare('SELECT 1 FROM accounts WHERE phone_key = ?').get(key9(phone));
+      const reg = !!db.prepare('SELECT 1 FROM accounts WHERE phone_key = ? AND phone_verified_at IS NOT NULL').get(key9(phone));
       return { status: 201, body: { mode: 'lead', name, pct: Math.min(90, friendPct(db) + (reg ? discountPct(db) : 0)), regPct: reg ? 0 : discountPct(db) } };
     }
     // Запрошення записуємо ДО запису друга: тоді bookTx бачить, що це запрошений друг, і дає знижку на перший візит
@@ -198,6 +198,8 @@ function setupFriendInvite({ app, db, publicBook, hasVisits, accountFromRequest,
   app.post('/api/account/friend-invite', (req, res) => {
     const acc = accountFromRequest(req);
     if (!acc) return res.status(401).json({ error: 'Увійдіть в кабінет' });
+    // Знижка за друзів належить номеру — запрошувати з кабінету можна лише після підтвердження номера
+    if (!acc.phone_verified_at) return res.status(403).json({ error: 'Спершу підтвердіть номер у кабінеті (через Telegram), тоді зможете запрошувати друзів' });
     const list = asList(req.body?.friends ?? req.body);
     const ref = { phone: acc.phone, name: acc.name };
     const bad = list.length ? checkMany(ref, list) : { status: 400, error: 'Додайте друга' };

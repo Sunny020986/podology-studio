@@ -66,9 +66,16 @@ async function startServer(extraEnv = {}) {
     if (accounts.has(k)) return;
     const r = await req('POST', '/api/account/register', { body: { name, phone, password: 'cabinet-pass-1' } });
     if (r.status !== 201 && r.status !== 409) throw new Error('Реєстрація: ' + r.text);
+    await verify(phone);
     accounts.add(k);
   }
-  return { base, req, stop, dir, log: () => log, ADMIN, register };
+  // Підтвердити номер кабінету (як після дзвінка персоналу): без цього кабінет не бачить записів і знижки
+  async function verify(phone) {
+    const k = String(phone).replace(/\D/g, '').slice(-9);
+    const r = await req('POST', `/api/admin/clients/${k}/verify-phone`, { token: ADMIN });
+    if (r.status !== 200) throw new Error('Підтвердження номера: ' + r.text);
+  }
+  return { base, req, stop, dir, log: () => log, ADMIN, register, verify };
 }
 
 // Майстер з паролем і всіма послугами; повертає { id, token }

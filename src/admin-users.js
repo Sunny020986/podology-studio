@@ -23,6 +23,8 @@ function createAdminUserTables(db) {
     expires_at INTEGER NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
+  // Свій Telegram адміністратора: йому приходять ті самі сповіщення, що й у чат кабінету
+  if (!db.prepare('PRAGMA table_info(admin_users)').all().some((c) => c.name === 'tg_chat_id')) db.exec('ALTER TABLE admin_users ADD COLUMN tg_chat_id TEXT');
 }
 
 // Активний адміністратор за токеном сесії (або null)

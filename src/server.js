@@ -565,25 +565,38 @@ function scheduleMaster(req, res) {
 }
 
 app.get('/api/admin/me', (req, res) => res.json(req.role === 'super'
-  ? { role: 'super', owner: !!req.owner, admin: req.adminId ? { id: req.adminId, name: req.adminName } : null }
+  ? { role: 'super', owner: !!req.owner, admin: req.adminId ? { id: req.adminId, name: req.adminName } : null,
+      telegram: req.adminId ? !!db.prepare('SELECT tg_chat_id FROM admin_users WHERE id = ?').get(req.adminId)?.tg_chat_id : false }
   : { role: 'master', master: { id: req.masterId, name: req.masterName },
       telegram: !!db.prepare('SELECT tg_chat_id FROM masters WHERE id = ?').get(req.masterId)?.tg_chat_id }));
 
-// Майстер підключає свій Telegram: бот надсилатиме йому його нові записи, скасування й перенесення
+// Майстер чи адміністратор підключає свій Telegram: майстрові — його записи, скасування й перенесення,
+// адміністраторові — ті самі сповіщення, що й у чат кабінету. Власник отримує їх у чат кабінету (вкладка «Кабінет»)
 const MASTER_LINK_MINUTES = 15;
 app.post('/api/admin/me/telegram', (req, res) => {
-  if (req.role !== 'master') return res.status(400).json({ error: 'Це налаштування для майстра' });
+  const isMaster = req.role === 'master';
+  if (!isMaster && !req.adminId) return res.status(400).json({ error: 'Власник отримує сповіщення в чат кабінету: вкладка «Кабінет» → «Сповіщення в Telegram»' });
   const code = crypto.randomBytes(6).toString('base64url');
-  db.prepare("INSERT INTO account_codes (kind, key, value, expires_at) VALUES ('mlink', ?, ?, ?) ON CONFLICT(kind, key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at")
-    .run(sha(code), String(req.masterId), Date.now() + MASTER_LINK_MINUTES * 60000);
-  const link = telegram.remindLink(`m_${code}`);
+  db.prepare("INSERT INTO account_codes (kind, key, value, expires_at) VALUES (?, ?, ?, ?) ON CONFLICT(kind, key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at")
+    .run(isMaster ? 'mlink' : 'alink', sha(code), String(isMaster ? req.masterId : req.adminId), Date.now() + MASTER_LINK_MINUTES * 60000);
+  const link = telegram.remindLink(`${isMaster ? 'm' : 'a'}_${code}`);
   if (!link) return res.status(503).json({ error: 'Бот Telegram ще не налаштований. Попросіть адміністратора налаштувати його у вкладці «Кабінет»' });
   res.json({ link, minutes: MASTER_LINK_MINUTES });
 });
 app.delete('/api/admin/me/telegram', (req, res) => {
   if (req.role === 'master') db.prepare('UPDATE masters SET tg_chat_id = NULL WHERE id = ?').run(req.masterId);
+  else if (req.adminId) db.prepare('UPDATE admin_users SET tg_chat_id = NULL WHERE id = ?').run(req.adminId);
   res.json({ ok: true });
 });
+function linkAdminTelegram(code, chatId) {
+  const row = db.prepare("SELECT value, expires_at FROM account_codes WHERE kind = 'alink' AND key = ?").get(sha(code));
+  if (!row || row.expires_at < Date.now()) return 'Посилання застаріло. Згенеруйте нове в адмінці.';
+  db.prepare("DELETE FROM account_codes WHERE kind = 'alink' AND key = ?").run(sha(code));
+  db.prepare('UPDATE admin_users SET tg_chat_id = ? WHERE id = ?').run(chatId, Number(row.value));
+  return '✅ Готово! Тепер сюди надходитимуть нові записи, питання в чаті та інші сповіщення кабінету.';
+}
+// Сповіщення персоналу йдуть і в чат кабінету, і кожному активному адміністраторові, що підключив Telegram
+telegram.setStaffChats(() => db.prepare("SELECT tg_chat_id FROM admin_users WHERE status = 'active' AND tg_chat_id IS NOT NULL").all().map((r) => r.tg_chat_id));
 function linkMasterTelegram(code, chatId) {
   const row = db.prepare("SELECT value, expires_at FROM account_codes WHERE kind = 'mlink' AND key = ?").get(sha(code));
   if (!row || row.expires_at < Date.now()) return 'Посилання застаріло. Згенеруйте нове в адмінці.';
@@ -803,6 +816,33 @@ function unclosedAppts(req) {
     .filter(hasStarted);
 }
 app.get('/api/admin/close-day/count', (req, res) => res.json({ count: unclosedAppts(req).length }));
+
+// Нагадування «Закрити день»: увечері (CLOSE_DAY_REMIND_AT, за замовчуванням 21:00) бот пише персоналу, скільки записів
+// не позначено («Відбувся» / «Не прийшов»), а кожному майстрові з Telegram — про його записи. Раз на день.
+// Без цього непозначений запис вважається візитом: губляться неявки, псується статистика.
+const CLOSE_REMIND_AT = (() => { const m = String(process.env.CLOSE_DAY_REMIND_AT || '21:00').match(/^(\d{1,2}):(\d{2})$/); return m ? Number(m[1]) * 60 + Number(m[2]) : 21 * 60; })();
+const plural = (n, one, few, many) => (n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many);
+function closeDayText(list, today) {
+  const todayN = list.filter((a) => a.date === today).length;
+  const older = list.length - todayN;
+  const parts = [];
+  if (todayN) parts.push(`за сьогодні — ${todayN} ${plural(todayN, 'запис', 'записи', 'записів')}`);
+  if (older) parts.push(`за попередні дні — ще ${older}`);
+  return `📋 Не позначено, чи прийшли клієнти: ${parts.join(', ')}.\n` +
+    'Позначте «Відбувся» або «Не прийшов»: адмінка → «Записи» → «Закрити день». Без позначки запис рахується як візит.';
+}
+function closeDayReminder() {
+  const today = todayStr();
+  if (nowMin() < CLOSE_REMIND_AT || db.prepare("SELECT value FROM settings WHERE key = 'close_day_reminded'").get()?.value === today) return;
+  db.prepare("INSERT INTO settings (key, value) VALUES ('close_day_reminded', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(today);
+  const all = unclosedAppts({ role: 'super', query: {}, body: {} });
+  if (!all.some((a) => a.date === today)) return; // за сьогодні все позначено — не турбуємо
+  telegram.notifyMaster(closeDayText(all, today));
+  for (const mid of new Set(all.filter((a) => a.date === today).map((a) => a.master_id).filter(Boolean))) {
+    notifyMasterOf(mid, closeDayText(all.filter((a) => a.master_id === mid), today));
+  }
+}
+setInterval(() => { try { closeDayReminder(); } catch (e) { console.error('«Закрити день»:', e.message); } }, Number(process.env.REMINDER_INTERVAL_MS) || 5 * 60 * 1000).unref();
 app.get('/api/admin/close-day', (req, res) => res.json(unclosedAppts(req)));
 app.post('/api/admin/close-day', (req, res) => {
   const items = Array.isArray(req.body?.items) ? req.body.items : null;
@@ -852,10 +892,13 @@ const reminders = setupReminderButtons({
 });
 
 // Клієнт натиснув «Start» за посиланням із сайту: прив'язуємо його чат до запису
+telegram.onContact((contact, fromId, chatId) => accounts.verifyContact(contact, fromId, chatId));
 telegram.onStart((code, chatId) => {
   if (code.startsWith('acc_')) return accounts.linkTelegram(code.slice(4), chatId);
+  if (code.startsWith('v_') || code.startsWith('c_')) return accounts.verifyStart(code.slice(2), chatId);
   if (code.startsWith('w_')) return waitlist.linkTelegram(code.slice(2), chatId);
   if (code.startsWith('m_')) return linkMasterTelegram(code.slice(2), chatId);
+  if (code.startsWith('a_')) return linkAdminTelegram(code.slice(2), chatId);
   const a = apptForClient('a.remind_code = ?', code);
   if (!a) return 'Не знайшли цей запис. Можливо, посилання застаріло. Запишіться на сайті ще раз або подзвоніть нам.';
   if (a.status === 'cancelled') return 'Цей запис скасовано. Щоб записатися знову, скористайтеся сайтом.';
@@ -946,14 +989,14 @@ function listClients(q, mode, masterId = null) {
   }
   // Зареєстровані в кабінеті: позначка «кабінет»; суперадмін бачить і тих, хто ще жодного разу не записувався
   // (майстер — лише своїх клієнтів із записами)
-  for (const acc of db.prepare('SELECT phone, phone_key, name, created_at, (tg_chat_id IS NOT NULL) AS tg FROM accounts').all()) {
+  for (const acc of db.prepare('SELECT phone, phone_key, name, created_at, (tg_chat_id IS NOT NULL) AS tg, phone_verified_at FROM accounts').all()) {
     let c = map.get(acc.phone_key);
     if (!c && masterId) continue;
     if (!c) {
       c = { key: acc.phone_key, name: acc.name, phone: acc.phone, visits: 0, cancelled: 0, no_shows: 0, noshow_streak: 0, last_visit: null, next_visit: null, last_change: acc.created_at };
       map.set(acc.phone_key, c);
     }
-    c.account = { since: acc.created_at, telegram: !!acc.tg };
+    c.account = { since: acc.created_at, telegram: !!acc.tg, verified: !!acc.phone_verified_at };
   }
   let list = [...map.values()].map((c) => {
     const n = notes.get(c.key);
@@ -1089,6 +1132,16 @@ app.get('/api/admin/clients.csv', (req, res) => {
   res.send('\uFEFF' + lines.map((l) => l.map(cell).join(';')).join('\r\n') + '\r\n');
 });
 
+// Підтвердити номер кабінету вручну (клієнт без Telegram, після дзвінка на цей номер). Лише суперадмін
+app.post('/api/admin/clients/:key/verify-phone', (req, res) => {
+  if (req.role !== 'super') return res.status(403).json({ error: 'Недостатньо прав' });
+  const key = req.params.key;
+  if (!isClientKey(key)) return res.status(400).json({ error: 'Некоректний клієнт' });
+  if (!db.prepare('SELECT 1 FROM accounts WHERE phone_key = ?').get(key)) return res.status(404).json({ error: 'У клієнта немає кабінету' });
+  accounts.verifyByStaff(key, req.actor?.name || req.adminName || 'Власник');
+  res.json({ ok: true });
+});
+
 app.get('/api/admin/clients/:key', (req, res) => {
   const key = req.params.key;
   if (!isClientKey(key)) return res.status(400).json({ error: 'Некоректний клієнт' });
@@ -1098,7 +1151,7 @@ app.get('/api/admin/clients/:key', (req, res) => {
               ORDER BY a.date DESC, a.start_time DESC`)
     .all()
     .filter((a) => last9(a.client_phone) === key && (req.role === 'super' || a.master_id === req.masterId));
-  const acc = db.prepare('SELECT name, phone, created_at, (tg_chat_id IS NOT NULL) AS tg FROM accounts WHERE phone_key = ?').get(key);
+  const acc = db.prepare('SELECT name, phone, created_at, (tg_chat_id IS NOT NULL) AS tg, phone_verified_at, verified_by FROM accounts WHERE phone_key = ?').get(key);
   // Клієнт без записів, але з кабінетом — бачить лише суперадмін
   if (!appointments.length && !(acc && req.role === 'super')) return res.status(404).json({ error: 'Клієнта не знайдено' });
   const noteRow = db.prepare('SELECT note, updated_at FROM client_notes WHERE phone_key = ?').get(key);
@@ -1107,7 +1160,7 @@ app.get('/api/admin/clients/:key', (req, res) => {
     name: appointments.length ? appointments[0].client_name : acc.name,
     phone: appointments.length ? appointments[0].client_phone : acc.phone,
     note: noteRow ? noteRow.note : '',
-    account: acc ? { since: acc.created_at, telegram: !!acc.tg, name: acc.name } : null,
+    account: acc ? { since: acc.created_at, telegram: !!acc.tg, name: acc.name, verified: !!acc.phone_verified_at, verified_by: acc.verified_by || '' } : null,
     appointments,
   });
 });
@@ -1327,7 +1380,7 @@ app.delete('/api/admin/conversations/:id', (req, res) => {
 // ---------- Чат (WebSocket) ----------
 function listConversations() {
   return db
-    .prepare(`SELECT c.id, c.last_message_at, acc.name AS client_name, acc.phone AS client_phone,
+    .prepare(`SELECT c.id, c.last_message_at, acc.name AS client_name, acc.phone AS client_phone, (acc.phone_verified_at IS NOT NULL) AS client_verified,
                      (SELECT body FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_body
               FROM conversations c LEFT JOIN accounts acc ON acc.id = c.account_id ORDER BY c.last_message_at DESC LIMIT 200`)
     .all();

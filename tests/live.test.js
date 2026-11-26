@@ -87,6 +87,7 @@ test('зміни персоналу — тиха подія «changed», теж 
 test('клієнт скасовує чи переносить запис у кабінеті — події «cancelled» і «moved»', async () => {
   const reg = await srv.req('POST', '/api/account/register', { body: { name: 'Ірина Кабінет', phone: '+380671110003', password: 'parol-12345' } });
   assert.equal(reg.status, 201, reg.text);
+  await srv.verify('+380671110003');
   const Cookie = cookieOf(reg);
 
   // Перенесення

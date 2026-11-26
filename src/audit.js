@@ -68,6 +68,7 @@ function setupAudit({ app, db, last9 }) {
     ['POST', /^\/clients\/(\d{9})\/archive$/, 'Клієнти: в архів', (m) => client(m[1])],
     ['POST', /^\/clients\/(\d{9})\/restore$/, 'Клієнти: повернуто з архіву', (m) => client(m[1])],
     ['PUT', /^\/clients\/(\d{9})\/note$/, 'Клієнти: нотатка', (m) => client(m[1])],
+    ['POST', /^\/clients\/(\d{9})\/verify-phone$/, 'Клієнти: номер кабінету підтверджено після дзвінка', (m) => client(m[1])],
     ['PUT', /^\/clients\/(\d{9})\/photo-consent$/, (b) => (b.granted ? 'Фото стоп: згоду позначено' : 'Фото стоп: згоду відкликано'), (m) => client(m[1])],
     ['POST', /^\/clients\/(\d{9})\/photos$/, 'Фото стоп: додано', (m) => client(m[1])],
     ['DELETE', /^\/client-photos\/(\d+)$/, 'Фото стоп: видалено', (m) => {

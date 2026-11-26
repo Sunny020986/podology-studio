@@ -31,7 +31,7 @@ test('власник додає адміністратора; той входи�
   assert.equal(r.status, 200, r.text);
   adminToken = r.body.token;
   const me = (await srv.req('GET', '/api/admin/me', { token: adminToken })).body;
-  assert.deepEqual(me, { role: 'super', owner: false, admin: { id: adminId, name: 'Оксана Адмін' } });
+  assert.deepEqual(me, { role: 'super', owner: false, admin: { id: adminId, name: 'Оксана Адмін' }, telegram: false });
   assert.equal((await srv.req('GET', '/api/admin/me', { token: srv.ADMIN })).body.owner, true);
   assert.equal((await srv.req('GET', '/api/admin/masters', { token: adminToken })).status, 200, 'бачить майстрів');
   assert.equal((await srv.req('GET', '/api/admin/admin-users', { token: adminToken })).status, 403);

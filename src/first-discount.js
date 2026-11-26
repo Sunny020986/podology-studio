@@ -37,10 +37,11 @@ const discountPct = (db) => {
   return Number.isInteger(n) && n > 0 && n <= 90 ? n : 0;
 };
 
-// Чи є в номера кабінет на сайті. Знижка на перший візит — лише зареєстрованим клієнтам («Знижка за реєстрацію»)
+// Чи є в номера кабінет на сайті з підтвердженим номером. Знижка на перший візит — лише таким клієнтам
+// («Знижка за реєстрацію»): інакше хтось міг би зареєструватися на чужий номер і забрати знижку
 function isRegistered(db, phone) {
   const key = String(phone).replace(/\D/g, '').slice(-9);
-  return key.length === 9 && !!db.prepare('SELECT 1 FROM accounts WHERE phone_key = ?').get(key);
+  return key.length === 9 && !!db.prepare('SELECT 1 FROM accounts WHERE phone_key = ? AND phone_verified_at IS NOT NULL').get(key);
 }
 
 // Чи були в цього номера записи, окрім скасованих і «не прийшов»

@@ -90,6 +90,7 @@ function createTelegram(db) {
   let poll = null; // { token, stop }
   let botUsername = '';
   let startHandler = () => null; // (код зі /start, чат) → текст відповіді або null
+  let contactHandler = () => null; // (контакт, хто пише, чат) → відповідь (текст або { text, reply_markup })
   let callbackHandler = () => null; // (дані кнопки, чат) → { answer, text?, buttons? } або null
 
   function remember(chat) {
@@ -126,6 +127,13 @@ function createTelegram(db) {
     const m = u.message;
     if (!m?.chat || m.chat.type !== 'private') return;
     const chatId = String(m.chat.id);
+    // Клієнт натиснув «Поділитися номером» (підтвердження номера кабінету)
+    if (m.contact) {
+      let r = null;
+      try { r = contactHandler(m.contact, String(m.from?.id ?? ''), chatId); } catch (e) { console.error('Telegram (контакт):', e.message); }
+      if (r) await sendReply(token, chatId, r);
+      return;
+    }
     const text = String(m.text || '').trim();
     const code = (text.match(/^\/start\s+(\S+)/) || [])[1];
     if (!code) remember(m.chat);
@@ -139,7 +147,12 @@ function createTelegram(db) {
       reply = `Привіт! Цей бот надсилає нагадування про запис у «${name}». Щоб увімкнути нагадування, ` +
         'запишіться на сайті й натисніть кнопку «Нагадати в Telegram» під підтвердженням запису.';
     }
-    if (reply) await call(token, 'sendMessage', { chat_id: chatId, text: reply }).catch(() => {});
+    if (reply) await sendReply(token, chatId, reply);
+  }
+  // Відповідь — текст або { text, reply_markup } (наприклад, кнопка «Поділитися номером»)
+  async function sendReply(token, chatId, r) {
+    const body = typeof r === 'string' ? { chat_id: chatId, text: r } : { chat_id: chatId, text: r.text, reply_markup: r.reply_markup };
+    await call(token, 'sendMessage', body).catch(() => {});
   }
 
   function startPolling() {
@@ -216,8 +229,16 @@ function createTelegram(db) {
   }
 
   // Сповіщення не мають ламати запис чи чат: помилки лише пишемо в журнал
-  const fire = (text) => send(text).then((ok) => { if (ok) sendError = null; return ok; })
-    .catch((e) => { console.error('Telegram:', explain(e)); sendError = errInfo(e); });
+  // Додаткові чати персоналу (адміністратори з власним Telegram); помилки там лише в журнал
+  let staffChats = () => [];
+  const fire = (text) => {
+    const main = get('tg_chat_id');
+    let extra = [];
+    try { extra = [...new Set(staffChats().map(String))].filter((c) => c && c !== main); } catch (e) { console.error('Telegram (персонал):', e.message); }
+    for (const c of extra) send(text, c).catch((e) => console.error('Telegram (адміністратор):', explain(e)));
+    return send(text).then((ok) => { if (ok) sendError = null; return ok; })
+      .catch((e) => { console.error('Telegram:', explain(e)); sendError = errInfo(e); });
+  };
 
   async function test() {
     if (!status().configured) throw Object.assign(new Error('Спершу збережіть токен і номер чату'), { status: 400 });
@@ -257,12 +278,14 @@ function createTelegram(db) {
 
   const onStart = (fn) => { startHandler = fn; };
   const onCallback = (fn) => { callbackHandler = fn; };
+  const onContact = (fn) => { contactHandler = fn; };
+  const setStaffChats = (fn) => { staffChats = fn; };
 
   startPolling();
 
   return {
     status, save, clear, detect, test, newAppointment, newChatMessage,
-    sendToClient, remindLink, onStart, onCallback, fmtDate, notifyMaster: (text) => fire(text),
+    sendToClient, remindLink, onStart, onCallback, onContact, setStaffChats, fmtDate, notifyMaster: (text) => fire(text),
   };
 }
 

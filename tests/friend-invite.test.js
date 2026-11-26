@@ -255,6 +255,9 @@ test('кабінет: стан і запрошення за сесією; без
   const Cookie = (reg.headers.get('set-cookie') || '').split(';')[0];
   const st = (await srv.req('GET', '/api/account/friend-invite', { headers: { Cookie } })).body;
   assert.deepEqual({ available: st.available, rewards: st.rewards, pct: st.pct }, { available: true, rewards: 0, pct: 20 });
+  const un = await srv.req('POST', '/api/account/friend-invite', { headers: { Cookie }, body: { friends: [{ mode: 'lead', name: 'Друг Рано', phone: phone() }] } });
+  assert.equal(un.status, 403, 'номер не підтверджено — запрошувати не можна');
+  await srv.verify(me);
   const r = await srv.req('POST', '/api/account/friend-invite', { headers: { Cookie }, body: { friends: [{ mode: 'lead', name: 'Друг З Кабінету', phone: phone() }] } });
   assert.equal(r.status, 201, r.text);
   assert.equal(r.body.friends[0].ok, true);
@@ -279,6 +282,7 @@ test('сценарій: Сашуліна запросила Арамчика к�
   assert.equal(r.status, 201, r.text);
   const reg = await srv.req('POST', '/api/account/register', { body: { name: 'Арамчик', phone: friendPhone, password: 'cabinet-pass-1' } });
   assert.equal(reg.status, 201, reg.text);
+  await srv.verify(friendPhone);
   const Cookie = (reg.headers.get('set-cookie') || '').split(';')[0];
   const me = (await srv.req('GET', '/api/account/me', { headers: { Cookie } })).body;
   assert.equal(me.invited_discount, 40, 'кабінет показує знижку запрошеного: 20% + 20%');

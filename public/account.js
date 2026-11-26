@@ -120,7 +120,15 @@
       <p class="acc-msg" id="xMsg" role="status"></p>
       <button class="btn btn-ghost btn-block" type="submit">Надіслати код</button>
     </form>
+    <div class="acc-form acc-claim">
+      <p class="muted"><b>Номер уже зареєстровано, але не вами?</b> Підтвердьте, що номер ваш, у Telegram — бот надішле код для нового пароля, і кабінет перейде до вас.</p>
+      ${phoneField('cPhone')}
+      <p class="acc-msg" id="cMsg" role="status"></p>
+      <button class="btn btn-ghost btn-block" type="button" data-act="claim">Підтвердити номер у Telegram</button>
+    </div>
     <form class="acc-form" id="resetConfirmForm">
+      <label class="step-label" for="xPhone2">Телефон</label>
+      <input class="input" id="xPhone2" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+380…">
       <label class="step-label" for="xCode">Код із Telegram</label>
       <input class="input" id="xCode" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 цифр">
       ${passField('xPass', 'Новий пароль (не менше 8 символів)', 'new-password')}
@@ -136,6 +144,12 @@
         <p>Вітаю, <b>${esc(me.name)}</b>.<br><span class="muted">Телефон: ${esc(me.phone)}</span></p>
         <button class="btn btn-ghost small acc-logout" type="button" data-act="logout"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg> Вийти</button>
       </div>
+      ${me.verified ? '' : `<div class="acc-verify">
+        <p><b>Підтвердіть свій номер.</b> Поки номер не підтверджено, тут не видно ваших записів, не діє знижка на перший візит і не можна запрошувати друзів. Так ніхто інший не зможе зайти в кабінет під вашим номером.</p>
+        <button class="btn btn-primary small" type="button" data-act="verify">Підтвердити номер у Telegram</button>
+        <p class="acc-msg" id="vMsg" role="status"></p>
+        <p class="muted small-note">Немає Telegram? Напишіть оператору в чат: ми зателефонуємо на ваш номер і підтвердимо його.</p>
+      </div>`}
       <div class="acc-tg">
         ${me.telegram
           ? '<p class="muted">Telegram підключено: нагадування про записи надходитимуть у бот.</p><button class="btn btn-ghost small" type="button" data-act="tg-unlink">Відключити Telegram</button>'
@@ -148,7 +162,7 @@
       <div id="accVideos"><p class="muted">Завантажую…</p></div>
       <h3 class="acc-h">Мої записи</h3>
       <ul class="acc-list" id="apptList"><li class="muted">Завантажую…</li></ul>`;
-    if (window.FriendInvite) window.FriendInvite.mount($('#accFriend'), {});
+    if (window.FriendInvite && me.verified) window.FriendInvite.mount($('#accFriend'), {});
     loadVideos();
     await loadAppointments();
   }
@@ -316,6 +330,10 @@
     if (!list) return;
     try {
       const items = await api('/api/account/appointments');
+      if (state.me && !state.me.verified) {
+        list.innerHTML = '<li class="muted">Ваші записи з\'являться тут після підтвердження номера.</li>';
+        return;
+      }
       if (!items.length) {
         list.innerHTML = '<li class="muted">Записів ще немає. Оберіть послугу на сайті.</li>';
         return;
@@ -395,6 +413,18 @@
         window.open(r.link, '_blank', 'noopener');
         return setMsg('tgMsg', `Відкрийте бота і натисніть «Старт». Посилання дійсне ${r.minutes} хв. Потім оновіть сторінку.`, true);
       }
+      if (a === 'verify' || a === 'claim') {
+        const msgId = a === 'verify' ? 'vMsg' : 'cMsg';
+        const r = a === 'verify'
+          ? await api('/api/account/verify/link', { method: 'POST' })
+          : await api('/api/account/claim/link', { method: 'POST', body: { phone: ($('#cPhone') || {}).value || '' } });
+        const el = document.getElementById(msgId);
+        el.classList.add('ok');
+        el.innerHTML = `Відкрийте бота: <a href="${esc(r.link)}" target="_blank" rel="noopener">${esc(r.link.replace('https://', ''))}</a>, натисніть «Старт», а потім «📱 Поділитися номером». Посилання дійсне ${r.minutes} хв.` +
+          (a === 'verify' ? ' Після цього оновіть сторінку.' : ' Бот надішле код — введіть його нижче разом із новим паролем.');
+        window.open(r.link, '_blank', 'noopener');
+        return;
+      }
       if (a === 'tg-unlink') {
         await api('/api/account/telegram/unlink', { method: 'POST' });
         return refresh();
@@ -409,6 +439,8 @@
       }
     } catch (err) {
       if (a === 'tg-link') return setMsg('tgMsg', err.message);
+      if (a === 'verify') return setMsg('vMsg', err.message);
+      if (a === 'claim') return setMsg('cMsg', err.message);
       alert(err.message);
     }
   });
@@ -466,7 +498,7 @@
         return setMsg('xMsg', r.message, true);
       }
       if (f.id === 'resetConfirmForm') {
-        await api('/api/account/reset/confirm', { method: 'POST', body: { phone: state.resetPhone || v('phone'), code: v('code'), password: v('password') } });
+        await api('/api/account/reset/confirm', { method: 'POST', body: { phone: v('phone') || state.resetPhone || ($('#cPhone') || {}).value || '', code: v('code'), password: v('password') } });
         state.authTab = 'login';
         return renderAuth();
       }
